@@ -52,6 +52,15 @@
       <DesignTime>True</DesignTime>
       <AutoGen>True</AutoGen>
     </Compile>
+    <None Update="CodeGen\Python\*Template.tt">
+      <Generator>TextTemplatingFilePreprocessor</Generator>
+      <LastGenOutput>%(Filename).cs</LastGenOutput>
+    </None>
+    <Compile Update="CodeGen\Python\*Template.cs">
+      <DependentUpon>%(Filename).tt</DependentUpon>
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+    </Compile>
   </ItemGroup>
 
   <ItemGroup>

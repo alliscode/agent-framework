@@ -1,0 +1,10 @@
+<#@ template language="C#" inherits="PythonCodeTemplate" visibility="internal" linePragmas="false" #>
+<#@ assembly name="System.Core" #>
+<# if (this.Condition is not null)
+{#>
+    builder.add_edge(<#= this.SourceId #>, <#= this.TargetId #>, condition=lambda result: <#= this.Condition #>)<#
+}
+else
+{#>
+    builder.add_edge(<#= this.SourceId #>, <#= this.TargetId #>)<#
+} #>

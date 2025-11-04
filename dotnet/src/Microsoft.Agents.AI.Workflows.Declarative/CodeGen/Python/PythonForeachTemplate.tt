@@ -1,0 +1,11 @@
+<#@ template language="C#" inherits="PythonActionTemplate" visibility="internal" linePragmas="false" #>
+<#@ output extension=".py" #>
+<#@ assembly name="System.Core" #>
+# TODO: Implement PythonForeachTemplate
+class <#= this.Name #>Executor(ActionExecutor):
+    def __init__(self, session: FormulaSession):
+        super().__init__(id="<#= this.Id #>", session=session)
+
+    async def execute_async(self, context: 'IWorkflowContext', cancellation_token: 'CancellationToken') -> Optional[object]:
+        # TODO: Implement executor logic
+        return None

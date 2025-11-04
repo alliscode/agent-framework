@@ -1,0 +1,3 @@
+<#@ template language="C#" inherits="PythonCodeTemplate" visibility="internal" linePragmas="false" #>
+<#@ assembly name="System.Core" #>
+<#= this.InstanceVariable #> = <#= this.ExecutorType #>Executor(session=<#= this.RootVariable #>.session<#= this.HasProvider ? ", agent_provider=options.agent_provider" : "" #>)

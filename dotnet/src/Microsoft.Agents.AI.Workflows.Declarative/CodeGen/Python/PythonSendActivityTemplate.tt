@@ -1,0 +1,33 @@
+<#@ template language="C#" inherits="PythonActionTemplate" visibility="internal" linePragmas="false" #>
+<#@ output extension=".py" #>
+<#@ assembly name="System.Core" #>
+class <#= this.Name #>Executor(ActionExecutor):
+    """Formats a message template and sends an activity event."""
+
+    def __init__(self, session: FormulaSession):
+        super().__init__(id="<#= this.Id #>", session=session)
+
+    async def execute_async(
+        self,
+        context: 'IWorkflowContext',
+        cancellation_token: 'CancellationToken'
+    ) -> Optional[object]: <#
+if (this.Model.Activity is MessageActivityTemplate messageActivity)
+{ #>
+        activity_text = await context.format_template_async( <#
+    foreach (TemplateLine line in messageActivity.Text)
+    {  #>
+            """<#
+        foreach (string text in line.ToTemplateString().ByLine())
+        { #>
+            <#= text #><#
+        } #>
+            """<#
+    }
+     #>
+        )
+        response = AgentRunResponse(messages=[ChatMessage(role=ChatRole.ASSISTANT, content=activity_text)])
+        await context.add_event_async(AgentRunResponseEvent(id=self.id, response=response))<#
+} #>
+
+        return None

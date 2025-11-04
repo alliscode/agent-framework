@@ -1,0 +1,52 @@
+<#@ template language="C#" inherits="PythonCodeTemplate, IModeledAction" visibility="internal" linePragmas="false"  #>
+<#@ import namespace="Microsoft.Agents.AI.Workflows.Declarative.Extensions" #>
+<#@ import namespace="Microsoft.Agents.AI.Workflows.Declarative.Interpreter" #>
+<#@ import namespace="Microsoft.Bot.ObjectModel" #>
+<#@ assembly name="System.Core" #>
+class <#= this.TypeName #>Executor(RootExecutor):
+    """The root executor for a declarative workflow."""
+
+    def __init__(
+        self,
+        options: DeclarativeWorkflowOptions,
+        input_transform: Callable[[TInput], ChatMessage]
+    ):
+        super().__init__(
+            id="<#= this.Id #>",
+            options=options,
+            input_transform=input_transform
+        )
+
+    async def execute_async(
+        self,
+        message: TInput,
+        context: 'IWorkflowContext',
+        cancellation_token: 'CancellationToken'
+    ) -> None:<#
+if (this.TypeInfo.EnvironmentVariables.Count > 0)
+{ #>
+        # Set environment variables
+        await self.initialize_environment_async(
+            context,<#
+    int index = this.TypeInfo.EnvironmentVariables.Count - 1;
+    foreach (string variableName in this.TypeInfo.EnvironmentVariables)
+    {#>
+            "<#= variableName #>"<#= index > 0 ? "," : "" #><#
+        --index;
+    }#>
+        )<#}
+
+if (this.TypeInfo.UserVariables.Count > 0)
+{
+#>
+        # Initialize variables<#
+    foreach (VariableInformationDiagnostic variableInfo in this.TypeInfo.UserVariables)
+    {#>
+        await context.queue_state_update_async(
+            key="<#= variableInfo.Path.VariableName #>",
+            value=UnassignedValue.instance(),
+            scope_name="<#= variableInfo.Path.NamespaceAlias #>"
+        )<#
+    }
+}#>
+

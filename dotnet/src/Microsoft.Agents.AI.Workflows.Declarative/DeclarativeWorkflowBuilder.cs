@@ -112,20 +112,41 @@ public static class DeclarativeWorkflowBuilder
         string? workflowNamespace = null,
         string? workflowPrefix = null)
     {
-        if (workflowLanguage != DeclarativeWorkflowLanguage.CSharp)
-        {
-            throw new NotSupportedException($"Converting workflow to {workflowLanguage} is not currently supported.");
-        }
-
         AdaptiveDialog workflowElement = ReadWorkflow(yamlReader);
-
         string rootId = WorkflowActionVisitor.Steps.Root(workflowElement);
         WorkflowTypeInfo typeInfo = workflowElement.WrapWithBot().Describe();
 
+        return workflowLanguage switch
+        {
+            DeclarativeWorkflowLanguage.CSharp => EjectCSharp(workflowElement, rootId, typeInfo, workflowNamespace, workflowPrefix),
+            DeclarativeWorkflowLanguage.Python => EjectPython(workflowElement, rootId, typeInfo, workflowNamespace, workflowPrefix),
+            _ => throw new NotSupportedException($"Converting workflow to {workflowLanguage} is not currently supported.")
+        };
+    }
+
+    private static string EjectCSharp(
+        AdaptiveDialog workflowElement,
+        string rootId,
+        WorkflowTypeInfo typeInfo,
+        string? workflowNamespace,
+        string? workflowPrefix)
+    {
         WorkflowTemplateVisitor visitor = new(rootId, typeInfo);
         WorkflowElementWalker walker = new(visitor);
         walker.Visit(workflowElement);
+        return visitor.Complete(workflowNamespace, workflowPrefix);
+    }
 
+    private static string EjectPython(
+        AdaptiveDialog workflowElement,
+        string rootId,
+        WorkflowTypeInfo typeInfo,
+        string? workflowNamespace,
+        string? workflowPrefix)
+    {
+        PythonTemplateVisitor visitor = new(rootId, typeInfo);
+        WorkflowElementWalker walker = new(visitor);
+        walker.Visit(workflowElement);
         return visitor.Complete(workflowNamespace, workflowPrefix);
     }
 
