@@ -204,3 +204,5 @@ agents.md
 # AI
 .claude/
 WARP.md
+.compose*
+.compose/
