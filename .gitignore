@@ -206,9 +206,9 @@ agents.md
 WARP.md
 **/memory-bank/
 **/projectBrief.md
-.compose*
-.compose/
-.astred*
+# .compose*
+# .compose/
+# .astred*
 
 # Azurite storage emulator files
 */__azurite_db_blob__.json

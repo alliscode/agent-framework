@@ -1,0 +1,16 @@
+{
+  "default_chat_model": "gpt-4o",
+  "default_embedding_model": "text-embedding-3-large",
+  "chat_models": [
+    {
+      "deployment": "gpt-4o",
+      "endpoint": "https://lightspeed-team-shared-openai-eastus.openai.azure.com/"
+    }
+  ],
+  "embedding_models": [
+    {
+      "deployment": "text-embedding-3-large",
+      "endpoint": "https://lightspeed-team-shared-openai-eastus.openai.azure.com/"
+    }
+  ]
+}
