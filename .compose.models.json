@@ -4,13 +4,13 @@
   "chat_models": [
     {
       "deployment": "gpt-4o",
-      "endpoint": "https://lightspeed-team-shared-openai-eastus.openai.azure.com/"
+      "endpoint": "https://lightspeed-team-shared-openai-northcentralus.openai.azure.com/"
     }
   ],
   "embedding_models": [
     {
       "deployment": "text-embedding-3-large",
-      "endpoint": "https://lightspeed-team-shared-openai-eastus.openai.azure.com/"
+      "endpoint": "https://ai-foundry-sk-interation-test.cognitiveservices.azure.com/"
     }
   ]
 }

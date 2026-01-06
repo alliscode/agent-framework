@@ -1,0 +1,12 @@
+{
+   "servers": {
+      "compose": {
+         "type": "stdio",
+         "command": "compose",
+         "args": [
+            "mcp",
+            "${workspaceFolder}/.astred.project.json"
+         ]
+      }
+   }
+}
