@@ -287,6 +287,18 @@ export interface ResponseErrorEvent extends ResponseStreamEvent {
   sequence_number: number;
 }
 
+// DevUI Extension: Harness Lifecycle Events
+export interface HarnessLifecycleEvent {
+  type: "response.harness_lifecycle";
+  event_type: "harness_started" | "turn_started" | "turn_completed" | "continuation_prompt" | "stall_detected" | "context_pressure" | "harness_completed" | string;
+  turn_number: number;
+  max_turns: number;
+  status?: "running" | "done" | "failed" | "stalled" | string | null;
+  data: Record<string, unknown>;
+  timestamp: string;
+  sequence_number: number;
+}
+
 // DevUI Extension: Function Approval Events
 export interface ResponseFunctionApprovalRequestedEvent {
   type: "response.function_approval.requested";
@@ -362,6 +374,7 @@ export type StructuredEvent =
   | ResponseErrorEvent
   | ResponseFunctionApprovalRequestedEvent
   | ResponseFunctionApprovalRespondedEvent
+  | HarnessLifecycleEvent
   | TurnSeparatorEvent;
 
 // Extended stream event that includes our structured events

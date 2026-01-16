@@ -139,6 +139,33 @@ class ResponseFunctionResultComplete(BaseModel):
     timestamp: str | None = None  # Optional timestamp for UI display
 
 
+class ResponseHarnessLifecycleEvent(BaseModel):
+    """DevUI extension: Stream harness lifecycle events.
+
+    This is a DevUI extension for Agent Harness infrastructure:
+    - Tracks harness execution progress (turns, status)
+    - Enables progress indicators in the UI
+    - Provides visibility into harness behavior (stalls, continuations)
+
+    Event types:
+    - harness_started: Harness initialized with config
+    - turn_started: Agent turn begins
+    - turn_completed: Agent turn ends
+    - continuation_prompt: Continuation prompt sent to agent
+    - stall_detected: Progress stall detected
+    - harness_completed: Harness execution finished
+    """
+
+    type: Literal["response.harness_lifecycle"] = "response.harness_lifecycle"
+    event_type: str  # harness_started, turn_started, turn_completed, etc.
+    turn_number: int = 0
+    max_turns: int = 0
+    status: str | None = None  # running, done, failed, stalled
+    data: dict[str, Any] = {}
+    timestamp: str
+    sequence_number: int
+
+
 class ResponseRequestInfoEvent(BaseModel):
     """DevUI extension: Workflow requests human input.
 
@@ -402,6 +429,7 @@ __all__ = [
     "MetaResponse",
     "OpenAIError",
     "ResponseFunctionResultComplete",
+    "ResponseHarnessLifecycleEvent",
     "ResponseOutputData",
     "ResponseOutputFile",
     "ResponseOutputImage",

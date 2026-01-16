@@ -23,10 +23,10 @@ export default defineConfig({
       output: {
         manualChunks: undefined,
         inlineDynamicImports: true,
-        // Use static filenames instead of content hashes
-        entryFileNames: "assets/index.js",
-        chunkFileNames: "assets/[name].js",
-        assetFileNames: "assets/[name].[ext]",
+        // Use content hashes for cache busting
+        entryFileNames: "assets/index-[hash].js",
+        chunkFileNames: "assets/[name]-[hash].js",
+        assetFileNames: "assets/[name]-[hash].[ext]",
       },
     },
   },

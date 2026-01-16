@@ -23,7 +23,7 @@ import {
   BarChart3,
 } from "lucide-react";
 import { ContextInspector } from "@/components/features/agent/context-inspector";
-import type { ExtendedResponseStreamEvent } from "@/types";
+import type { ExtendedResponseStreamEvent, HarnessLifecycleEvent } from "@/types";
 
 // Simple visual separator component
 function MessageSeparator() {
@@ -479,6 +479,30 @@ function getEventSummary(event: ExtendedResponseStreamEvent): string {
       }
       return "Trace event";
 
+    case "response.harness_lifecycle": {
+      const harnessEvent = event as HarnessLifecycleEvent;
+      const eventType = harnessEvent.event_type || "unknown";
+      const turn = harnessEvent.turn_number || 0;
+      const maxTurns = harnessEvent.max_turns || 0;
+
+      switch (eventType) {
+        case "harness_started":
+          return `Harness started (max ${maxTurns} turns)`;
+        case "turn_started":
+          return `Turn ${turn}/${maxTurns} started`;
+        case "turn_completed":
+          return `Turn ${turn}/${maxTurns} completed`;
+        case "continuation_prompt":
+          return `Continuation prompt (turn ${turn})`;
+        case "stall_detected":
+          return `Stall detected (turn ${turn})`;
+        case "harness_completed":
+          return `Harness completed (${harnessEvent.status || "done"})`;
+        default:
+          return `Harness: ${eventType}`;
+      }
+    }
+
     case "response.completed":
       if ("response" in event && event.response && "usage" in event.response) {
         const completedEvent =
@@ -521,6 +545,8 @@ function getEventIcon(type: string) {
       return Activity;
     case "response.trace.completed":
       return Search;
+    case "response.harness_lifecycle":
+      return Zap;
     case "response.completed":
       return CheckCircle2;
     case "response.done":
@@ -548,6 +574,8 @@ function getEventColor(type: string) {
       return "text-purple-600 dark:text-purple-400";
     case "response.trace.completed":
       return "text-orange-600 dark:text-orange-400";
+    case "response.harness_lifecycle":
+      return "text-cyan-600 dark:text-cyan-400";
     case "response.completed":
       return "text-green-600 dark:text-green-400";
     case "response.done":
@@ -589,6 +617,8 @@ function EventItem({ event }: EventItemProps) {
     (event.type === "response.trace.completed" &&
       "data" in event &&
       event.data) ||
+    // Harness lifecycle events are always expandable
+    event.type === "response.harness_lifecycle" ||
     (event.type === "response.output_text.delta" &&
       "delta" in event &&
       event.delta &&
@@ -896,6 +926,96 @@ function EventExpandedContent({
         );
       }
       break;
+
+    case "response.harness_lifecycle": {
+      const harnessEvent = event as HarnessLifecycleEvent;
+      const eventType = harnessEvent.event_type || "unknown";
+      const turn = harnessEvent.turn_number || 0;
+      const maxTurns = harnessEvent.max_turns || 0;
+      const status = harnessEvent.status;
+      const data = harnessEvent.data || {};
+
+      // Determine status badge color
+      const getStatusColor = (s: string | null | undefined) => {
+        switch (s) {
+          case "done":
+            return "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200";
+          case "failed":
+            return "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200";
+          case "stalled":
+            return "bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200";
+          default:
+            return "bg-cyan-100 dark:bg-cyan-900 text-cyan-800 dark:text-cyan-200";
+        }
+      };
+
+      return (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-cyan-500" />
+            <span className="font-semibold text-sm">Harness Lifecycle</span>
+          </div>
+          <div className="grid grid-cols-1 gap-2 text-xs">
+            <div>
+              <span className="font-medium text-muted-foreground">
+                Event:
+              </span>
+              <span className="ml-2 font-mono bg-cyan-100 dark:bg-cyan-900 px-2 py-1 rounded">
+                {eventType}
+              </span>
+            </div>
+            {maxTurns > 0 && (
+              <div>
+                <span className="font-medium text-muted-foreground">
+                  Progress:
+                </span>
+                <span className="ml-2">
+                  Turn {turn} / {maxTurns}
+                </span>
+                <div className="mt-1 w-full bg-muted rounded-full h-2">
+                  <div
+                    className="bg-cyan-500 h-2 rounded-full transition-all"
+                    style={{ width: `${Math.min((turn / maxTurns) * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            {status && (
+              <div>
+                <span className="font-medium text-muted-foreground">
+                  Status:
+                </span>
+                <span className={`ml-2 px-2 py-1 rounded text-xs font-medium ${getStatusColor(status)}`}>
+                  {status}
+                </span>
+              </div>
+            )}
+            {harnessEvent.timestamp && (
+              <div>
+                <span className="font-medium text-muted-foreground">
+                  Timestamp:
+                </span>
+                <span className="ml-2 font-mono text-xs">
+                  {harnessEvent.timestamp}
+                </span>
+              </div>
+            )}
+            {Object.keys(data).length > 0 && (
+              <div>
+                <span className="font-medium text-muted-foreground">
+                  Details:
+                </span>
+                <div className="mt-1 max-h-32 overflow-auto">
+                  <pre className="text-xs bg-background border rounded p-2 whitespace-pre-wrap max-w-full break-all">
+                    {JSON.stringify(data, null, 2)}
+                  </pre>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
 
     case "response.trace.completed":
       if ("data" in event && event.data) {

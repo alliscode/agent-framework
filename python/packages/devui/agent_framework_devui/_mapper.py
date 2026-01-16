@@ -153,6 +153,10 @@ class MessageMapper:
         """
         context = self._get_or_create_context(request)
 
+        # Debug: log all incoming events
+        event_type = type(raw_event).__name__
+        logger.debug(f"Mapper: convert_event received {event_type}")
+
         # Handle error events
         if isinstance(raw_event, dict) and raw_event.get("type") == "error":
             return [await self._create_error_event(raw_event.get("message", "Unknown error"), context)]
@@ -184,12 +188,16 @@ class MessageMapper:
             # Handle AgentRunUpdateEvent - workflow event wrapping AgentRunResponseUpdate
             # This must be checked BEFORE generic WorkflowEvent check
             if isinstance(raw_event, AgentRunUpdateEvent):
+                # Debug: log what we received
+                logger.debug(f"Mapper: AgentRunUpdateEvent - executor_id={raw_event.executor_id}, data_type={type(raw_event.data).__name__ if raw_event.data else None}")
                 # Extract the AgentRunResponseUpdate from the event's data attribute
                 if raw_event.data and isinstance(raw_event.data, AgentRunResponseUpdate):
                     # Preserve executor_id in context for proper output routing
                     context["current_executor_id"] = raw_event.executor_id
+                    logger.debug(f"Mapper: Converting AgentRunUpdateEvent to agent update - contents={[type(c).__name__ for c in (raw_event.data.contents or [])]}")
                     return await self._convert_agent_update(raw_event.data, context)
                 # If no data, treat as generic workflow event
+                logger.debug(f"Mapper: AgentRunUpdateEvent has no valid data, treating as workflow event")
                 return await self._convert_workflow_event(raw_event, context)
 
             # Handle complete agent response (AgentRunResponse) - for non-streaming agent execution
@@ -1168,6 +1176,37 @@ class MessageMapper:
                 logger.info(f"   sequence_number: {hil_event.sequence_number}")
 
                 return [hil_event]
+
+            # Handle HarnessLifecycleEvent - Agent Harness progress tracking
+            if event_class == "HarnessLifecycleEvent":
+                from .models._openai_custom import ResponseHarnessLifecycleEvent
+
+                harness_event_type = getattr(event, "event_type", "unknown")
+                turn_number = getattr(event, "turn_number", 0)
+                max_turns = getattr(event, "max_turns", 0)
+                event_data = getattr(event, "data", {}) or {}
+                timestamp = getattr(event, "timestamp", datetime.now().isoformat())
+
+                # Extract status from data for completed events
+                status = event_data.get("status") if harness_event_type == "harness_completed" else None
+
+                logger.debug(
+                    f"HarnessLifecycleEvent: {harness_event_type} "
+                    f"(turn {turn_number}/{max_turns})"
+                )
+
+                return [
+                    ResponseHarnessLifecycleEvent(
+                        type="response.harness_lifecycle",
+                        event_type=harness_event_type,
+                        turn_number=turn_number,
+                        max_turns=max_turns,
+                        status=status,
+                        data=event_data,
+                        timestamp=timestamp,
+                        sequence_number=self._next_sequence(context),
+                    )
+                ]
 
             # Handle other informational workflow events (status, warnings, errors)
             if event_class in ["WorkflowStatusEvent", "WorkflowWarningEvent", "WorkflowErrorEvent"]:

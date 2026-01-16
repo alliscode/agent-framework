@@ -134,6 +134,7 @@ export type {
   StructuredEvent,
   WorkflowItem,
   ExecutorActionItem,
+  HarnessLifecycleEvent,
 } from "./openai";
 
 export { isExecutorAction } from "./openai";
