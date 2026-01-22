@@ -7,20 +7,34 @@ interactive testing and debugging. The harness provides:
 - Turn limits and stall detection
 - Continuation prompts to verify task completion
 - Task contract verification (optional)
-- Context pressure management (optional)
+- Context compaction (optional) - production-quality context management
 
 Usage:
-    python devui_harness.py [--sandbox PATH] [--port PORT]
+    python devui_harness.py [--sandbox PATH] [--port PORT] [--compaction]
+
+Examples:
+    # Basic usage
+    python devui_harness.py
+
+    # With context compaction enabled
+    python devui_harness.py --compaction
+
+    # With custom sandbox and compaction
+    python devui_harness.py --sandbox ./workspace --compaction
 """
 
 import argparse
 import logging
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from agent_framework.azure import AzureOpenAIChatClient
 from agent_framework._harness import (
     AgentHarness,
+    InMemoryArtifactStore,
+    InMemoryCompactionStore,
+    InMemorySummaryCache,
     get_task_complete_tool,
 )
 from agent_framework_devui import serve
@@ -65,12 +79,19 @@ STYLE:
 """
 
 
-def create_harness_agent(sandbox_dir: Path) -> AgentHarness:
+def create_harness_agent(
+    sandbox_dir: Path,
+    enable_compaction: bool = False,
+) -> AgentHarness:
     """Create a harness-wrapped agent with coding tools.
 
     Returns an AgentHarness that can be registered with DevUI.
     The AgentHarness has a run_stream(message) method that DevUI
     can call directly with the user's input.
+
+    Args:
+        sandbox_dir: Directory for agent workspace.
+        enable_compaction: Whether to enable production context compaction.
     """
     # Create tools sandboxed to the directory
     tools = CodingTools(sandbox_dir)
@@ -85,6 +106,18 @@ def create_harness_agent(sandbox_dir: Path) -> AgentHarness:
         tools=all_tools,
     )
 
+    # Configure compaction stores if enabled
+    compaction_kwargs: dict[str, Any] = {}
+    if enable_compaction:
+        compaction_kwargs = {
+            "enable_compaction": True,
+            "compaction_store": InMemoryCompactionStore(),
+            "artifact_store": InMemoryArtifactStore(),
+            "summary_cache": InMemorySummaryCache(max_entries=100),
+            "max_input_tokens": 100_000,
+            "soft_threshold_percent": 0.85,
+        }
+
     # Wrap in harness with all features enabled
     harness = AgentHarness(
         agent,
@@ -93,15 +126,17 @@ def create_harness_agent(sandbox_dir: Path) -> AgentHarness:
         stall_threshold=3,
         enable_continuation_prompts=True,
         max_continuation_prompts=2,
+        **compaction_kwargs,
     )
 
     # Add id, name and description for DevUI discovery
     # DevUI requires both id and name for agent-like entities
     harness.id = "coding-harness"
     harness.name = "coding-harness"
+    compaction_status = "enabled" if enable_compaction else "disabled"
     harness.description = (
         f"Coding assistant with harness infrastructure. "
-        f"Sandbox: {sandbox_dir}"
+        f"Sandbox: {sandbox_dir}. Compaction: {compaction_status}"
     )
 
     return harness
@@ -121,6 +156,11 @@ def main():
         default=8080,
         help="Port for DevUI server (default: 8080)",
     )
+    parser.add_argument(
+        "--compaction",
+        action="store_true",
+        help="Enable production context compaction (Phase 9)",
+    )
     args = parser.parse_args()
 
     # Determine sandbox directory
@@ -135,11 +175,15 @@ def main():
         print(f"Using temp sandbox: {sandbox_dir}")
 
     # Create the harness-wrapped agent
-    harness = create_harness_agent(sandbox_dir)
+    harness = create_harness_agent(sandbox_dir, enable_compaction=args.compaction)
 
     print(f"\nStarting DevUI on port {args.port}...")
     print(f"Sandbox directory: {sandbox_dir}")
     print(f"Harness config: max_turns=20, stall_threshold=3")
+    if args.compaction:
+        print("Context compaction: ENABLED (100K tokens, 85% threshold)")
+    else:
+        print("Context compaction: disabled")
 
     # Launch DevUI with the harness
     # Note: AgentHarness has run_stream(message) method that DevUI can call directly

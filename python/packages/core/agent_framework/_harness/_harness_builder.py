@@ -11,6 +11,7 @@ from .._workflows._checkpoint import CheckpointStorage
 from .._workflows._workflow import Workflow
 from .._workflows._workflow_builder import WorkflowBuilder
 from ._agent_turn_executor import AgentTurnExecutor
+from ._compaction_executor import CompactionExecutor
 from ._constants import (
     DEFAULT_MAX_INPUT_TOKENS,
     DEFAULT_MAX_TURNS,
@@ -23,6 +24,14 @@ from ._state import RepairTrigger
 from ._stop_decision_executor import StopDecisionExecutor
 
 if TYPE_CHECKING:
+    from ._compaction import (
+        ArtifactStore,
+        CompactionStore,
+        CompactionStrategy,
+        ProviderAwareTokenizer,
+        Summarizer,
+        SummaryCache,
+    )
     from ._task_contract import TaskContract
 
 # Key for harness configuration passed via kwargs
@@ -66,10 +75,19 @@ class HarnessWorkflowBuilder:
         agent_thread: AgentThread | None = None,
         max_turns: int = DEFAULT_MAX_TURNS,
         checkpoint_storage: CheckpointStorage | None = None,
-        # Phase 2: Context pressure
+        # Phase 2: Context pressure (legacy)
         enable_context_pressure: bool = False,
         max_input_tokens: int = DEFAULT_MAX_INPUT_TOKENS,
         soft_threshold_percent: float = DEFAULT_SOFT_THRESHOLD_PERCENT,
+        # Phase 9: Production compaction (preferred)
+        enable_compaction: bool = False,
+        compaction_store: "CompactionStore | None" = None,
+        artifact_store: "ArtifactStore | None" = None,
+        summary_cache: "SummaryCache | None" = None,
+        compaction_strategies: "list[CompactionStrategy] | None" = None,
+        summarizer: "Summarizer | None" = None,
+        tokenizer: "ProviderAwareTokenizer | None" = None,
+        model_name: str = "gpt-4o",
         # Phase 3: Task contracts and stall detection
         task_contract: "TaskContract | None" = None,
         enable_stall_detection: bool = False,
@@ -86,9 +104,17 @@ class HarnessWorkflowBuilder:
             agent_thread: Optional thread for the agent. If None, creates a new thread.
             max_turns: Maximum number of agent turns before stopping. Default is 50.
             checkpoint_storage: Optional checkpoint storage for durability.
-            enable_context_pressure: Whether to enable context pressure management.
-            max_input_tokens: Maximum input tokens for context pressure. Default is 100000.
-            soft_threshold_percent: Percentage at which to trigger context pressure. Default is 0.85.
+            enable_context_pressure: Whether to enable legacy context pressure management.
+            max_input_tokens: Maximum input tokens for context pressure/compaction. Default is 100000.
+            soft_threshold_percent: Percentage at which to trigger compaction. Default is 0.85.
+            enable_compaction: Whether to enable production compaction (preferred over context_pressure).
+            compaction_store: Injectable store for compaction plans. Defaults to in-memory.
+            artifact_store: Injectable store for externalized content. None disables externalization.
+            summary_cache: Injectable cache for LLM summaries. None disables caching.
+            compaction_strategies: Custom list of compaction strategies.
+            summarizer: LLM summarizer for summarize/externalize strategies.
+            tokenizer: Tokenizer for token counting. Defaults to model-appropriate tokenizer.
+            model_name: Model name for default tokenizer selection.
             task_contract: Optional task contract for automation mode. When provided,
                 contract verification is automatically enabled.
             enable_stall_detection: Whether to detect stalled progress.
@@ -104,6 +130,16 @@ class HarnessWorkflowBuilder:
         self._enable_context_pressure = enable_context_pressure
         self._max_input_tokens = max_input_tokens
         self._soft_threshold_percent = soft_threshold_percent
+        # Compaction settings
+        self._enable_compaction = enable_compaction
+        self._compaction_store = compaction_store
+        self._artifact_store = artifact_store
+        self._summary_cache = summary_cache
+        self._compaction_strategies = compaction_strategies
+        self._summarizer = summarizer
+        self._tokenizer = tokenizer
+        self._model_name = model_name
+        # Task contract settings
         self._task_contract = task_contract
         self._enable_stall_detection = enable_stall_detection
         self._stall_threshold = stall_threshold
@@ -121,7 +157,13 @@ class HarnessWorkflowBuilder:
             "max_turns": self._max_turns,
         }
 
-        if self._enable_context_pressure:
+        if self._enable_compaction:
+            config["compaction"] = {
+                "enabled": True,
+                "max_input_tokens": self._max_input_tokens,
+                "soft_threshold_percent": self._soft_threshold_percent,
+            }
+        elif self._enable_context_pressure:
             config["context_pressure"] = {
                 "enabled": True,
                 "max_input_tokens": self._max_input_tokens,
@@ -151,8 +193,36 @@ class HarnessWorkflowBuilder:
             name="repair",
         )
 
-        # Optionally add context pressure executor
-        if self._enable_context_pressure:
+        # Optionally add compaction or context pressure executor
+        # Compaction (Phase 9) is preferred over context pressure (Phase 2)
+        if self._enable_compaction:
+            # Capture settings for lambda
+            compaction_store = self._compaction_store
+            artifact_store = self._artifact_store
+            summary_cache = self._summary_cache
+            strategies = self._compaction_strategies
+            summarizer = self._summarizer
+            tokenizer = self._tokenizer
+            model_name = self._model_name
+            max_tokens = self._max_input_tokens
+            threshold = self._soft_threshold_percent
+
+            builder.register_executor(
+                lambda: CompactionExecutor(
+                    compaction_store=compaction_store,
+                    artifact_store=artifact_store,
+                    summary_cache=summary_cache,
+                    strategies=strategies,
+                    summarizer=summarizer,
+                    max_input_tokens=max_tokens,
+                    soft_threshold_percent=threshold,
+                    tokenizer=tokenizer,
+                    model_name=model_name,
+                    id="harness_compaction",
+                ),
+                name="compaction",
+            )
+        elif self._enable_context_pressure:
             builder.register_executor(
                 lambda: ContextPressureExecutor(
                     max_input_tokens=self._max_input_tokens,
@@ -192,8 +262,12 @@ class HarnessWorkflowBuilder:
             name="stop_decision",
         )
 
-        # Wire the harness loop based on whether context pressure is enabled
-        if self._enable_context_pressure:
+        # Wire the harness loop based on whether compaction/context pressure is enabled
+        if self._enable_compaction:
+            # repair -> compaction -> agent_turn -> stop_decision -> repair (loop)
+            builder.add_edge("repair", "compaction")
+            builder.add_edge("compaction", "agent_turn")
+        elif self._enable_context_pressure:
             # repair -> context_pressure -> agent_turn -> stop_decision -> repair (loop)
             builder.add_edge("repair", "context_pressure")
             builder.add_edge("context_pressure", "agent_turn")
@@ -212,8 +286,9 @@ class HarnessWorkflowBuilder:
             builder.with_checkpointing(self._checkpoint_storage)
 
         # Set max iterations high enough for max_turns
-        # Each turn is roughly 3-4 supersteps depending on context pressure
-        supersteps_per_turn = 4 if self._enable_context_pressure else 3
+        # Each turn is roughly 3-4 supersteps depending on compaction/context pressure
+        has_pressure_executor = self._enable_compaction or self._enable_context_pressure
+        supersteps_per_turn = 4 if has_pressure_executor else 3
         builder.set_max_iterations(self._max_turns * supersteps_per_turn * 2)
 
         return builder.build()
@@ -270,10 +345,19 @@ class AgentHarness:
         agent_thread: AgentThread | None = None,
         max_turns: int = DEFAULT_MAX_TURNS,
         checkpoint_storage: CheckpointStorage | None = None,
-        # Phase 2: Context pressure
+        # Phase 2: Context pressure (legacy)
         enable_context_pressure: bool = False,
         max_input_tokens: int = DEFAULT_MAX_INPUT_TOKENS,
         soft_threshold_percent: float = DEFAULT_SOFT_THRESHOLD_PERCENT,
+        # Phase 9: Production compaction (preferred)
+        enable_compaction: bool = False,
+        compaction_store: "CompactionStore | None" = None,
+        artifact_store: "ArtifactStore | None" = None,
+        summary_cache: "SummaryCache | None" = None,
+        compaction_strategies: "list[CompactionStrategy] | None" = None,
+        summarizer: "Summarizer | None" = None,
+        tokenizer: "ProviderAwareTokenizer | None" = None,
+        model_name: str = "gpt-4o",
         # Phase 3: Task contracts and stall detection
         task_contract: "TaskContract | None" = None,
         enable_stall_detection: bool = False,
@@ -290,9 +374,17 @@ class AgentHarness:
             agent_thread: Optional thread for the agent. If None, creates a new thread.
             max_turns: Maximum number of agent turns before stopping. Default is 50.
             checkpoint_storage: Optional checkpoint storage for durability.
-            enable_context_pressure: Whether to enable context pressure management.
-            max_input_tokens: Maximum input tokens for context pressure. Default is 100000.
-            soft_threshold_percent: Percentage at which to trigger context pressure. Default is 0.85.
+            enable_context_pressure: Whether to enable legacy context pressure management.
+            max_input_tokens: Maximum input tokens for context pressure/compaction. Default is 100000.
+            soft_threshold_percent: Percentage at which to trigger compaction. Default is 0.85.
+            enable_compaction: Whether to enable production compaction (preferred over context_pressure).
+            compaction_store: Injectable store for compaction plans. Defaults to in-memory.
+            artifact_store: Injectable store for externalized content. None disables externalization.
+            summary_cache: Injectable cache for LLM summaries. None disables caching.
+            compaction_strategies: Custom list of compaction strategies.
+            summarizer: LLM summarizer for summarize/externalize strategies.
+            tokenizer: Tokenizer for token counting. Defaults to model-appropriate tokenizer.
+            model_name: Model name for default tokenizer selection.
             task_contract: Optional task contract for automation mode. When provided,
                 contract verification is automatically enabled.
             enable_stall_detection: Whether to detect stalled progress.
@@ -309,6 +401,14 @@ class AgentHarness:
             enable_context_pressure=enable_context_pressure,
             max_input_tokens=max_input_tokens,
             soft_threshold_percent=soft_threshold_percent,
+            enable_compaction=enable_compaction,
+            compaction_store=compaction_store,
+            artifact_store=artifact_store,
+            summary_cache=summary_cache,
+            compaction_strategies=compaction_strategies,
+            summarizer=summarizer,
+            tokenizer=tokenizer,
+            model_name=model_name,
             task_contract=task_contract,
             enable_stall_detection=enable_stall_detection,
             stall_threshold=stall_threshold,
