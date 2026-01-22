@@ -285,7 +285,7 @@ class TaskContract:
         """
         outputs = [
             RequiredOutput(
-                id=f"R{i+1}",
+                id=f"R{i + 1}",
                 description=req,
                 predicate=Predicate.always_true(f"Requirement: {req}"),
             )

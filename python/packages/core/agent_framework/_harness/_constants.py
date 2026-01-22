@@ -14,6 +14,10 @@ HARNESS_PENDING_TOOL_CALLS_KEY = "harness.pending_tool_calls"
 HARNESS_TOKEN_BUDGET_KEY = "harness.token_budget"
 HARNESS_CONTEXT_EDIT_HISTORY_KEY = "harness.context_edit_history"
 
+# Compaction state keys (Phase 9 - Production Compaction)
+HARNESS_COMPACTION_PLAN_KEY = "harness.compaction_plan"
+HARNESS_COMPACTION_METRICS_KEY = "harness.compaction_metrics"
+
 # Initial message key
 HARNESS_INITIAL_MESSAGE_KEY = "harness.initial_message"
 

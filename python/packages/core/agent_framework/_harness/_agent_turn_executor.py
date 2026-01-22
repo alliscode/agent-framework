@@ -4,7 +4,7 @@
 
 import contextlib
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .._agents import AgentProtocol, ChatAgent
 from .._threads import AgentThread
@@ -14,6 +14,7 @@ from .._workflows._events import AgentRunEvent, AgentRunUpdateEvent
 from .._workflows._executor import Executor, handler
 from .._workflows._workflow_context import WorkflowContext
 from ._constants import (
+    HARNESS_COMPACTION_PLAN_KEY,
     HARNESS_CONTINUATION_COUNT_KEY,
     HARNESS_INITIAL_MESSAGE_KEY,
     HARNESS_MAX_TURNS_KEY,
@@ -22,6 +23,9 @@ from ._constants import (
 )
 from ._done_tool import TASK_COMPLETE_TOOL_NAME
 from ._state import HarnessEvent, HarnessLifecycleEvent, RepairComplete, TurnComplete
+
+if TYPE_CHECKING:
+    from ._compaction import CompactionPlan
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +36,15 @@ class AgentTurnExecutor(Executor):
     This executor wraps an agent and executes it as a single turn within the
     harness loop. It tracks turn counts, records events to the harness transcript,
     and signals completion to the stop decision executor.
+
+    Context Compaction Integration:
+    When a CompactionPlan is present in SharedState, this executor applies it
+    to the message cache before passing to the agent. The full cache is preserved
+    for durability, while the agent sees a compacted view. This supports the
+    Plan Pipeline architecture where:
+    - CompactionPlan flows through SharedState (small, serializable)
+    - Message cache is local to this executor
+    - Storage protocols are injectable for different environments
     """
 
     # Default continuation prompt - gentle nudge, not accusatory
@@ -47,6 +60,7 @@ class AgentTurnExecutor(Executor):
         enable_continuation_prompts: bool = True,
         max_continuation_prompts: int = 2,
         continuation_prompt: str | None = None,
+        enable_compaction: bool = False,
         id: str = "harness_agent_turn",
     ):
         """Initialize the AgentTurnExecutor.
@@ -57,6 +71,7 @@ class AgentTurnExecutor(Executor):
             enable_continuation_prompts: Whether to prompt agent to continue if it stops early.
             max_continuation_prompts: Maximum continuation prompts before accepting done signal.
             continuation_prompt: Custom continuation prompt text.
+            enable_compaction: Whether to apply CompactionPlan from SharedState.
             id: Unique identifier for this executor.
         """
         super().__init__(id)
@@ -66,6 +81,7 @@ class AgentTurnExecutor(Executor):
         self._enable_continuation_prompts = enable_continuation_prompts
         self._max_continuation_prompts = max_continuation_prompts
         self._continuation_prompt = continuation_prompt or self.DEFAULT_CONTINUATION_PROMPT
+        self._enable_compaction = enable_compaction
 
     @handler
     async def run_turn(self, trigger: RepairComplete, ctx: WorkflowContext[TurnComplete]) -> None:
@@ -221,14 +237,17 @@ class AgentTurnExecutor(Executor):
         # This prevents conflicts when DevUI passes its own thread
         run_kwargs = {k: v for k, v in run_kwargs.items() if k != "thread"}
 
+        # Apply compaction if enabled and plan exists
+        messages_to_send = await self._get_messages_for_agent(ctx)
+
         response = await self._agent.run(
-            self._cache,
+            messages_to_send,
             thread=self._agent_thread,
             **run_kwargs,
         )
         await ctx.add_event(AgentRunEvent(self.id, response))
 
-        # Update cache with response messages
+        # Update cache with response messages (full cache, not compacted)
         self._cache.extend(response.messages)
 
         return response
@@ -250,17 +269,26 @@ class AgentTurnExecutor(Executor):
         # This prevents conflicts when DevUI passes its own thread
         run_kwargs = {k: v for k, v in run_kwargs.items() if k != "thread"}
 
+        # Apply compaction if enabled and plan exists
+        messages_to_send = await self._get_messages_for_agent(ctx)
+
         updates: list[AgentRunResponseUpdate] = []
         async for update in self._agent.run_stream(
-            self._cache,
+            messages_to_send,
             thread=self._agent_thread,
             **run_kwargs,
         ):
             updates.append(update)
             # Debug: log update contents
-            update_text = getattr(update, 'text', None)
-            update_contents = getattr(update, 'contents', [])
-            logger.debug(f"AgentTurnExecutor: Streaming update - text={update_text[:50] if update_text else None}..., contents={[type(c).__name__ for c in (update_contents or [])]}")
+            update_text = getattr(update, "text", None)
+            update_contents = getattr(update, "contents", [])
+            content_types = [type(c).__name__ for c in (update_contents or [])]
+            text_preview = update_text[:50] if update_text else None
+            logger.debug(
+                "AgentTurnExecutor: Streaming update - text=%s..., contents=%s",
+                text_preview,
+                content_types,
+            )
             await ctx.add_event(AgentRunUpdateEvent(self.id, update))
 
         # Build the final response
@@ -273,10 +301,193 @@ class AgentTurnExecutor(Executor):
         else:
             response = AgentRunResponse.from_agent_run_response_updates(updates)
 
-        # Update cache with response messages
+        # Update cache with response messages (full cache, not compacted)
         self._cache.extend(response.messages)
 
         return response
+
+    async def _get_messages_for_agent(self, ctx: WorkflowContext[Any]) -> list[Any]:
+        """Get messages to send to agent, applying compaction if enabled.
+
+        Args:
+            ctx: The workflow context.
+
+        Returns:
+            Messages to send - either the full cache or a compacted view.
+        """
+        if not self._enable_compaction:
+            return self._cache
+
+        # Load compaction plan from SharedState
+        plan = await self._load_compaction_plan(ctx)
+        if plan is None or plan.is_empty:
+            return self._cache
+
+        # Apply compaction to cache
+        return self._apply_compaction_plan(plan)
+
+    async def _load_compaction_plan(self, ctx: WorkflowContext[Any]) -> "CompactionPlan | None":
+        """Load the compaction plan from SharedState.
+
+        Note: Full deserialization is not yet implemented. For now, we check
+        if plan data exists and return an empty plan with preserved metadata.
+
+        Args:
+            ctx: The workflow context.
+
+        Returns:
+            The CompactionPlan if found, None otherwise.
+        """
+        try:
+            plan_data = await ctx.get_shared_state(HARNESS_COMPACTION_PLAN_KEY)
+            if plan_data and isinstance(plan_data, dict):
+                from typing import cast
+
+                from ._compaction import CompactionPlan
+
+                plan_dict = cast(dict[str, Any], plan_data)
+                thread_id = str(plan_dict.get("thread_id", "harness"))
+                version = int(plan_dict.get("thread_version", 0))
+                # Note: Full deserialization will be added when from_dict is added to CompactionPlan
+                return CompactionPlan.create_empty(thread_id=thread_id, thread_version=version)
+        except KeyError:
+            pass
+        return None
+
+    def _apply_compaction_plan(self, plan: "CompactionPlan") -> list[Any]:
+        """Apply compaction plan to the message cache.
+
+        This produces a compacted view of the cache for the agent while
+        preserving the original cache for durability.
+
+        Args:
+            plan: The compaction plan to apply.
+
+        Returns:
+            Compacted message list.
+        """
+        from ._compaction import CompactionAction
+
+        compacted: list[Any] = []
+        processed_spans: set[str] = set()
+
+        for msg in self._cache:
+            # Get message ID - include as-is if no ID
+            msg_id = getattr(msg, "message_id", None)
+            if msg_id is None:
+                compacted.append(msg)
+                continue
+
+            # Look up action in plan
+            action, record = plan.get_action(msg_id)
+
+            # Apply action
+            if action == CompactionAction.DROP:
+                continue  # Skip this message
+
+            if action == CompactionAction.INCLUDE:
+                compacted.append(msg)
+                continue
+
+            if action == CompactionAction.CLEAR:
+                compacted.append(self._render_cleared_message(msg, record))
+                continue
+
+            # For SUMMARIZE and EXTERNALIZE, only render once per span
+            if record is None:
+                continue
+
+            span_key = record.span.start_message_id
+            if span_key in processed_spans:
+                continue
+            processed_spans.add(span_key)
+
+            if action == CompactionAction.SUMMARIZE:
+                compacted.append(self._render_summary_message(record))
+
+            elif action == CompactionAction.EXTERNALIZE:
+                compacted.append(self._render_externalization_message(record))
+
+        return compacted
+
+    def _render_cleared_message(self, original_msg: Any, record: Any) -> Any:
+        """Render a cleared message as a placeholder.
+
+        Args:
+            original_msg: The original message.
+            record: The clear record.
+
+        Returns:
+            A placeholder message.
+        """
+        from .._types import ChatMessage
+
+        role_attr = getattr(original_msg, "role", "assistant")
+        # Handle both enum-style roles and string roles
+        role_value: str = str(getattr(role_attr, "value", role_attr))
+
+        # Build placeholder
+        parts = [f"[Cleared: {role_value} message]"]
+        if record is not None and hasattr(record, "preserved_fields") and record.preserved_fields:
+            fields = ", ".join(f"{k}={v}" for k, v in sorted(record.preserved_fields.items()))
+            parts.append(f"Key data: {fields}")
+
+        return ChatMessage(
+            role=role_value,  # type: ignore[arg-type]
+            text="\n".join(parts),
+            message_id=getattr(original_msg, "message_id", None),
+        )
+
+    def _render_summary_message(self, record: Any) -> Any:
+        """Render a summary as an assistant message.
+
+        Args:
+            record: The summarization record.
+
+        Returns:
+            A summary message.
+        """
+        from .._types import ChatMessage
+
+        span = record.span
+        summary_text = record.summary.render_as_message()
+
+        content = (
+            f"[Context Summary - Turns {span.first_turn}-{span.last_turn}]\n"
+            f"{summary_text}"
+        )
+
+        return ChatMessage(
+            role="assistant",
+            text=content,
+            message_id=f"summary-{span.start_message_id}",
+        )
+
+    def _render_externalization_message(self, record: Any) -> Any:
+        """Render an externalization pointer as an assistant message.
+
+        Args:
+            record: The externalization record.
+
+        Returns:
+            An externalization pointer message.
+        """
+        from .._types import ChatMessage
+
+        span = record.span
+        summary_text = record.summary.render_as_message()
+
+        content = (
+            f"[Externalized Content - artifact:{record.artifact_id}]\n"
+            f"Summary: {summary_text}\n"
+            f'To retrieve full content, call: read_artifact("{record.artifact_id}")'
+        )
+
+        return ChatMessage(
+            role="assistant",
+            text=content,
+            message_id=f"external-{span.start_message_id}",
+        )
 
     def _has_tool_calls(self, response: AgentRunResponse) -> bool:
         """Check if the response contains tool calls (excluding task_complete).

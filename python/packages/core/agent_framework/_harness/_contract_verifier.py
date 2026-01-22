@@ -101,26 +101,25 @@ class ContractVerifier:
         try:
             if predicate.type == PredicateType.ALWAYS_TRUE:
                 return self._verify_always_true(predicate)
-            elif predicate.type == PredicateType.FILE_EXISTS:
+            if predicate.type == PredicateType.FILE_EXISTS:
                 return self._verify_file_exists(predicate)
-            elif predicate.type == PredicateType.CONTAINS_TEXT:
+            if predicate.type == PredicateType.CONTAINS_TEXT:
                 return self._verify_contains_text(predicate, context)
-            elif predicate.type == PredicateType.TOOL_RESULT_SUCCESS:
+            if predicate.type == PredicateType.TOOL_RESULT_SUCCESS:
                 return self._verify_tool_success(predicate)
-            elif predicate.type == PredicateType.JSON_SCHEMA_VALID:
+            if predicate.type == PredicateType.JSON_SCHEMA_VALID:
                 return self._verify_json_schema(predicate, context)
-            elif predicate.type == PredicateType.CUSTOM:
+            if predicate.type == PredicateType.CUSTOM:
                 return self._verify_custom(predicate, context)
-            else:
-                return VerificationResult(
-                    success=False,
-                    message=f"Unknown predicate type: {predicate.type}",
-                )
+            return VerificationResult(
+                success=False,
+                message=f"Unknown predicate type: {predicate.type}",
+            )
         except Exception as e:
             logger.warning(f"Predicate verification failed: {e}")
             return VerificationResult(
                 success=False,
-                message=f"Verification error: {str(e)}",
+                message=f"Verification error: {e!s}",
             )
 
     def verify_requirement(
@@ -235,11 +234,10 @@ class ContractVerifier:
                     value=path,
                 ),
             )
-        else:
-            return VerificationResult(
-                success=False,
-                message=f"File not found: {path}",
-            )
+        return VerificationResult(
+            success=False,
+            message=f"File not found: {path}",
+        )
 
     def _verify_contains_text(
         self, predicate: Predicate, context: dict[str, Any]
@@ -274,11 +272,10 @@ class ContractVerifier:
                     value=f"Pattern '{pattern}' found in {field}",
                 ),
             )
-        else:
-            return VerificationResult(
-                success=False,
-                message=f"Pattern not found: {pattern}",
-            )
+        return VerificationResult(
+            success=False,
+            message=f"Pattern not found: {pattern}",
+        )
 
     def _verify_tool_success(self, predicate: Predicate) -> VerificationResult:
         """Verify a tool_result_success predicate."""
@@ -388,15 +385,14 @@ class ContractVerifier:
                             value=predicate.description or "Custom verification passed",
                         ),
                     )
-                else:
-                    return VerificationResult(
-                        success=False,
-                        message="Custom check failed",
-                    )
+                return VerificationResult(
+                    success=False,
+                    message="Custom check failed",
+                )
             except Exception as e:
                 return VerificationResult(
                     success=False,
-                    message=f"Custom check error: {str(e)}",
+                    message=f"Custom check error: {e!s}",
                 )
 
         return VerificationResult(

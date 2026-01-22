@@ -145,37 +145,35 @@ class StopDecisionExecutor(Executor):
                     )
                     await self._stop(ctx, HarnessStatus.DONE, reason, turn_count)
                     return
-                else:
-                    # Contract not satisfied - log gap and continue
-                    logger.info(
-                        f"StopDecisionExecutor: Agent signaled done but contract not satisfied. "
-                        f"Gaps: {gap_info}"
-                    )
-                    # Record gap event
-                    await self._append_event(
-                        ctx,
-                        HarnessEvent(
-                            event_type="stop_decision",
-                            data={
-                                "decision": "continue",
-                                "reason": "contract_not_satisfied",
-                                "gaps": gap_info,
-                                "turn": turn_count,
-                            },
-                        ),
-                    )
-                    # Continue execution
-                    await ctx.send_message(RepairTrigger())
-                    return
-            else:
-                # No contract verification - accept done signal
-                reason = StopReason(
-                    kind="agent_done",
-                    message="Agent completed task",
-                    details={"turn": turn_count},
+                # Contract not satisfied - log gap and continue
+                logger.info(
+                    f"StopDecisionExecutor: Agent signaled done but contract not satisfied. "
+                    f"Gaps: {gap_info}"
                 )
-                await self._stop(ctx, HarnessStatus.DONE, reason, turn_count)
+                # Record gap event
+                await self._append_event(
+                    ctx,
+                    HarnessEvent(
+                        event_type="stop_decision",
+                        data={
+                            "decision": "continue",
+                            "reason": "contract_not_satisfied",
+                            "gaps": gap_info,
+                            "turn": turn_count,
+                        },
+                    ),
+                )
+                # Continue execution
+                await ctx.send_message(RepairTrigger())
                 return
+            # No contract verification - accept done signal
+            reason = StopReason(
+                kind="agent_done",
+                message="Agent completed task",
+                details={"turn": turn_count},
+            )
+            await self._stop(ctx, HarnessStatus.DONE, reason, turn_count)
+            return
 
         # No stop condition met - continue to next turn
         logger.info(f"StopDecisionExecutor: Continuing to turn {turn_count + 1}")
@@ -207,7 +205,7 @@ class StopDecisionExecutor(Executor):
         Returns:
             Tuple of (is_stalled, stall_turns).
         """
-        from ._task_contract import CoverageLedger, ProgressFingerprint, ProgressTracker
+        from ._task_contract import ProgressFingerprint
 
         # Get or create progress tracker
         tracker = await self._get_progress_tracker(ctx)
@@ -283,7 +281,7 @@ class StopDecisionExecutor(Executor):
             Tuple of (satisfied, gap_info).
         """
         from ._contract_verifier import ContractVerifier
-        from ._task_contract import CoverageLedger, GapReport, TaskContract
+        from ._task_contract import CoverageLedger, GapReport
 
         # Get contract
         contract = await self._get_task_contract(ctx)

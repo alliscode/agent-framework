@@ -17,7 +17,6 @@ from agent_framework._harness import (
     DropEdit,
     DropOldestStrategy,
     HarnessStatus,
-    RepairComplete,
     RepairExecutor,
     RepairTrigger,
     TokenBudget,
@@ -34,8 +33,6 @@ from agent_framework._harness._constants import (
     HARNESS_TRANSCRIPT_KEY,
     HARNESS_TURN_COUNT_KEY,
 )
-from agent_framework._harness._repair_executor import HARNESS_CONFIG_KEY
-
 
 # Test TokenBudget
 

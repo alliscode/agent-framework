@@ -13,7 +13,6 @@ Strategies (in recommended order):
 4. Drop: Remove older content entirely (last resort)
 """
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable

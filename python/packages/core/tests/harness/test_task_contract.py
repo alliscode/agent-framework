@@ -4,14 +4,11 @@
 
 import os
 import tempfile
-from dataclasses import dataclass
-from typing import Any
 
 from agent_framework import Executor, WorkflowBuilder, WorkflowContext, handler
 from agent_framework._harness import (
     AcceptabilityCriteria,
     CompletionReport,
-    ContractVerificationResult,
     ContractVerifier,
     CoverageLedger,
     Evidence,
@@ -26,16 +23,13 @@ from agent_framework._harness import (
     RepairExecutor,
     RepairTrigger,
     RequiredOutput,
-    RequirementCoverage,
     RequirementStatus,
     StopDecisionExecutor,
     TaskContract,
     TurnComplete,
     UserQuestion,
-    VerificationResult,
 )
 from agent_framework._harness._constants import (
-    HARNESS_COVERAGE_LEDGER_KEY,
     HARNESS_MAX_TURNS_KEY,
     HARNESS_STATUS_KEY,
     HARNESS_TASK_CONTRACT_KEY,
@@ -43,7 +37,6 @@ from agent_framework._harness._constants import (
     HARNESS_TURN_COUNT_KEY,
 )
 from agent_framework._harness._repair_executor import HARNESS_CONFIG_KEY
-
 
 # Test TaskContract
 
