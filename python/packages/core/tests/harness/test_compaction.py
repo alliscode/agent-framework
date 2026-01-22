@@ -18,24 +18,21 @@ from agent_framework._harness import (
     # Core types
     ClearRecord,
     CompactionAction,
+    # Event types
+    CompactionMetrics,
     CompactionPlan,
-    DropRecord,
-    SpanReference,
     # Summary types
     Decision,
+    DropRecord,
+    MetricsCollector,
+    # Tokenizer types
     OpenItem,
+    SimpleTokenizer,
+    SpanReference,
     StructuredSummary,
     SummaryCacheKey,
-    ToolOutcome,
-    # Tokenizer types
-    ModelProvider,
-    SimpleTokenizer,
     TokenBudgetV2,
-    # Event types
-    CompactionEventType,
-    CompactionMetrics,
-    LoggingEventEmitter,
-    MetricsCollector,
+    ToolOutcome,
 )
 from agent_framework._harness._compaction import (
     # Storage types
@@ -43,15 +40,14 @@ from agent_framework._harness._compaction import (
     InMemoryArtifactStore,
     InMemoryCompactionStore,
     InMemorySummaryCache,
-    compute_content_hash,
-    create_summary_cache_key,
     # Rehydration types
     RehydrationInterceptor,
     RehydrationState,
     ToolCall,
+    compute_content_hash,
     create_rehydration_interceptor,
+    create_summary_cache_key,
 )
-
 
 # ============================================================================
 # SpanReference Tests

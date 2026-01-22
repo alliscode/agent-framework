@@ -17,6 +17,7 @@ from ._constants import (
     HARNESS_TASK_CONTRACT_KEY,
     HARNESS_TRANSCRIPT_KEY,
     HARNESS_TURN_COUNT_KEY,
+    HARNESS_WORK_ITEM_LEDGER_KEY,
 )
 from ._state import (
     HarnessEvent,
@@ -60,6 +61,7 @@ class StopDecisionExecutor(Executor):
         *,
         enable_contract_verification: bool = False,
         enable_stall_detection: bool = False,
+        enable_work_item_verification: bool = False,
         stall_threshold: int = DEFAULT_STALL_THRESHOLD,
         id: str = "harness_stop_decision",
     ):
@@ -68,12 +70,14 @@ class StopDecisionExecutor(Executor):
         Args:
             enable_contract_verification: Whether to verify contracts before stopping.
             enable_stall_detection: Whether to detect stalled progress.
+            enable_work_item_verification: Whether to verify work items before stopping.
             stall_threshold: Number of unchanged turns before stall detection.
             id: Unique identifier for this executor.
         """
         super().__init__(id)
         self._enable_contract_verification = enable_contract_verification
         self._enable_stall_detection = enable_stall_detection
+        self._enable_work_item_verification = enable_work_item_verification
         self._stall_threshold = stall_threshold
 
     @handler
@@ -137,40 +141,61 @@ class StopDecisionExecutor(Executor):
                 # Verify contract before accepting done signal
                 contract_satisfied, gap_info = await self._verify_contract(ctx)
 
-                if contract_satisfied:
-                    reason = StopReason(
-                        kind="agent_done",
-                        message="Agent completed task (contract verified)",
-                        details={"turn": turn_count, "contract_verified": True},
+                if not contract_satisfied:
+                    # Contract not satisfied - log gap and continue
+                    logger.info(
+                        f"StopDecisionExecutor: Agent signaled done but contract not satisfied. "
+                        f"Gaps: {gap_info}"
                     )
-                    await self._stop(ctx, HarnessStatus.DONE, reason, turn_count)
+                    # Record gap event
+                    await self._append_event(
+                        ctx,
+                        HarnessEvent(
+                            event_type="stop_decision",
+                            data={
+                                "decision": "continue",
+                                "reason": "contract_not_satisfied",
+                                "gaps": gap_info,
+                                "turn": turn_count,
+                            },
+                        ),
+                    )
+                    # Continue execution
+                    await ctx.send_message(RepairTrigger())
                     return
-                # Contract not satisfied - log gap and continue
-                logger.info(
-                    f"StopDecisionExecutor: Agent signaled done but contract not satisfied. "
-                    f"Gaps: {gap_info}"
-                )
-                # Record gap event
-                await self._append_event(
-                    ctx,
-                    HarnessEvent(
-                        event_type="stop_decision",
-                        data={
-                            "decision": "continue",
-                            "reason": "contract_not_satisfied",
-                            "gaps": gap_info,
-                            "turn": turn_count,
-                        },
-                    ),
-                )
-                # Continue execution
-                await ctx.send_message(RepairTrigger())
-                return
-            # No contract verification - accept done signal
+
+            # Layer 3b: Work item verification (if enabled)
+            if self._enable_work_item_verification:
+                work_items_complete = await self._verify_work_items(ctx)
+                if not work_items_complete:
+                    logger.info(
+                        "StopDecisionExecutor: Agent signaled done but work items incomplete"
+                    )
+                    await self._append_event(
+                        ctx,
+                        HarnessEvent(
+                            event_type="stop_decision",
+                            data={
+                                "decision": "continue",
+                                "reason": "work_items_incomplete",
+                                "turn": turn_count,
+                            },
+                        ),
+                    )
+                    await ctx.send_message(RepairTrigger())
+                    return
+
+            # All verification passed - accept done signal
+            details: dict[str, Any] = {"turn": turn_count}
+            if self._enable_contract_verification:
+                details["contract_verified"] = True
+            if self._enable_work_item_verification:
+                details["work_items_verified"] = True
+
             reason = StopReason(
                 kind="agent_done",
                 message="Agent completed task",
-                details={"turn": turn_count},
+                details=details,
             )
             await self._stop(ctx, HarnessStatus.DONE, reason, turn_count)
             return
@@ -216,11 +241,15 @@ class StopDecisionExecutor(Executor):
         # Get coverage ledger if available
         ledger = await self._get_coverage_ledger(ctx)
 
+        # Get work item statuses if available
+        work_item_statuses = await self._get_work_item_statuses(ctx)
+
         # Compute and add fingerprint
         fingerprint = ProgressFingerprint.compute(
             turn_number=turn_count,
             ledger=ledger,
             transcript_length=len(transcript),
+            work_item_statuses=work_item_statuses,
         )
         tracker.add_fingerprint(fingerprint)
 
@@ -232,6 +261,23 @@ class StopDecisionExecutor(Executor):
         stall_duration = tracker.get_stall_duration()
 
         return is_stalled, stall_duration
+
+    async def _get_work_item_statuses(self, ctx: WorkflowContext[Any, Any]) -> dict[str, str] | None:
+        """Get work item statuses for progress fingerprint."""
+        from ._work_items import WorkItemLedger
+
+        try:
+            ledger_data = await ctx.get_shared_state(HARNESS_WORK_ITEM_LEDGER_KEY)
+            if ledger_data and isinstance(ledger_data, dict):
+                ledger = WorkItemLedger.from_dict(cast(dict[str, Any], ledger_data))
+                if ledger.items:
+                    return {
+                        item_id: item.status.value
+                        for item_id, item in ledger.items.items()
+                    }
+        except KeyError:
+            pass
+        return None
 
     async def _get_progress_tracker(self, ctx: WorkflowContext[Any, Any]) -> Any:
         """Get or create the progress tracker."""
@@ -311,6 +357,28 @@ class StopDecisionExecutor(Executor):
         gap_report = GapReport.from_contract_and_ledger(contract, ledger)
 
         return False, gap_report.to_dict()
+
+    async def _verify_work_items(self, ctx: WorkflowContext[Any, Any]) -> bool:
+        """Verify that all work items are complete.
+
+        Args:
+            ctx: Workflow context for state access.
+
+        Returns:
+            True if all work items are complete (or no items exist).
+        """
+        from ._work_items import WorkItemLedger
+
+        try:
+            ledger_data = await ctx.get_shared_state(HARNESS_WORK_ITEM_LEDGER_KEY)
+            if ledger_data and isinstance(ledger_data, dict):
+                ledger = WorkItemLedger.from_dict(cast(dict[str, Any], ledger_data))
+                return ledger.is_all_complete()
+        except KeyError:
+            pass
+
+        # No ledger means no items to verify
+        return True
 
     async def _get_task_contract(self, ctx: WorkflowContext[Any, Any]) -> Any:
         """Get the task contract if available."""

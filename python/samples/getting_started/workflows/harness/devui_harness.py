@@ -8,9 +8,10 @@ interactive testing and debugging. The harness provides:
 - Continuation prompts to verify task completion
 - Task contract verification (optional)
 - Context compaction (optional) - production-quality context management
+- Work item tracking (optional) - self-critique loop for multi-step tasks
 
 Usage:
-    python devui_harness.py [--sandbox PATH] [--port PORT] [--compaction]
+    python devui_harness.py [--sandbox PATH] [--port PORT] [--compaction] [--work-items]
 
 Examples:
     # Basic usage
@@ -19,8 +20,11 @@ Examples:
     # With context compaction enabled
     python devui_harness.py --compaction
 
-    # With custom sandbox and compaction
-    python devui_harness.py --sandbox ./workspace --compaction
+    # With work item tracking (self-critique loop)
+    python devui_harness.py --work-items
+
+    # With both compaction and work items
+    python devui_harness.py --compaction --work-items
 """
 
 import argparse
@@ -82,6 +86,7 @@ STYLE:
 def create_harness_agent(
     sandbox_dir: Path,
     enable_compaction: bool = False,
+    enable_work_items: bool = False,
 ) -> AgentHarness:
     """Create a harness-wrapped agent with coding tools.
 
@@ -92,6 +97,7 @@ def create_harness_agent(
     Args:
         sandbox_dir: Directory for agent workspace.
         enable_compaction: Whether to enable production context compaction.
+        enable_work_items: Whether to enable work item tracking (self-critique loop).
     """
     # Create tools sandboxed to the directory
     tools = CodingTools(sandbox_dir)
@@ -126,6 +132,7 @@ def create_harness_agent(
         stall_threshold=3,
         enable_continuation_prompts=True,
         max_continuation_prompts=2,
+        enable_work_items=enable_work_items,
         **compaction_kwargs,
     )
 
@@ -134,9 +141,11 @@ def create_harness_agent(
     harness.id = "coding-harness"
     harness.name = "coding-harness"
     compaction_status = "enabled" if enable_compaction else "disabled"
+    work_items_status = "enabled" if enable_work_items else "disabled"
     harness.description = (
         f"Coding assistant with harness infrastructure. "
-        f"Sandbox: {sandbox_dir}. Compaction: {compaction_status}"
+        f"Sandbox: {sandbox_dir}. Compaction: {compaction_status}. "
+        f"Work items: {work_items_status}"
     )
 
     return harness
@@ -161,6 +170,11 @@ def main():
         action="store_true",
         help="Enable production context compaction (Phase 9)",
     )
+    parser.add_argument(
+        "--work-items",
+        action="store_true",
+        help="Enable work item tracking (self-critique loop)",
+    )
     args = parser.parse_args()
 
     # Determine sandbox directory
@@ -175,7 +189,11 @@ def main():
         print(f"Using temp sandbox: {sandbox_dir}")
 
     # Create the harness-wrapped agent
-    harness = create_harness_agent(sandbox_dir, enable_compaction=args.compaction)
+    harness = create_harness_agent(
+        sandbox_dir,
+        enable_compaction=args.compaction,
+        enable_work_items=args.work_items,
+    )
 
     print(f"\nStarting DevUI on port {args.port}...")
     print(f"Sandbox directory: {sandbox_dir}")
@@ -184,6 +202,10 @@ def main():
         print("Context compaction: ENABLED (100K tokens, 85% threshold)")
     else:
         print("Context compaction: disabled")
+    if args.work_items:
+        print("Work item tracking: ENABLED (self-critique loop)")
+    else:
+        print("Work item tracking: disabled")
 
     # Launch DevUI with the harness
     # Note: AgentHarness has run_stream(message) method that DevUI can call directly

@@ -71,6 +71,7 @@ class HarnessEvent:
         "continuation_prompt",
         "stall_detected",
         "context_pressure",
+        "work_item_reminder",
     ]
     data: dict[str, Any]
     event_id: str = field(default_factory=lambda: str(uuid4()))

@@ -30,6 +30,9 @@ HARNESS_COVERAGE_LEDGER_KEY = "harness.coverage_ledger"
 HARNESS_PROGRESS_TRACKER_KEY = "harness.progress_tracker"
 HARNESS_COMPLETION_REPORT_KEY = "harness.completion_report"
 
+# Work item tracking state keys
+HARNESS_WORK_ITEM_LEDGER_KEY = "harness.work_item_ledger"
+
 # Default values
 DEFAULT_MAX_TURNS = 50
 DEFAULT_MAX_INPUT_TOKENS = 100000

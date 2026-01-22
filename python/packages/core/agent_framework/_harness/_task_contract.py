@@ -540,6 +540,7 @@ class ProgressFingerprint:
         ledger: CoverageLedger | None = None,
         transcript_length: int = 0,
         artifacts: list[str] | None = None,
+        work_item_statuses: dict[str, str] | None = None,
     ) -> "ProgressFingerprint":
         """Compute a progress fingerprint from current state.
 
@@ -548,12 +549,15 @@ class ProgressFingerprint:
             ledger: Coverage ledger (if available).
             transcript_length: Length of transcript.
             artifacts: List of artifact identifiers.
+            work_item_statuses: Mapping of work item IDs to status values.
+                When provided, work item changes count as progress
+                (prevents false stall detection).
 
         Returns:
             A new ProgressFingerprint.
         """
         # Build state to hash
-        state = {
+        state: dict[str, Any] = {
             "transcript_length": transcript_length,
             "artifacts": sorted(artifacts or []),
         }
@@ -564,6 +568,10 @@ class ProgressFingerprint:
                 req_id: cov.status.value
                 for req_id, cov in ledger.coverage.items()
             }
+
+        if work_item_statuses:
+            # Include work item statuses so changes count as progress
+            state["work_item_statuses"] = dict(sorted(work_item_statuses.items()))
 
         # Compute hash
         state_str = json.dumps(state, sort_keys=True)

@@ -20,12 +20,14 @@ from ._constants import (
     HARNESS_MAX_TURNS_KEY,
     HARNESS_TRANSCRIPT_KEY,
     HARNESS_TURN_COUNT_KEY,
+    HARNESS_WORK_ITEM_LEDGER_KEY,
 )
 from ._done_tool import TASK_COMPLETE_TOOL_NAME
 from ._state import HarnessEvent, HarnessLifecycleEvent, RepairComplete, TurnComplete
 
 if TYPE_CHECKING:
     from ._compaction import CompactionPlan
+    from ._work_items import WorkItemTaskListProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +63,7 @@ class AgentTurnExecutor(Executor):
         max_continuation_prompts: int = 2,
         continuation_prompt: str | None = None,
         enable_compaction: bool = False,
+        task_list: "WorkItemTaskListProtocol | None" = None,
         id: str = "harness_agent_turn",
     ):
         """Initialize the AgentTurnExecutor.
@@ -72,6 +75,7 @@ class AgentTurnExecutor(Executor):
             max_continuation_prompts: Maximum continuation prompts before accepting done signal.
             continuation_prompt: Custom continuation prompt text.
             enable_compaction: Whether to apply CompactionPlan from SharedState.
+            task_list: Optional work item task list for self-critique tracking.
             id: Unique identifier for this executor.
         """
         super().__init__(id)
@@ -82,6 +86,7 @@ class AgentTurnExecutor(Executor):
         self._max_continuation_prompts = max_continuation_prompts
         self._continuation_prompt = continuation_prompt or self.DEFAULT_CONTINUATION_PROMPT
         self._enable_compaction = enable_compaction
+        self._task_list = task_list
 
     @handler
     async def run_turn(self, trigger: RepairComplete, ctx: WorkflowContext[TurnComplete]) -> None:
@@ -126,7 +131,15 @@ class AgentTurnExecutor(Executor):
                 logger.info(f"AgentTurnExecutor: Injecting initial message: {preview}...")
                 self._cache.append(initial_message)
 
-        # 2. Record turn start event
+            # Inject work item guidance on first turn
+            if self._task_list is not None:
+                self._inject_work_item_guidance()
+
+        # 2. Inject work item reminder if last stop was work_items_incomplete
+        if self._task_list is not None:
+            await self._maybe_inject_work_item_reminder(ctx)
+
+        # 3. Record turn start event
         await self._append_event(
             ctx,
             HarnessEvent(
@@ -135,7 +148,7 @@ class AgentTurnExecutor(Executor):
             ),
         )
 
-        # 3. Run the agent
+        # 4. Run the agent
         try:
             if ctx.is_streaming():
                 response = await self._run_agent_streaming(ctx)
@@ -161,7 +174,11 @@ class AgentTurnExecutor(Executor):
                 ),
             )
 
-            # 5. Determine if agent is done
+            # 5. Sync work item ledger to SharedState
+            if self._task_list is not None:
+                await self._sync_work_item_ledger(ctx)
+
+            # 6. Determine if agent is done
             # Priority: task_complete tool > no tool calls > continuation prompts
             has_tool_calls = self._has_tool_calls(response)
             called_task_complete = self._has_task_complete_call(response)
@@ -237,6 +254,10 @@ class AgentTurnExecutor(Executor):
         # This prevents conflicts when DevUI passes its own thread
         run_kwargs = {k: v for k, v in run_kwargs.items() if k != "thread"}
 
+        # Inject work item tools if task_list is set
+        if self._task_list is not None:
+            run_kwargs["tools"] = self._task_list.get_tools()
+
         # Apply compaction if enabled and plan exists
         messages_to_send = await self._get_messages_for_agent(ctx)
 
@@ -268,6 +289,10 @@ class AgentTurnExecutor(Executor):
         # Filter out 'thread' from run_kwargs since we manage our own thread
         # This prevents conflicts when DevUI passes its own thread
         run_kwargs = {k: v for k, v in run_kwargs.items() if k != "thread"}
+
+        # Inject work item tools if task_list is set
+        if self._task_list is not None:
+            run_kwargs["tools"] = self._task_list.get_tools()
 
         # Apply compaction if enabled and plan exists
         messages_to_send = await self._get_messages_for_agent(ctx)
@@ -629,6 +654,100 @@ class AgentTurnExecutor(Executor):
 
         transcript.append(event.to_dict())
         await ctx.set_shared_state(HARNESS_TRANSCRIPT_KEY, transcript)
+
+    # Default guidance message for work item tools
+    WORK_ITEM_GUIDANCE = (
+        "You have access to work item tracking tools for planning and self-review:\n"
+        "- work_item_add(title, priority?, notes?): Plan subtasks for this request\n"
+        "- work_item_update(item_id, status, notes?): Track progress (done/skipped)\n"
+        "- work_item_list(filter_status?): Review your progress before finishing\n\n"
+        "For multi-step tasks, start by adding work items to plan your approach, "
+        "update them as you progress, and review them before signaling completion. "
+        "All items must be marked done or skipped before the task can finish."
+    )
+
+    def _inject_work_item_guidance(self) -> None:
+        """Inject guidance about work item tools on the first turn."""
+        from .._types import ChatMessage
+
+        guidance_msg = ChatMessage(role="user", text=self.WORK_ITEM_GUIDANCE)
+        self._cache.append(guidance_msg)
+        logger.info("AgentTurnExecutor: Injected work item guidance message")
+
+    async def _maybe_inject_work_item_reminder(self, ctx: WorkflowContext[Any]) -> None:
+        """Inject a work item reminder if the last stop decision was work_items_incomplete.
+
+        Args:
+            ctx: Workflow context for state access.
+        """
+        from .._types import ChatMessage
+        from ._work_items import WorkItemLedger, format_work_item_reminder
+
+        # Check the transcript for the most recent stop_decision event
+        try:
+            transcript = await ctx.get_shared_state(HARNESS_TRANSCRIPT_KEY)
+            if not transcript:
+                return
+        except KeyError:
+            return
+
+        # Find the last stop_decision event
+        last_stop = None
+        for event_data in reversed(transcript):
+            if event_data.get("event_type") == "stop_decision":
+                last_stop = event_data
+                break
+
+        if last_stop is None:
+            return
+
+        # Check if it was a work_items_incomplete rejection
+        data = last_stop.get("data", {})
+        if data.get("reason") != "work_items_incomplete":
+            return
+
+        # Get the ledger and format reminder
+        try:
+            ledger_data = await ctx.get_shared_state(HARNESS_WORK_ITEM_LEDGER_KEY)
+            if not ledger_data or not isinstance(ledger_data, dict):
+                return
+            ledger = WorkItemLedger.from_dict(ledger_data)
+        except KeyError:
+            return
+
+        reminder_text = format_work_item_reminder(ledger)
+        if not reminder_text:
+            return
+
+        # Inject reminder as user message
+        reminder_msg = ChatMessage(role="user", text=reminder_text)
+        self._cache.append(reminder_msg)
+
+        # Record event
+        await self._append_event(
+            ctx,
+            HarnessEvent(
+                event_type="work_item_reminder",
+                data={"incomplete_count": len(ledger.get_incomplete_items())},
+            ),
+        )
+
+        logger.info(
+            f"AgentTurnExecutor: Injected work item reminder "
+            f"({len(ledger.get_incomplete_items())} items remaining)"
+        )
+
+    async def _sync_work_item_ledger(self, ctx: WorkflowContext[Any]) -> None:
+        """Sync the work item ledger to SharedState after each turn.
+
+        Args:
+            ctx: Workflow context for state access.
+        """
+        if self._task_list is None:
+            return
+
+        ledger = self._task_list.ledger
+        await ctx.set_shared_state(HARNESS_WORK_ITEM_LEDGER_KEY, ledger.to_dict())
 
     async def on_checkpoint_save(self) -> dict[str, Any]:
         """Save executor state for checkpointing.

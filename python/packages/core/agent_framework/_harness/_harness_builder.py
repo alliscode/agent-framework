@@ -33,6 +33,7 @@ if TYPE_CHECKING:
         SummaryCache,
     )
     from ._task_contract import TaskContract
+    from ._work_items import WorkItemTaskListProtocol
 
 # Key for harness configuration passed via kwargs
 HARNESS_CONFIG_KEY = "harness.config"
@@ -96,6 +97,9 @@ class HarnessWorkflowBuilder:
         enable_continuation_prompts: bool = True,
         max_continuation_prompts: int = 2,
         continuation_prompt: str | None = None,
+        # Work item tracking
+        enable_work_items: bool = False,
+        task_list: "WorkItemTaskListProtocol | None" = None,
     ):
         """Initialize the HarnessWorkflowBuilder.
 
@@ -122,6 +126,10 @@ class HarnessWorkflowBuilder:
             enable_continuation_prompts: Whether to prompt agent to continue if it stops early.
             max_continuation_prompts: Maximum continuation prompts before accepting done. Default is 2.
             continuation_prompt: Custom continuation prompt text.
+            enable_work_items: Whether to enable work item tracking. When True, a default
+                WorkItemTaskList is created and its tools are injected at runtime.
+            task_list: Optional custom task list implementation. When provided,
+                work item tracking is automatically enabled.
         """
         self._agent = agent
         self._agent_thread = agent_thread
@@ -146,6 +154,26 @@ class HarnessWorkflowBuilder:
         self._enable_continuation_prompts = enable_continuation_prompts
         self._max_continuation_prompts = max_continuation_prompts
         self._continuation_prompt = continuation_prompt
+        # Work item tracking
+        self._task_list = self._resolve_task_list(enable_work_items, task_list)
+
+    @staticmethod
+    def _resolve_task_list(
+        enable_work_items: bool,
+        task_list: "WorkItemTaskListProtocol | None",
+    ) -> "WorkItemTaskListProtocol | None":
+        """Resolve the task list from flags.
+
+        If task_list is provided, use it directly.
+        If enable_work_items is True, create a default WorkItemTaskList.
+        """
+        if task_list is not None:
+            return task_list
+        if enable_work_items:
+            from ._work_items import WorkItemTaskList
+
+            return WorkItemTaskList()
+        return None
 
     def get_harness_kwargs(self) -> dict[str, Any]:
         """Get the kwargs to pass to workflow.run() for harness configuration.
@@ -232,10 +260,11 @@ class HarnessWorkflowBuilder:
                 name="context_pressure",
             )
 
-        # Capture continuation settings for lambda
+        # Capture continuation and work item settings for lambda
         enable_cont = self._enable_continuation_prompts
         max_cont = self._max_continuation_prompts
         cont_prompt = self._continuation_prompt
+        task_list = self._task_list
 
         builder.register_executor(
             lambda: AgentTurnExecutor(
@@ -244,6 +273,7 @@ class HarnessWorkflowBuilder:
                 enable_continuation_prompts=enable_cont,
                 max_continuation_prompts=max_cont,
                 continuation_prompt=cont_prompt,
+                task_list=task_list,
                 id="harness_agent_turn",
             ),
             name="agent_turn",
@@ -252,10 +282,12 @@ class HarnessWorkflowBuilder:
         # Configure stop decision with Phase 3 options
         # Contract verification is enabled when a contract is provided
         enable_contract_verification = self._task_contract is not None
+        enable_work_item_verification = self._task_list is not None
         builder.register_executor(
             lambda: StopDecisionExecutor(
                 enable_contract_verification=enable_contract_verification,
                 enable_stall_detection=self._enable_stall_detection,
+                enable_work_item_verification=enable_work_item_verification,
                 stall_threshold=self._stall_threshold,
                 id="harness_stop_decision",
             ),
@@ -317,6 +349,9 @@ class AgentHarness:
             harness = AgentHarness(agent, max_turns=20)
             result = await harness.run("Solve this complex task...")
 
+            # With work item tracking (self-critique loop)
+            harness = AgentHarness(agent, enable_work_items=True, max_turns=20)
+
             # With stall detection
             harness = AgentHarness(
                 agent,
@@ -366,6 +401,9 @@ class AgentHarness:
         enable_continuation_prompts: bool = True,
         max_continuation_prompts: int = 2,
         continuation_prompt: str | None = None,
+        # Work item tracking
+        enable_work_items: bool = False,
+        task_list: "WorkItemTaskListProtocol | None" = None,
     ):
         """Initialize the AgentHarness.
 
@@ -392,6 +430,10 @@ class AgentHarness:
             enable_continuation_prompts: Whether to prompt agent to continue if it stops early.
             max_continuation_prompts: Maximum continuation prompts before accepting done. Default is 2.
             continuation_prompt: Custom continuation prompt text.
+            enable_work_items: Whether to enable work item tracking. When True, a default
+                WorkItemTaskList is created and its tools are injected at runtime.
+            task_list: Optional custom task list implementation. When provided,
+                work item tracking is automatically enabled.
         """
         self._builder = HarnessWorkflowBuilder(
             agent,
@@ -415,6 +457,8 @@ class AgentHarness:
             enable_continuation_prompts=enable_continuation_prompts,
             max_continuation_prompts=max_continuation_prompts,
             continuation_prompt=continuation_prompt,
+            enable_work_items=enable_work_items,
+            task_list=task_list,
         )
         self._workflow: Workflow | None = None
         self._harness_kwargs = self._builder.get_harness_kwargs()

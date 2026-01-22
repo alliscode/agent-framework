@@ -152,6 +152,7 @@ from ._constants import (
     HARNESS_TOKEN_BUDGET_KEY,
     HARNESS_TRANSCRIPT_KEY,
     HARNESS_TURN_COUNT_KEY,
+    HARNESS_WORK_ITEM_LEDGER_KEY,
 )
 from ._context_pressure import (
     ClearEdit,
@@ -204,6 +205,15 @@ from ._task_contract import (
     TaskContract,
     UserQuestion,
 )
+from ._work_items import (
+    WorkItem,
+    WorkItemLedger,
+    WorkItemPriority,
+    WorkItemStatus,
+    WorkItemTaskList,
+    WorkItemTaskListProtocol,
+    format_work_item_reminder,
+)
 
 __all__ = [
     # Production context compaction (v2)
@@ -231,6 +241,7 @@ __all__ = [
     "HARNESS_TOKEN_BUDGET_KEY",
     "HARNESS_TRANSCRIPT_KEY",
     "HARNESS_TURN_COUNT_KEY",
+    "HARNESS_WORK_ITEM_LEDGER_KEY",
     "STRUCTURED_SUMMARY_SCHEMA_VERSION",
     "SUMMARY_RENDER_VERSION",
     # Done signaling tool
@@ -368,12 +379,20 @@ __all__ = [
     "UserQuestion",
     "VerificationResult",
     "VersionConflictEvent",
+    # Work item tracking types
+    "WorkItem",
+    "WorkItemLedger",
+    "WorkItemPriority",
+    "WorkItemStatus",
+    "WorkItemTaskList",
+    "WorkItemTaskListProtocol",
     # Utilities
     "compute_content_hash",
     "create_rehydration_interceptor",
     "create_summary_cache_key",
     "estimate_tokens",
     "estimate_transcript_tokens",
+    "format_work_item_reminder",
     "get_default_strategies",
     "get_task_complete_tool",
     "get_tokenizer",
