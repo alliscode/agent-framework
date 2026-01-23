@@ -148,6 +148,7 @@ class HarnessResult:
     reason: StopReason | None = None
     transcript: list[HarnessEvent] = field(default_factory=lambda: [])
     turn_count: int = 0
+    deliverables: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
@@ -156,6 +157,7 @@ class HarnessResult:
             "reason": self.reason.to_dict() if self.reason else None,
             "transcript": [e.to_dict() for e in self.transcript],
             "turn_count": self.turn_count,
+            "deliverables": self.deliverables,
         }
 
 
@@ -187,6 +189,7 @@ class HarnessLifecycleEvent(WorkflowEvent):
             "continuation_prompt",
             "stall_detected",
             "context_pressure",
+            "deliverables_updated",
             "harness_completed",
         ],
         *,

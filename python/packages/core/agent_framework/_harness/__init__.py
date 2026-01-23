@@ -206,6 +206,9 @@ from ._task_contract import (
     UserQuestion,
 )
 from ._work_items import (
+    ArtifactContaminationLevel,
+    ArtifactRole,
+    ArtifactValidationResult,
     WorkItem,
     WorkItemLedger,
     WorkItemPriority,
@@ -213,6 +216,8 @@ from ._work_items import (
     WorkItemTaskList,
     WorkItemTaskListProtocol,
     format_work_item_reminder,
+    validate_artifact_content,
+    validate_control_artifact,
 )
 
 __all__ = [
@@ -253,12 +258,14 @@ __all__ = [
     "AgentHarness",
     # Executors
     "AgentTurnExecutor",
-    # Renderer types
+    # Artifact types
+    "ArtifactContaminationLevel",
     "ArtifactMetadata",
-    # Summary types
     "ArtifactReference",
+    "ArtifactRole",
     "ArtifactStore",
     "ArtifactStoreEntry",
+    "ArtifactValidationResult",
     "CacheEntry",
     # Context pressure types (Phase 2)
     "ClearEdit",
@@ -399,4 +406,6 @@ __all__ = [
     "render_externalization_text",
     "render_summary_text",
     "task_complete",
+    "validate_artifact_content",
+    "validate_control_artifact",
 ]

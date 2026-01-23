@@ -11,6 +11,7 @@ The harness auto-injects work item tools at runtime and verifies
 completeness before accepting the agent's done signal.
 """
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -18,6 +19,289 @@ from enum import Enum
 from typing import Annotated, Any, Callable, Protocol, runtime_checkable
 
 from .._tools import ai_function
+
+# ============================================================
+# Artifact Contamination Detection
+# ============================================================
+
+
+class ArtifactContaminationLevel(Enum):
+    """Classification of narrative contamination in artifact content."""
+
+    CLEAN = "clean"
+    LIGHT = "light_contamination"
+    HEAVY = "heavy_contamination"
+
+
+@dataclass
+class ArtifactValidationResult:
+    """Result of artifact content validation.
+
+    Attributes:
+        level: The contamination classification.
+        cleaned_content: Content with boundary narration stripped (same as input if CLEAN).
+        removed_lines: Lines that were removed during cleaning.
+        message: Human-readable message describing the result.
+    """
+
+    level: ArtifactContaminationLevel
+    cleaned_content: str
+    removed_lines: list[str]
+    message: str
+
+
+# Preamble patterns - detected case-insensitively at line starts (first 5 lines)
+_PREAMBLE_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"^\s*I will now\b", re.IGNORECASE),
+    re.compile(r"^\s*I'll (create|write|document|generate|produce|build|prepare)\b", re.IGNORECASE),
+    re.compile(r"^\s*Let me\b", re.IGNORECASE),
+    re.compile(r"^\s*Now I'll\b", re.IGNORECASE),
+    re.compile(r"^\s*Here is the\b", re.IGNORECASE),
+    re.compile(r"^\s*Here's the\b", re.IGNORECASE),
+    re.compile(r"^\s*Below is\b", re.IGNORECASE),
+    re.compile(r"^\s*I'm going to\b", re.IGNORECASE),
+    re.compile(r"^\s*The following is\b", re.IGNORECASE),
+]
+
+# Postamble patterns - detected case-insensitively at line starts (last 5 lines)
+_POSTAMBLE_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"^\s*I've (stored|saved|recorded|created|written|documented)\b", re.IGNORECASE),
+    re.compile(r"^\s*I'll now (move|proceed|continue)\b", re.IGNORECASE),
+    re.compile(r"^\s*Next,? I'll\b", re.IGNORECASE),
+    re.compile(r"^\s*Moving on to\b", re.IGNORECASE),
+    re.compile(r"^\s*This has been (stored|saved|recorded)\b", re.IGNORECASE),
+    re.compile(r"^\s*The above has been\b", re.IGNORECASE),
+]
+
+# Meta-reference patterns - compound matches required (anywhere in content)
+_META_REFERENCE_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"^\s*.*\bwork.?item\b", re.IGNORECASE),
+    re.compile(r"^\s*.*\bartifact\b.*\b(stored|saved)\b", re.IGNORECASE),
+    re.compile(r"^\s*.*\b(stored|saved)\b.*\bartifact\b", re.IGNORECASE),
+    re.compile(r"^\s*.*\btask_complete\b", re.IGNORECASE),
+    re.compile(r"^\s*.*\bwork_item_set_artifact\b", re.IGNORECASE),
+    re.compile(r"^\s*.*\bwork_item_flag_revision\b", re.IGNORECASE),
+]
+
+# Boundary zone size (number of lines at start/end to check for preamble/postamble)
+_BOUNDARY_ZONE_SIZE = 5
+
+# Maximum narration lines for LIGHT classification
+_MAX_LIGHT_NARRATION_LINES = 3
+
+
+def _is_narration_line(line: str, patterns: list[re.Pattern[str]]) -> bool:
+    """Check if a line matches any of the given narration patterns."""
+    return any(p.search(line) for p in patterns)
+
+
+def _has_content_before(line_idx: int, lines: list[str], narration_indices: set[int]) -> bool:
+    """Check if there are non-empty, non-narration content lines before the given index."""
+    return any(
+        lines[i].strip() and i not in narration_indices
+        for i in range(line_idx)
+    )
+
+
+def _has_content_after(line_idx: int, lines: list[str], narration_indices: set[int]) -> bool:
+    """Check if there are non-empty, non-narration content lines after the given index."""
+    return any(
+        lines[i].strip() and i not in narration_indices
+        for i in range(line_idx + 1, len(lines))
+    )
+
+
+def _find_narration_lines(
+    lines: list[str],
+) -> tuple[list[int], list[int], list[int]]:
+    """Find indices of narration lines in preamble, postamble, and interior.
+
+    A narration line is only considered "boundary" if it is truly at the
+    start or end of content (no non-narration content lines before/after it).
+    Narration interleaved with content is always classified as interior.
+
+    Returns:
+        Tuple of (preamble_indices, postamble_indices, interior_meta_indices).
+    """
+    preamble_indices: list[int] = []
+    postamble_indices: list[int] = []
+    interior_meta_indices: list[int] = []
+
+    total = len(lines)
+    preamble_end = min(_BOUNDARY_ZONE_SIZE, total)
+    postamble_start = max(0, total - _BOUNDARY_ZONE_SIZE)
+
+    # First pass: find all narration matches with their pattern type
+    narration_matches: list[tuple[int, str]] = []  # (index, type: "preamble"|"postamble"|"meta")
+
+    for i, line in enumerate(lines):
+        if not line.strip():
+            continue
+
+        in_preamble_zone = i < preamble_end
+        in_postamble_zone = i >= postamble_start
+
+        if in_preamble_zone and _is_narration_line(line, _PREAMBLE_PATTERNS):
+            narration_matches.append((i, "preamble"))
+            continue
+
+        if in_postamble_zone and _is_narration_line(line, _POSTAMBLE_PATTERNS):
+            narration_matches.append((i, "postamble"))
+            continue
+
+        if _is_narration_line(line, _META_REFERENCE_PATTERNS):
+            narration_matches.append((i, "meta"))
+
+    # Second pass: classify each match as boundary or interior based on
+    # whether it has non-narration content lines both before and after it.
+    narration_indices = {idx for idx, _ in narration_matches}
+
+    for idx, match_type in narration_matches:
+        has_before = _has_content_before(idx, lines, narration_indices)
+        has_after = _has_content_after(idx, lines, narration_indices)
+
+        if has_before and has_after:
+            # Interleaved with content - always interior
+            interior_meta_indices.append(idx)
+        elif match_type == "preamble" or (match_type == "meta" and not has_before):
+            preamble_indices.append(idx)
+        else:
+            postamble_indices.append(idx)
+
+    return preamble_indices, postamble_indices, interior_meta_indices
+
+
+def validate_artifact_content(artifact: str) -> ArtifactValidationResult:
+    """Validate artifact content for narrative contamination.
+
+    Classification:
+    - CLEAN: No narration lines detected.
+    - LIGHT: Narration only in boundary zones (first/last 5 lines), ≤3 total.
+             Auto-strips boundary narration.
+    - HEAVY: Narration in body interior, OR >3 total narration lines.
+             Rejects entirely.
+
+    Args:
+        artifact: The artifact content to validate.
+
+    Returns:
+        ArtifactValidationResult with classification and cleaned content.
+    """
+    lines = artifact.split("\n")
+
+    preamble_idx, postamble_idx, interior_idx = _find_narration_lines(lines)
+
+    total_narration = len(preamble_idx) + len(postamble_idx) + len(interior_idx)
+
+    # CLEAN: no narration detected
+    if total_narration == 0:
+        return ArtifactValidationResult(
+            level=ArtifactContaminationLevel.CLEAN,
+            cleaned_content=artifact,
+            removed_lines=[],
+            message="",
+        )
+
+    # HEAVY: interior narration or too many total narration lines
+    if interior_idx or total_narration > _MAX_LIGHT_NARRATION_LINES:
+        all_indices = sorted(set(preamble_idx + postamble_idx + interior_idx))
+        flagged_lines = [lines[i] for i in all_indices]
+        return ArtifactValidationResult(
+            level=ArtifactContaminationLevel.HEAVY,
+            cleaned_content=artifact,  # Not cleaned - rejected
+            removed_lines=flagged_lines,
+            message=(
+                f"Artifact rejected: narrative contamination detected "
+                f"({total_narration} narration lines, "
+                f"{len(interior_idx)} in body interior). "
+                f"Artifact content must be pure deliverable data. "
+                f"Process commentary belongs in your response text, "
+                f"not inside the artifact parameter. "
+                f"Please resubmit with only the structured content."
+            ),
+        )
+
+    # LIGHT: boundary-only narration, ≤3 lines
+    boundary_indices = sorted(set(preamble_idx + postamble_idx))
+    removed = [lines[i] for i in boundary_indices]
+
+    # Strip narration lines and clean up leading/trailing blank lines
+    cleaned_lines = [line for i, line in enumerate(lines) if i not in set(boundary_indices)]
+
+    # Strip leading blank lines
+    while cleaned_lines and not cleaned_lines[0].strip():
+        cleaned_lines.pop(0)
+
+    # Strip trailing blank lines
+    while cleaned_lines and not cleaned_lines[-1].strip():
+        cleaned_lines.pop()
+
+    cleaned_content = "\n".join(cleaned_lines)
+
+    return ArtifactValidationResult(
+        level=ArtifactContaminationLevel.LIGHT,
+        cleaned_content=cleaned_content,
+        removed_lines=removed,
+        message=(
+            f"Artifact stored (auto-cleaned): removed {len(removed)} "
+            f"narration line(s) from boundaries. "
+            f"Reminder: artifact content should be pure deliverable data. "
+            f"Place process commentary in your response text instead."
+        ),
+    )
+
+
+def validate_control_artifact(artifact: str) -> tuple[bool, str]:
+    """Validate that a control artifact has the required structured format.
+
+    Control artifacts must be valid JSON with:
+    - verdict: "pass" or "fail"
+    - checks: list of {name, result, detail} objects
+    - summary: string explaining the overall verdict
+
+    Args:
+        artifact: The artifact content to validate.
+
+    Returns:
+        Tuple of (is_valid, error_message). error_message is empty if valid.
+    """
+    import json
+
+    try:
+        data = json.loads(artifact)
+    except (json.JSONDecodeError, ValueError) as e:
+        return False, f"Control artifact must be valid JSON: {e}"
+
+    if not isinstance(data, dict):
+        return False, "Control artifact must be a JSON object"
+
+    if "verdict" not in data:
+        return False, "Missing required field 'verdict' (must be 'pass' or 'fail')"
+    if data["verdict"] not in ("pass", "fail"):
+        return False, f"'verdict' must be 'pass' or 'fail', got '{data['verdict']}'"
+
+    if "checks" not in data:
+        return False, "Missing required field 'checks' (array of check objects)"
+    if not isinstance(data["checks"], list):
+        return False, "'checks' must be an array"
+    if len(data["checks"]) == 0:
+        return False, "'checks' must contain at least one check"
+
+    for i, check in enumerate(data["checks"]):
+        if not isinstance(check, dict):
+            return False, f"checks[{i}] must be an object"
+        for required_field in ("name", "result", "detail"):
+            if required_field not in check:
+                return False, f"checks[{i}] missing required field '{required_field}'"
+        if check["result"] not in ("pass", "fail"):
+            return False, f"checks[{i}].result must be 'pass' or 'fail', got '{check['result']}'"
+
+    if "summary" not in data:
+        return False, "Missing required field 'summary'"
+    if not isinstance(data["summary"], str) or not data["summary"].strip():
+        return False, "'summary' must be a non-empty string"
+
+    return True, ""
 
 
 class WorkItemStatus(Enum):
@@ -37,6 +321,14 @@ class WorkItemPriority(Enum):
     LOW = "low"
 
 
+class ArtifactRole(Enum):
+    """Role classification for work item artifacts."""
+
+    DELIVERABLE = "deliverable"
+    WORKING = "working"
+    CONTROL = "control"
+
+
 @dataclass
 class WorkItem:
     """A single work item in the ledger.
@@ -47,6 +339,9 @@ class WorkItem:
         status: Current status of the item.
         priority: Priority level.
         notes: Optional context or notes.
+        artifact: Structured output produced by this step.
+        requires_revision: Whether this item's output needs correction.
+        revision_of: ID of the parent item this is a revision of.
         created_at: ISO timestamp when created.
         updated_at: ISO timestamp when last updated.
     """
@@ -56,8 +351,16 @@ class WorkItem:
     status: WorkItemStatus = WorkItemStatus.PENDING
     priority: WorkItemPriority = WorkItemPriority.MEDIUM
     notes: str = ""
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    artifact: str = ""
+    artifact_role: ArtifactRole = ArtifactRole.WORKING
+    requires_revision: bool = False
+    revision_of: str = ""
+    created_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+    updated_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
@@ -67,6 +370,10 @@ class WorkItem:
             "status": self.status.value,
             "priority": self.priority.value,
             "notes": self.notes,
+            "artifact": self.artifact,
+            "artifact_role": self.artifact_role.value,
+            "requires_revision": self.requires_revision,
+            "revision_of": self.revision_of,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -74,12 +381,20 @@ class WorkItem:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "WorkItem":
         """Deserialize from dictionary."""
+        try:
+            artifact_role = ArtifactRole(data.get("artifact_role", "working"))
+        except ValueError:
+            artifact_role = ArtifactRole.WORKING
         return cls(
             id=data["id"],
             title=data["title"],
             status=WorkItemStatus(data.get("status", "pending")),
             priority=WorkItemPriority(data.get("priority", "medium")),
             notes=data.get("notes", ""),
+            artifact=data.get("artifact", ""),
+            artifact_role=artifact_role,
+            requires_revision=data.get("requires_revision", False),
+            revision_of=data.get("revision_of", ""),
             created_at=data.get("created_at", datetime.now(timezone.utc).isoformat()),
             updated_at=data.get("updated_at", datetime.now(timezone.utc).isoformat()),
         )
@@ -120,14 +435,47 @@ class WorkItemLedger:
         return True
 
     def get_incomplete_items(self) -> list[WorkItem]:
-        """Get all items that are not done or skipped."""
-        return [
+        """Get all items that are not done or skipped, plus unresolved revisions."""
+        incomplete = [
             item for item in self.items.values()
             if item.status not in (WorkItemStatus.DONE, WorkItemStatus.SKIPPED)
         ]
+        # Also include done items that still require revision without a completed fix
+        for item in self.items.values():
+            if (
+                item.requires_revision
+                and not self._has_completed_revision(item.id)
+                and item not in incomplete
+            ):
+                incomplete.append(item)
+        return incomplete
+
+    def _has_completed_revision(self, item_id: str) -> bool:
+        """Check if an item has a completed revision child."""
+        for item in self.items.values():
+            if (
+                item.revision_of == item_id
+                and item.status in (WorkItemStatus.DONE, WorkItemStatus.SKIPPED)
+            ):
+                return True
+        return False
+
+    def get_items_needing_revision(self) -> list[WorkItem]:
+        """Get items flagged for revision that don't have a completed fix."""
+        return [
+            item for item in self.items.values()
+            if item.requires_revision and not self._has_completed_revision(item.id)
+        ]
+
+    def get_deliverables(self) -> list[WorkItem]:
+        """Get all items with deliverable role that have artifact content."""
+        return [
+            item for item in self.items.values()
+            if item.artifact_role == ArtifactRole.DELIVERABLE and item.artifact
+        ]
 
     def is_all_complete(self) -> bool:
-        """Check if all items are done or skipped."""
+        """Check if all items are done/skipped and no unresolved revisions."""
         if not self.items:
             return True
         return len(self.get_incomplete_items()) == 0
@@ -205,9 +553,15 @@ class WorkItemTaskList:
         """Get tool closures bound to the ledger.
 
         Returns:
-            List of tool functions: [work_item_add, work_item_update, work_item_list]
+            List of tool functions for work item management.
         """
-        return [self._make_add_tool(), self._make_update_tool(), self._make_list_tool()]
+        return [
+            self._make_add_tool(),
+            self._make_update_tool(),
+            self._make_list_tool(),
+            self._make_set_artifact_tool(),
+            self._make_flag_revision_tool(),
+        ]
 
     def _make_add_tool(self) -> Callable[..., str]:
         """Create the work_item_add tool closure."""
@@ -216,6 +570,7 @@ class WorkItemTaskList:
         @ai_function(name="work_item_add", approval_mode="never_require")
         def work_item_add(
             title: Annotated[str, "Brief description of the work item"],
+            role: Annotated[str, "Artifact role: deliverable, working, or control"],
             priority: Annotated[str, "Priority level: high, medium, or low"] = "medium",
             notes: Annotated[str, "Optional context or notes"] = "",
         ) -> str:
@@ -223,10 +578,14 @@ class WorkItemTaskList:
 
             Use this to plan out the steps needed to complete the overall task.
             Each work item represents a discrete piece of work that should be
-            completed and checked off.
+            completed and checked off. You must classify each item's role:
+            - deliverable: User-facing output the user will receive directly.
+            - working: Internal scratchpad, drafts, or intermediate data.
+            - control: Validation checks, audits, quality gates.
 
             Args:
                 title: Brief description of the work item.
+                role: Artifact role classification.
                 priority: Priority level (high, medium, low).
                 notes: Optional context or notes.
 
@@ -238,15 +597,21 @@ class WorkItemTaskList:
             except ValueError:
                 priority_enum = WorkItemPriority.MEDIUM
 
+            try:
+                role_enum = ArtifactRole(role)
+            except ValueError:
+                role_enum = ArtifactRole.WORKING
+
             item = WorkItem(
                 id=_generate_item_id(),
                 title=title,
                 status=WorkItemStatus.PENDING,
                 priority=priority_enum,
+                artifact_role=role_enum,
                 notes=notes,
             )
             ledger.add_item(item)
-            return f"Added [{item.id}]: {title} (priority: {priority_enum.value})"
+            return f"Added [{item.id}]: {title} (role: {role_enum.value}, priority: {priority_enum.value})"
 
         return work_item_add
 
@@ -336,10 +701,22 @@ class WorkItemTaskList:
 
             for item in items:
                 icon = status_icons.get(item.status, "[ ]")
-                priority_tag = f" ({item.priority.value})" if item.priority != WorkItemPriority.MEDIUM else ""
-                lines.append(f"  {icon} [{item.id}] {item.title}{priority_tag}")
+                priority_tag = (
+                    f" ({item.priority.value})"
+                    if item.priority != WorkItemPriority.MEDIUM
+                    else ""
+                )
+                revision_tag = " [NEEDS REVISION]" if item.requires_revision else ""
+                parent_tag = f" (revision of {item.revision_of})" if item.revision_of else ""
+                lines.append(
+                    f"  {icon} [{item.id}] {item.title}"
+                    f"{priority_tag}{revision_tag}{parent_tag}"
+                )
                 if item.notes:
                     lines.append(f"      Notes: {item.notes}")
+                if item.artifact:
+                    preview = item.artifact[:60] + "..." if len(item.artifact) > 60 else item.artifact
+                    lines.append(f"      Artifact: {preview}")
 
             # Summary
             summary = ledger.get_status_summary()
@@ -350,6 +727,131 @@ class WorkItemTaskList:
             return "\n".join(lines)
 
         return work_item_list
+
+    def _make_set_artifact_tool(self) -> Callable[..., str]:
+        """Create the work_item_set_artifact tool closure."""
+        ledger = self._ledger
+
+        @ai_function(name="work_item_set_artifact", approval_mode="never_require")
+        def work_item_set_artifact(
+            item_id: Annotated[str, "ID of the work item"],
+            artifact: Annotated[
+                str, "The structured output/artifact produced by this step"
+            ],
+            role: Annotated[str, "Artifact role: deliverable, working, or control"] = "working",
+        ) -> str:
+            """Store the structured output (artifact) for a completed work item.
+
+            Use this to record the concrete deliverable of a step. For audit
+            or review steps, store findings as structured data (JSON preferred).
+            Stored artifacts enable cross-step validation and revision tracking.
+
+            Args:
+                item_id: ID of the work item.
+                artifact: The output content (text, JSON, etc.).
+                role: Artifact role classification.
+
+            Returns:
+                Confirmation message.
+            """
+            item = ledger.items.get(item_id)
+            if item is None:
+                return f"Error: Work item [{item_id}] not found"
+
+            # Parse role to enum
+            try:
+                role_enum = ArtifactRole(role)
+            except ValueError:
+                role_enum = ArtifactRole.WORKING
+
+            # Validate control artifact structure
+            if role_enum == ArtifactRole.CONTROL:
+                valid, error = validate_control_artifact(artifact)
+                if not valid:
+                    return (
+                        f"Error: Invalid control artifact format. {error}\n\n"
+                        f"Required format:\n"
+                        f'{{"verdict": "pass"|"fail", '
+                        f'"checks": [{{"name": "...", "result": "pass"|"fail", "detail": "..."}}], '
+                        f'"summary": "..."}}'
+                    )
+
+            # Validate artifact content for narrative contamination
+            validation = validate_artifact_content(artifact)
+
+            if validation.level == ArtifactContaminationLevel.HEAVY:
+                return f"Error: {validation.message}"
+
+            if validation.level == ArtifactContaminationLevel.LIGHT:
+                item.artifact = validation.cleaned_content
+                item.artifact_role = role_enum
+                item.updated_at = datetime.now(timezone.utc).isoformat()
+                cleaned = validation.cleaned_content
+                preview = cleaned[:80] + "..." if len(cleaned) > 80 else cleaned
+                return f"{validation.message}\nStored for [{item_id}]: {preview}"
+
+            # CLEAN
+            item.artifact = artifact
+            item.artifact_role = role_enum
+            item.updated_at = datetime.now(timezone.utc).isoformat()
+            preview = artifact[:80] + "..." if len(artifact) > 80 else artifact
+            return (
+                f"Artifact stored for [{item_id}]: {preview}"
+            )
+
+        return work_item_set_artifact
+
+    def _make_flag_revision_tool(self) -> Callable[..., str]:
+        """Create the work_item_flag_revision tool closure."""
+        ledger = self._ledger
+
+        @ai_function(name="work_item_flag_revision", approval_mode="never_require")
+        def work_item_flag_revision(
+            item_id: Annotated[str, "ID of the work item that needs revision"],
+            reason: Annotated[str, "What needs to be fixed in this item's output"],
+        ) -> str:
+            """Flag a completed work item as needing revision.
+
+            Use this during audit/review steps when you find issues in a prior
+            step's output. This creates a new revision work item that must be
+            completed before the task can finish. The revision item should
+            produce a corrected version of the original artifact.
+
+            Args:
+                item_id: ID of the item whose output needs correction.
+                reason: Description of what needs fixing.
+
+            Returns:
+                Confirmation with the new revision item ID.
+            """
+            item = ledger.items.get(item_id)
+            if item is None:
+                return f"Error: Work item [{item_id}] not found"
+
+            # Flag the original item
+            item.requires_revision = True
+            item.updated_at = datetime.now(timezone.utc).isoformat()
+
+            # Create a revision child item (inherits artifact_role from parent)
+            revision_item = WorkItem(
+                id=_generate_item_id(),
+                title=f"Revise: {item.title}",
+                status=WorkItemStatus.PENDING,
+                priority=WorkItemPriority.HIGH,
+                notes=f"Revision needed: {reason}",
+                artifact_role=item.artifact_role,
+                revision_of=item_id,
+            )
+            ledger.add_item(revision_item)
+
+            return (
+                f"Flagged [{item_id}] for revision. "
+                f"Created revision item [{revision_item.id}]: "
+                f"Revise: {item.title}\n"
+                f"Reason: {reason}"
+            )
+
+        return work_item_flag_revision
 
 
 def format_work_item_reminder(ledger: WorkItemLedger) -> str:
@@ -370,20 +872,40 @@ def format_work_item_reminder(ledger: WorkItemLedger) -> str:
     status_icons = {
         WorkItemStatus.PENDING: "[ ]",
         WorkItemStatus.IN_PROGRESS: "[~]",
+        WorkItemStatus.DONE: "[x]",  # shown for items needing revision
     }
 
+    # Separate revision-flagged items from regular incomplete
+    needs_revision = [i for i in incomplete if i.requires_revision]
+    regular_incomplete = [i for i in incomplete if not i.requires_revision]
+
     lines = [
-        "You indicated you are done, but you have incomplete work items:",
+        "You indicated you are done, but you have unresolved work items:",
     ]
-    for item in incomplete:
-        icon = status_icons.get(item.status, "[ ]")
-        priority_tag = f" ({item.priority.value})" if item.priority != WorkItemPriority.MEDIUM else ""
-        lines.append(f"  {icon} [{item.id}] {item.title}{priority_tag}")
+
+    if needs_revision:
+        lines.append("")
+        lines.append("Items requiring revision (use work_item_flag_revision findings):")
+        for item in needs_revision:
+            icon = status_icons.get(item.status, "[ ]")
+            lines.append(f"  {icon} [{item.id}] {item.title} [NEEDS REVISION]")
+
+    if regular_incomplete:
+        lines.append("")
+        lines.append("Incomplete items:")
+        for item in regular_incomplete:
+            icon = status_icons.get(item.status, "[ ]")
+            priority_tag = (
+                f" ({item.priority.value})"
+                if item.priority != WorkItemPriority.MEDIUM
+                else ""
+            )
+            lines.append(f"  {icon} [{item.id}] {item.title}{priority_tag}")
 
     lines.append("")
     lines.append(
-        "Please complete these items or mark them as skipped if no longer needed, "
-        "then signal done again."
+        "Complete remaining items, apply revisions (producing corrected artifacts), "
+        "or mark items as skipped if no longer needed. Then signal done again."
     )
 
     return "\n".join(lines)

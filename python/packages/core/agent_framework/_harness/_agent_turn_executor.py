@@ -27,7 +27,7 @@ from ._state import HarnessEvent, HarnessLifecycleEvent, RepairComplete, TurnCom
 
 if TYPE_CHECKING:
     from ._compaction import CompactionPlan
-    from ._work_items import WorkItemTaskListProtocol
+    from ._work_items import WorkItemLedger, WorkItemTaskListProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -657,13 +657,63 @@ class AgentTurnExecutor(Executor):
 
     # Default guidance message for work item tools
     WORK_ITEM_GUIDANCE = (
-        "You have access to work item tracking tools for planning and self-review:\n"
+        "You have access to work item tracking tools for planning, self-review, "
+        "and quality control:\n\n"
+        "PLANNING & PROGRESS:\n"
         "- work_item_add(title, priority?, notes?): Plan subtasks for this request\n"
         "- work_item_update(item_id, status, notes?): Track progress (done/skipped)\n"
         "- work_item_list(filter_status?): Review your progress before finishing\n\n"
-        "For multi-step tasks, start by adding work items to plan your approach, "
-        "update them as you progress, and review them before signaling completion. "
-        "All items must be marked done or skipped before the task can finish."
+        "ARTIFACT & REVISION PROTOCOL:\n"
+        "- work_item_set_artifact(item_id, artifact): Store the output of a completed step\n"
+        "- work_item_flag_revision(item_id, reason): Flag a prior step's output for correction\n\n"
+        "WORKFLOW:\n"
+        "1. Plan: Add work items for each distinct step\n"
+        "2. Execute: Work through items one at a time. After storing an artifact for a step, "
+        "immediately mark it done with work_item_update. Do NOT batch status updates.\n"
+        "3. Audit: When reviewing prior work, if you find issues, call flag_revision to "
+        "create a mandatory correction item\n"
+        "4. Revise: Complete any revision items with corrected artifacts\n"
+        "5. Verify: Call work_item_list to confirm all items are done before signaling completion\n\n"
+        "IMPORTANT: Mark each item done AS SOON AS you complete it and store its artifact. "
+        "All items (including revisions) must be done or skipped before the task "
+        "can finish. Audit steps that find issues MUST call flag_revision - "
+        "noting problems in prose is not sufficient.\n\n"
+        "ARTIFACT CONTENT RULES:\n"
+        "Artifacts are pure deliverables. Your response text is the narrative channel.\n"
+        "- GOOD: The structured content itself (text, JSON, markdown, code)\n"
+        "- BAD: 'I will now write...\\n## Timeline\\n...\\nI have stored this.'\n"
+        "- Never start with 'I will...', 'Let me...', 'Here is...'\n"
+        "- Never end with 'I have stored...', 'Moving on...', 'Next I will...'\n"
+        "- Never reference work items or task management within artifact content\n"
+        "- Process commentary belongs in response text BEFORE/AFTER the tool call\n\n"
+        "ARTIFACT ROLES:\n"
+        "When adding work items, you MUST classify their role correctly:\n"
+        "- deliverable: Any output the user asked for or will receive. Reports, documents,\n"
+        "  analyses, plans, summaries, code — if it answers the user's request, it is a deliverable.\n"
+        "- working: Your own scratch notes, intermediate reasoning, or data you won't show the user.\n"
+        "- control: Validation checks and audit results (must use structured JSON format below).\n"
+        "IMPORTANT: Most work items in a typical task should be 'deliverable'. Only use 'working'\n"
+        "for items that are purely internal to your process and not part of the user's answer.\n\n"
+        "CONTROL ARTIFACT FORMAT (REQUIRED):\n"
+        "When storing a control-role artifact, it MUST be valid JSON with this structure:\n"
+        '{"verdict": "pass" or "fail",\n'
+        ' "checks": [{"name": "what was checked", "result": "pass" or "fail", "detail": "evidence"}],\n'
+        ' "summary": "overall reasoning for the verdict"}\n\n'
+        "If your verdict is 'fail', you MUST call flag_revision on items whose checks failed.\n"
+        "A pass verdict must still include the checks showing what was validated.\n\n"
+        "ANTI-DOUBLE-EMISSION (CRITICAL):\n"
+        "Your response text is a brief narrative of progress. Artifact content goes ONLY in tool calls.\n"
+        "- NEVER reproduce artifact content in your response text\n"
+        "- NEVER mention tool names, artifacts, work items, or internal mechanics in response text\n"
+        "- NEVER say 'I stored/saved this as an artifact' or 'I will call work_item_set_artifact'\n"
+        "- DO describe what you are working on at a high level\n"
+        "- DO say what you produced and what you will do next\n\n"
+        "CORRECT response style:\n"
+        "  'I have completed the incident timeline covering 10:00-10:47 AM across 3 systems. "
+        "Now I will work on the stakeholder impact analysis.'\n\n"
+        "WRONG response style:\n"
+        "  '### Timeline\\n10:00 AM - Deploy...\\n10:47 AM - Recovery...\\n"
+        "I will store these findings as an artifact for this step.'"
     )
 
     def _inject_work_item_guidance(self) -> None:
@@ -748,6 +798,100 @@ class AgentTurnExecutor(Executor):
 
         ledger = self._task_list.ledger
         await ctx.set_shared_state(HARNESS_WORK_ITEM_LEDGER_KEY, ledger.to_dict())
+
+        # Emit progress event whenever ledger has items (progress bar + deliverables)
+        if ledger.items:
+            deliverables = ledger.get_deliverables()
+            total_items = len(ledger.items)
+            done_items = sum(
+                1 for item in ledger.items.values()
+                if item.status.value in ("done", "skipped")
+            )
+            await ctx.add_event(
+                HarnessLifecycleEvent(
+                    event_type="deliverables_updated",
+                    data={
+                        "count": len(deliverables),
+                        "total_items": total_items,
+                        "done_items": done_items,
+                        "items": [
+                            {
+                                "item_id": i.id,
+                                "title": i.title,
+                                "content": i.artifact,
+                            }
+                            for i in deliverables
+                        ],
+                    },
+                )
+            )
+
+        # Layer 3: Runtime invariant - failed control audits must produce revisions
+        invariant_prompt = self._check_control_invariants(ledger)
+        if invariant_prompt:
+            from .._types import ChatMessage
+            self._cache.append(ChatMessage(role="user", text=invariant_prompt))
+            await self._append_event(
+                ctx,
+                HarnessEvent(
+                    event_type="control_invariant_violation",
+                    data={"prompt": invariant_prompt},
+                ),
+            )
+            logger.info("AgentTurnExecutor: Control invariant violated, injected continuation prompt")
+
+    def _check_control_invariants(self, ledger: "WorkItemLedger") -> str | None:
+        """Check if control artifacts with verdict=fail have corresponding revisions.
+
+        Returns:
+            A continuation prompt string if the invariant is violated, None otherwise.
+        """
+        import json
+
+        from ._work_items import ArtifactRole, WorkItemStatus
+
+        failed_control_items: list[tuple[str, list[dict]]] = []
+
+        for item in ledger.items.values():
+            if (
+                item.artifact_role == ArtifactRole.CONTROL
+                and item.artifact
+                and item.status in (WorkItemStatus.DONE, WorkItemStatus.IN_PROGRESS)
+            ):
+                try:
+                    data = json.loads(item.artifact)
+                    if data.get("verdict") == "fail":
+                        failed_checks = [
+                            c for c in data.get("checks", [])
+                            if c.get("result") == "fail"
+                        ]
+                        if failed_checks:
+                            failed_control_items.append((item.id, failed_checks))
+                except (json.JSONDecodeError, ValueError, AttributeError):
+                    continue
+
+        if not failed_control_items:
+            return None
+
+        # Check if any revision items exist in the ledger
+        has_revisions = any(
+            item.revision_of for item in ledger.items.values()
+        )
+
+        if has_revisions:
+            return None  # Revisions exist, invariant satisfied
+
+        # Build continuation prompt
+        check_names = []
+        for _, checks in failed_control_items:
+            check_names.extend(c.get("name", "unnamed") for c in checks)
+
+        return (
+            "Your control audit reported a 'fail' verdict with failed checks: "
+            f"{', '.join(check_names)}. "
+            "You must call flag_revision on the work items that need correction, "
+            "then complete the revision items with corrected artifacts before finishing."
+        )
 
     async def on_checkpoint_save(self) -> dict[str, Any]:
         """Save executor state for checkpointing.

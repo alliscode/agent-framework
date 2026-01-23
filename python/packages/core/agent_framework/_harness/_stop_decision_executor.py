@@ -451,12 +451,30 @@ class StopDecisionExecutor(Executor):
         except KeyError:
             transcript = []
 
+        # Collect deliverable artifacts from work item ledger
+        deliverables: list[dict[str, Any]] = []
+        try:
+            ledger_data = await ctx.get_shared_state(HARNESS_WORK_ITEM_LEDGER_KEY)
+            if ledger_data and isinstance(ledger_data, dict):
+                from ._work_items import WorkItemLedger
+
+                ledger = WorkItemLedger.from_dict(cast(dict[str, Any], ledger_data))
+                for item in ledger.get_deliverables():
+                    deliverables.append({
+                        "item_id": item.id,
+                        "title": item.title,
+                        "content": item.artifact,
+                    })
+        except KeyError:
+            pass
+
         # Yield final result
         result = HarnessResult(
             status=status,
             reason=reason,
             transcript=transcript,
             turn_count=turn_count,
+            deliverables=deliverables,
         )
         await ctx.yield_output(result)
 
