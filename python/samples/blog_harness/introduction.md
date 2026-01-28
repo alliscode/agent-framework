@@ -1,6 +1,6 @@
-# Building a Custom Agent Harness: Part 1 - Introduction
+# Building a Custom Agent Harness: Introduction
 
-*This is Part 1 of a series on building custom agent harnesses using the Agent Framework's workflow system.*
+*This is the introduction to a series on building custom agent harnesses using the Agent Framework's workflow system.*
 
 ## What is an Agent Harness?
 
@@ -34,19 +34,19 @@ Over this series, we'll build a production-ready agent harness piece by piece:
 
 ```mermaid
 graph LR
-    subgraph "Part 2: Minimal"
+    subgraph "Part 1: Minimal"
         A[Turn Limits] --> B[Completion Detection]
     end
 
-    subgraph "Part 3: Stall Detection"
+    subgraph "Part 2: Stall Detection"
         C[Fingerprinting] --> D[Continuation Prompts]
     end
 
-    subgraph "Part 4: Policies"
+    subgraph "Part 3: Policies"
         E[Tool Limits] --> F[Content Filtering]
     end
 
-    subgraph "Part 5: Complete"
+    subgraph "Part 4: Complete"
         G[Output Validation] --> H[Builder Pattern]
     end
 
@@ -92,15 +92,15 @@ You don't need deep workflow experience - we'll explain as we go.
 
 | Part | Topic | What You'll Learn |
 |------|-------|-------------------|
-| **Part 2** | Minimal Harness | Workflow basics, turn limits, completion detection |
-| **Part 3** | Stall Detection | Response fingerprinting, continuation prompts |
-| **Part 4** | Policy Enforcement | Pluggable policies, workflow composition |
-| **Part 5** | Complete Harness | Output validation, builder pattern, production patterns |
+| **Part 1** | Minimal Harness | Workflow basics, turn limits, completion detection |
+| **Part 2** | Stall Detection | Response fingerprinting, continuation prompts |
+| **Part 3** | Policy Enforcement | Pluggable policies, workflow composition |
+| **Part 4** | Complete Harness | Output validation, builder pattern, production patterns |
 
 ## Let's Get Started
 
-In [Part 2](./part2_minimal/README.md), we'll build a minimal harness that prevents infinite loops and detects when the agent is done. It's simple, but it establishes the patterns we'll use throughout the series.
+In [Part 1](./part1_minimal/README.md), we'll build a minimal harness that prevents infinite loops and detects when the agent is done. It's simple, but it establishes the patterns we'll use throughout the series.
 
 ---
 
-*Next: [Part 2 - A Minimal Agent Harness](./part2_minimal/README.md)*
+*Next: [Part 1 - A Minimal Agent Harness](./part1_minimal/README.md)*

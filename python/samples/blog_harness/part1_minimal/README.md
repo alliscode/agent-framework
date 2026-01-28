@@ -1,6 +1,6 @@
-# Building a Custom Agent Harness: Part 2 - A Minimal Harness
+# Building a Custom Agent Harness: Part 1 - A Minimal Harness
 
-*This is Part 2 of a series on building custom agent harnesses. [Start from Part 1](../part1_introduction.md) if you haven't already.*
+*This is Part 1 of a series on building custom agent harnesses. [Start from the Introduction](../introduction.md) if you haven't already.*
 
 ## The Problem
 
@@ -213,7 +213,7 @@ print(f"Status: {result.status}, Turns: {result.turn_count}")
 ## Running the Example
 
 ```bash
-cd python/samples/blog_harness/part2_minimal
+cd python/samples/blog_harness/part1_minimal
 python example.py
 python example.py --max-turns 5
 python example.py --task "Calculate sqrt(144) + sqrt(256)"
@@ -245,9 +245,9 @@ Our completion detection is naive: "no tool calls = done". But what if the agent
 - Keeps repeating the same response?
 - Gets stuck in a reasoning loop?
 
-In [Part 3](../part3_stall_detection/README.md), we'll add **stall detection** to catch these cases.
+In [Part 2](../part2_stall_detection/README.md), we'll add **stall detection** to catch these cases.
 
 ---
 
-*Previous: [Part 1 - Introduction](../part1_introduction.md)*
-*Next: [Part 3 - Stall Detection](../part3_stall_detection/README.md)*
+*Previous: [Introduction](../introduction.md)*
+*Next: [Part 2 - Stall Detection](../part2_stall_detection/README.md)*

@@ -1,6 +1,6 @@
-# Building a Custom Agent Harness: Part 4 - Policy Enforcement
+# Building a Custom Agent Harness: Part 3 - Policy Enforcement
 
-*This is Part 4 of a series on building custom agent harnesses. [Start from Part 1](../part1_introduction.md) if you haven't already.*
+*This is Part 3 of a series on building custom agent harnesses. [Start from the Introduction](../introduction.md) if you haven't already.*
 
 ## The Problem
 
@@ -323,7 +323,7 @@ class MyCustomPolicy(Policy):
 
 ## What's Next?
 
-We now have a robust harness with turn limits, stall detection, and policies. In [Part 5](../part5_complete/README.md), we'll add the finishing touches:
+We now have a robust harness with turn limits, stall detection, and policies. In [Part 4](../part4_complete/README.md), we'll add the finishing touches:
 
 - **Output validation** - Ensure responses meet domain requirements
 - **Builder pattern** - Clean configuration API
@@ -331,5 +331,5 @@ We now have a robust harness with turn limits, stall detection, and policies. In
 
 ---
 
-*Previous: [Part 3 - Stall Detection](../part3_stall_detection/README.md)*
-*Next: [Part 5 - Complete Harness](../part5_complete/README.md)*
+*Previous: [Part 2 - Stall Detection](../part2_stall_detection/README.md)*
+*Next: [Part 4 - Complete Harness](../part4_complete/README.md)*

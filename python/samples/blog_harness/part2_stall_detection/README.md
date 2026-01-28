@@ -1,10 +1,10 @@
-# Building a Custom Agent Harness: Part 3 - Stall Detection
+# Building a Custom Agent Harness: Part 2 - Stall Detection
 
-*This is Part 3 of a series on building custom agent harnesses. [Start from Part 1](../part1_introduction.md) if you haven't already.*
+*This is Part 2 of a series on building custom agent harnesses. [Start from the Introduction](../introduction.md) if you haven't already.*
 
 ## The Problem
 
-In Part 2, we built a harness that stops when the agent finishes (no tool calls) or hits a turn limit. But agents can get stuck in subtler ways:
+In Part 1, we built a harness that stops when the agent finishes (no tool calls) or hits a turn limit. But agents can get stuck in subtler ways:
 
 - **Repetitive responses**: "I'll look that up for you" → calls tool → "I'll look that up for you" → ...
 - **Reasoning loops**: The agent keeps restating the problem without making progress
@@ -228,9 +228,9 @@ Our harness now handles turn limits and stalls. But what about:
 - Filtering prohibited content?
 - Enforcing custom rules?
 
-In [Part 4](../part4_policies/README.md), we'll add **pluggable policies** - and see how the workflow architecture makes this trivial.
+In [Part 3](../part3_policies/README.md), we'll add **pluggable policies** - and see how the workflow architecture makes this trivial.
 
 ---
 
-*Previous: [Part 2 - Minimal Harness](../part2_minimal/README.md)*
-*Next: [Part 4 - Policy Enforcement](../part4_policies/README.md)*
+*Previous: [Part 1 - Minimal Harness](../part1_minimal/README.md)*
+*Next: [Part 3 - Policy Enforcement](../part3_policies/README.md)*

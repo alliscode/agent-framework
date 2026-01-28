@@ -1,13 +1,13 @@
-# Building a Custom Agent Harness: Part 5 - The Complete Harness
+# Building a Custom Agent Harness: Part 4 - The Complete Harness
 
-*This is Part 5 of a series on building custom agent harnesses. [Start from Part 1](../part1_introduction.md) if you haven't already.*
+*This is Part 4 of a series on building custom agent harnesses. [Start from the Introduction](../introduction.md) if you haven't already.*
 
 ## What We've Built
 
 Over this series, we've progressively built a harness with:
-- Turn limits and completion detection (Part 2)
-- Stall detection with fingerprinting (Part 3)
-- Pluggable policy enforcement (Part 4)
+- Turn limits and completion detection (Part 1)
+- Stall detection with fingerprinting (Part 2)
+- Pluggable policy enforcement (Part 3)
 
 In this final part, we'll add output validation and polish the API for production use.
 
@@ -301,7 +301,7 @@ If the agent produces invalid JSON or misses required fields, the harness automa
 ## Running the Example
 
 ```bash
-cd python/samples/blog_harness/part5_complete
+cd python/samples/blog_harness/part4_complete
 
 # Normal analysis task
 python example.py
@@ -354,16 +354,16 @@ graph TB
 
 | Part | Feature | Benefit |
 |------|---------|---------|
-| 2 | Turn limits | Prevent infinite loops |
-| 2 | Completion detection | Know when agent is done |
-| 3 | Fingerprinting | Detect repetitive responses |
-| 3 | Continuation prompts | Break stall loops |
-| 4 | Policy system | Enforce rules without code changes |
-| 4 | Content filtering | Block unwanted content |
-| 5 | Output validation | Ensure output meets requirements |
-| 5 | Retry logic | Give agent chances to fix errors |
-| 5 | Builder pattern | Clean configuration API |
-| 5 | Structured events | Production observability |
+| 1 | Turn limits | Prevent infinite loops |
+| 1 | Completion detection | Know when agent is done |
+| 2 | Fingerprinting | Detect repetitive responses |
+| 2 | Continuation prompts | Break stall loops |
+| 3 | Policy system | Enforce rules without code changes |
+| 3 | Content filtering | Block unwanted content |
+| 4 | Output validation | Ensure output meets requirements |
+| 4 | Retry logic | Give agent chances to fix errors |
+| 4 | Builder pattern | Clean configuration API |
+| 4 | Structured events | Production observability |
 
 ## Key Takeaways
 
@@ -390,5 +390,5 @@ The workflow architecture makes all of these additions straightforward.
 
 ---
 
-*Previous: [Part 4 - Policy Enforcement](../part4_policies/README.md)*
-*Back to: [Part 1 - Introduction](../part1_introduction.md)*
+*Previous: [Part 3 - Policy Enforcement](../part3_policies/README.md)*
+*Back to: [Introduction](../introduction.md)*
