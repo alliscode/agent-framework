@@ -161,7 +161,7 @@ class MarkdownRenderer:
     def on_turn_started(self, turn_number: int) -> str | None:
         """Render an activity verb indicator."""
         verb = ACTIVITY_VERBS[(turn_number - 1) % len(ACTIVITY_VERBS)]
-        return f"\n\n***● {verb}...***\n\n"
+        return f"\n\n**● {verb}...**\n\n"
 
     def on_deliverables_updated(self, data: dict[str, Any]) -> str | None:
         """Render progress bar and any new deliverables."""
@@ -214,9 +214,8 @@ class MarkdownRenderer:
 
     def _format_deliverable(self, title: str, content: str) -> str:
         """Format a single deliverable as a markdown block."""
-        # Indent content as a blockquote
-        quoted = "\n".join(f"> {line}" for line in content.split("\n"))
-        return f"\n#### {title}\n\n{quoted}\n"
+        # Use horizontal rules and clear heading - blockquotes don't render well in all UIs
+        return f"\n\n---\n**📄 {title}**\n\n{content}\n\n---\n"
 
 
 # ── Stream Wrapper ─────────────────────────────────────────────────────────

@@ -158,9 +158,9 @@ class TestMarkdownRenderer:
         """Test the markdown format of turn indicator."""
         renderer = MarkdownRenderer()
         result = renderer.on_turn_started(1)
-        # Should be bold italic with bullet
-        assert result.strip().startswith("***")
-        assert result.strip().endswith("***")
+        # Should be bold with bullet
+        assert result.strip().startswith("**")
+        assert result.strip().endswith("**")
         assert "..." in result
 
     def test_deliverables_updated_shows_progress_bar(self) -> None:
@@ -195,7 +195,7 @@ class TestMarkdownRenderer:
         result = renderer.on_deliverables_updated(data)
         assert "Report" in result
         assert "Findings" in result
-        assert "> " in result  # blockquote
+        assert "---" in result  # horizontal rule separator
 
     def test_deliverables_updated_skips_seen_items(self) -> None:
         """Test that already-seen deliverables are not re-rendered."""
@@ -281,14 +281,15 @@ class TestMarkdownRenderer:
         assert renderer.on_text("Hello") == "Hello"
         assert renderer.on_text("") == ""
 
-    def test_format_deliverable_blockquote(self) -> None:
-        """Test deliverable formatting as blockquote."""
+    def test_format_deliverable_block(self) -> None:
+        """Test deliverable formatting with horizontal rules."""
         renderer = MarkdownRenderer()
         output = renderer._format_deliverable("My Title", "Line 1\nLine 2\nLine 3")
-        assert "#### My Title" in output
-        assert "> Line 1" in output
-        assert "> Line 2" in output
-        assert "> Line 3" in output
+        assert "**📄 My Title**" in output
+        assert "---" in output
+        assert "Line 1" in output
+        assert "Line 2" in output
+        assert "Line 3" in output
 
 
 # ============================================================
