@@ -176,6 +176,13 @@ from ._context_pressure_executor import ContextPressureComplete, ContextPressure
 from ._contract_verifier import ContractVerificationResult, ContractVerifier, VerificationResult
 from ._done_tool import TASK_COMPLETE_TOOL_NAME, get_task_complete_tool, task_complete
 from ._harness_builder import AgentHarness, HarnessWorkflowBuilder
+from ._renderers import (
+    ACTIVITY_VERBS,
+    HarnessRenderer,
+    MarkdownRenderer,
+    PassthroughRenderer,
+    render_stream,
+)
 from ._repair_executor import RepairExecutor
 from ._state import (
     HarnessEvent,
@@ -221,6 +228,8 @@ from ._work_items import (
 )
 
 __all__ = [
+    # Renderer types
+    "ACTIVITY_VERBS",
     # Production context compaction (v2)
     # Core types
     "COMPACTION_PRECEDENCE",
@@ -326,6 +335,7 @@ __all__ = [
     "GapReport",
     "HarnessEvent",
     "HarnessLifecycleEvent",
+    "HarnessRenderer",
     "HarnessResult",
     "HarnessStatus",
     "HarnessWorkflowBuilder",
@@ -333,10 +343,12 @@ __all__ = [
     "InMemoryCompactionStore",
     "InMemorySummaryCache",
     "LoggingEventEmitter",
+    "MarkdownRenderer",
     "MetricsCollector",
     # Tokenizer types (v2)
     "ModelProvider",
     "OpenItem",
+    "PassthroughRenderer",
     "PendingToolCall",
     "Predicate",
     "PredicateType",
@@ -404,6 +416,7 @@ __all__ = [
     "get_task_complete_tool",
     "get_tokenizer",
     "render_externalization_text",
+    "render_stream",
     "render_summary_text",
     "task_complete",
     "validate_artifact_content",
