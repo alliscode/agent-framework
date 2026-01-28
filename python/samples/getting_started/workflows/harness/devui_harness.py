@@ -33,23 +33,24 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from agent_framework.azure import AzureOpenAIChatClient
 from agent_framework._harness import (
     AgentHarness,
     InMemoryArtifactStore,
     InMemoryCompactionStore,
     InMemorySummaryCache,
+    MarkdownRenderer,
     get_task_complete_tool,
+    render_stream,
 )
+from agent_framework.azure import AzureOpenAIChatClient
 from agent_framework_devui import serve
 from azure.identity import AzureCliCredential
-
 from coding_tools import CodingTools
 
 # Enable debug logging for harness and mapper
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logging.getLogger("agent_framework._harness").setLevel(logging.DEBUG)
 logging.getLogger("agent_framework._workflows").setLevel(logging.DEBUG)
@@ -81,6 +82,36 @@ STYLE:
 - Explain what you're about to do before doing it
 - Report results clearly after each action
 """
+
+
+class RenderedHarness:
+    """Wrapper that applies MarkdownRenderer to harness run_stream output.
+
+    This wraps an AgentHarness and intercepts run_stream() calls to apply
+    the MarkdownRenderer, which formats progress indicators and deliverables
+    as markdown for DevUI display.
+    """
+
+    def __init__(self, harness: AgentHarness, use_renderer: bool = True):
+        self._harness = harness
+        self._renderer = MarkdownRenderer() if use_renderer else None
+        # Copy attributes DevUI needs for discovery
+        self.id = harness.id
+        self.name = harness.name
+        self.description = harness.description
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate attribute access to underlying harness."""
+        return getattr(self._harness, name)
+
+    async def run_stream(self, message: str, **kwargs: Any):
+        """Run the harness with optional markdown rendering."""
+        if self._renderer:
+            async for event in render_stream(self._harness, message, self._renderer, **kwargs):
+                yield event
+        else:
+            async for event in self._harness.run_stream(message, **kwargs):
+                yield event
 
 
 def create_harness_agent(
@@ -195,15 +226,20 @@ def main():
         enable_work_items=args.work_items,
     )
 
+    # Wrap with MarkdownRenderer when work items are enabled
+    if args.work_items:
+        harness = RenderedHarness(harness, use_renderer=True)
+
     print(f"\nStarting DevUI on port {args.port}...")
     print(f"Sandbox directory: {sandbox_dir}")
-    print(f"Harness config: max_turns=20, stall_threshold=3")
+    print("Harness config: max_turns=20, stall_threshold=3")
     if args.compaction:
         print("Context compaction: ENABLED (100K tokens, 85% threshold)")
     else:
         print("Context compaction: disabled")
     if args.work_items:
         print("Work item tracking: ENABLED (self-critique loop)")
+        print("Markdown renderer: ENABLED (activity verbs, progress bars)")
     else:
         print("Work item tracking: disabled")
 
