@@ -206,18 +206,20 @@ agents.md
 WARP.md
 **/memory-bank/
 **/projectBrief.md
+**/tmpclaude*
 # .compose*
 # .compose/
 # .astred*
 
 # Azurite storage emulator files
-*/__azurite_db_blob__.json
-*/__azurite_db_blob_extent__.json
-*/__azurite_db_queue__.json
-*/__azurite_db_queue_extent__.json
-*/__azurite_db_table__.json
+*/__azurite_db_blob__.json*
+*/__azurite_db_blob_extent__.json*
+*/__azurite_db_queue__.json*
+*/__azurite_db_queue_extent__.json*
+*/__azurite_db_table__.json*
 */__blobstorage__/
 */__queuestorage__/
+*/AzuriteConfig
 
 # Azure Functions local settings
 local.settings.json
@@ -229,3 +231,4 @@ local.settings.json
 
 # Database files
 *.db
+python/dotnet-ref
