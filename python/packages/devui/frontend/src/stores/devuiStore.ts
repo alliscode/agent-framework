@@ -63,7 +63,7 @@ interface DevUIState {
   streamingEnabled: boolean; // Whether to use streaming mode for responses
 
   // Debug Panel Preferences (persisted)
-  debugPanelTab: "events" | "traces" | "tools"; // Main debug panel tab
+  debugPanelTab: "events" | "traces" | "tools" | "tasks"; // Main debug panel tab
   debugTraceSubTab: "spans" | "context"; // OTel Spans vs Context Inspector
   contextInspectorViewMode: "tokens" | "composition";
   contextInspectorCumulative: boolean;
@@ -156,7 +156,7 @@ interface DevUIActions {
   setStreamingEnabled: (enabled: boolean) => void;
 
   // Debug Panel Preference Actions
-  setDebugPanelTab: (tab: "events" | "traces" | "tools") => void;
+  setDebugPanelTab: (tab: "events" | "traces" | "tools" | "tasks") => void;
   setDebugTraceSubTab: (tab: "spans" | "context") => void;
   setContextInspectorViewMode: (mode: "tokens" | "composition") => void;
   setContextInspectorCumulative: (cumulative: boolean) => void;

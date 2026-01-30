@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Annotated, Any, Callable, Protocol, runtime_checkable
 
+from .._middleware import FunctionInvocationContext, FunctionMiddleware
 from .._tools import ai_function
 
 # ============================================================
@@ -909,3 +910,80 @@ def format_work_item_reminder(ledger: WorkItemLedger) -> str:
     )
 
     return "\n".join(lines)
+
+
+class WorkItemEventMiddleware(FunctionMiddleware):
+    """Middleware that queues events when work items change.
+
+    This middleware intercepts work item tool calls and queues event data
+    after each modification. The harness drains this queue to emit events
+    for real-time UI updates.
+
+    Attributes:
+        WORK_ITEM_TOOLS: Set of tool names that modify work items.
+    """
+
+    WORK_ITEM_TOOLS = frozenset({
+        "work_item_add",
+        "work_item_update",
+        "work_item_set_artifact",
+        "work_item_flag_revision",
+    })
+
+    def __init__(self, ledger: WorkItemLedger) -> None:
+        """Initialize the middleware with a ledger reference.
+
+        Args:
+            ledger: The WorkItemLedger to read state from after tool calls.
+        """
+        self._ledger = ledger
+        self._pending_events: list[dict[str, Any]] = []
+
+    @property
+    def pending_events(self) -> list[dict[str, Any]]:
+        """Get the list of pending events."""
+        return self._pending_events
+
+    def drain_events(self) -> list[dict[str, Any]]:
+        """Drain and return all pending events.
+
+        Returns:
+            List of event data dictionaries. The list is cleared after draining.
+        """
+        events = self._pending_events.copy()
+        self._pending_events.clear()
+        return events
+
+    async def process(
+        self,
+        context: FunctionInvocationContext,
+        next: Callable[[FunctionInvocationContext], Any],
+    ) -> None:
+        """Process a function invocation, queueing events for work item tools.
+
+        Args:
+            context: The function invocation context.
+            next: The next handler in the middleware chain.
+        """
+        # Execute the tool
+        await next(context)
+
+        # If it was a work item tool, queue an event
+        if context.function.name in self.WORK_ITEM_TOOLS:
+            self._pending_events.append({
+                "tool": context.function.name,
+                "all_items": [
+                    {
+                        "id": item.id,
+                        "title": item.title,
+                        "status": item.status.value,
+                        "priority": item.priority.value,
+                        "artifact_role": item.artifact_role.value,
+                        "notes": item.notes,
+                        "requires_revision": item.requires_revision,
+                        "created_at": item.created_at,
+                        "updated_at": item.updated_at,
+                    }
+                    for item in self._ledger.items.values()
+                ],
+            })

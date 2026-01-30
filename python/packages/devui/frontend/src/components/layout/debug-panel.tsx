@@ -21,6 +21,11 @@ import {
   ChevronRight,
   ChevronDown,
   BarChart3,
+  ListTodo,
+  Clock,
+  Play,
+  Check,
+  SkipForward,
 } from "lucide-react";
 import { ContextInspector } from "@/components/features/agent/context-inspector";
 import type { ExtendedResponseStreamEvent, HarnessLifecycleEvent } from "@/types";
@@ -107,6 +112,19 @@ interface TraceGroup {
   traces: TraceNode[];
   totalDuration: number;
   entity_id?: string;
+}
+
+// Work item from harness deliverables_updated event
+interface WorkItem {
+  id: string;
+  title: string;
+  status: string; // "pending" | "in_progress" | "done" | "skipped"
+  priority: string; // "p0" | "p1" | "p2"
+  artifact_role: string;
+  notes: string | null;
+  requires_revision: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 interface DebugPanelProps {
@@ -1866,6 +1884,230 @@ function ToolEventItem({ event }: { event: ExtendedResponseStreamEvent }) {
   );
 }
 
+// Helper to get status icon for work items
+function getStatusIcon(status: string) {
+  switch (status) {
+    case "done":
+      return Check;
+    case "in_progress":
+      return Play;
+    case "skipped":
+      return SkipForward;
+    case "pending":
+    default:
+      return Clock;
+  }
+}
+
+// Helper to get status color for work items
+function getStatusColor(status: string) {
+  switch (status) {
+    case "done":
+      return "text-green-600 dark:text-green-400";
+    case "in_progress":
+      return "text-blue-600 dark:text-blue-400";
+    case "skipped":
+      return "text-gray-400 dark:text-gray-500";
+    case "pending":
+    default:
+      return "text-yellow-600 dark:text-yellow-400";
+  }
+}
+
+// Helper to get priority badge styling
+function getPriorityBadge(priority: string) {
+  switch (priority) {
+    case "p0":
+      return "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200";
+    case "p1":
+      return "bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200";
+    case "p2":
+    default:
+      return "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400";
+  }
+}
+
+// Extract work items from harness lifecycle events
+function extractWorkItems(events: ExtendedResponseStreamEvent[]): WorkItem[] {
+  // Find the most recent event with all_items (work_item_changed or deliverables_updated)
+  // work_item_changed events are emitted after each tool call for real-time updates
+  // deliverables_updated events are emitted at the end of each turn
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.type === "response.harness_lifecycle") {
+      const harnessEvent = event as HarnessLifecycleEvent;
+      if (
+        (harnessEvent.event_type === "work_item_changed" ||
+          harnessEvent.event_type === "deliverables_updated") &&
+        harnessEvent.data &&
+        Array.isArray(harnessEvent.data.all_items)
+      ) {
+        return harnessEvent.data.all_items as WorkItem[];
+      }
+    }
+  }
+  return [];
+}
+
+function TasksTab({ events }: { events: ExtendedResponseStreamEvent[] }) {
+  const workItems = extractWorkItems(events);
+
+  // Sort items: in_progress first, then pending, then done, then skipped
+  const statusOrder: Record<string, number> = {
+    in_progress: 0,
+    pending: 1,
+    done: 2,
+    skipped: 3,
+  };
+  const sortedItems = [...workItems].sort((a, b) => {
+    const statusDiff = (statusOrder[a.status] ?? 4) - (statusOrder[b.status] ?? 4);
+    if (statusDiff !== 0) return statusDiff;
+    // Secondary sort by priority (p0 first)
+    return a.priority.localeCompare(b.priority);
+  });
+
+  // Count items by status
+  const counts = workItems.reduce(
+    (acc, item) => {
+      acc[item.status] = (acc[item.status] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center gap-2 p-3 border-b">
+        <ListTodo className="h-4 w-4" />
+        <span className="font-medium">Tasks</span>
+        <Badge variant="outline">{workItems.length}</Badge>
+
+        {/* Status summary */}
+        {workItems.length > 0 && (
+          <div className="flex items-center gap-2 ml-auto text-xs">
+            {counts.done && (
+              <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
+                <Check className="h-3 w-3" />
+                {counts.done}
+              </span>
+            )}
+            {counts.in_progress && (
+              <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                <Play className="h-3 w-3" />
+                {counts.in_progress}
+              </span>
+            )}
+            {counts.pending && (
+              <span className="flex items-center gap-1 text-yellow-600 dark:text-yellow-400">
+                <Clock className="h-3 w-3" />
+                {counts.pending}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      <ScrollArea className="flex-1">
+        <div className="p-3">
+          {workItems.length === 0 ? (
+            <div className="text-center text-muted-foreground text-sm py-8">
+              No tasks yet. Work items will appear here when the agent creates them.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {sortedItems.map((item) => (
+                <TaskItem key={item.id} item={item} />
+              ))}
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}
+
+function TaskItem({ item }: { item: WorkItem }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const StatusIcon = getStatusIcon(item.status);
+  const statusColor = getStatusColor(item.status);
+  const hasDetails = item.notes || item.requires_revision;
+
+  return (
+    <div className="border rounded p-2 hover:bg-muted/50 transition-colors">
+      <div
+        className={`flex items-start gap-2 ${hasDetails ? "cursor-pointer" : ""}`}
+        onClick={() => hasDetails && setIsExpanded(!isExpanded)}
+      >
+        {/* Status icon */}
+        <div className={`mt-0.5 ${statusColor}`}>
+          <StatusIcon className="h-4 w-4" />
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span
+              className={`text-sm font-medium truncate ${
+                item.status === "skipped" ? "line-through text-muted-foreground" : ""
+              }`}
+            >
+              {item.title}
+            </span>
+            {item.requires_revision && (
+              <Badge variant="destructive" className="text-[10px] py-0 px-1">
+                needs revision
+              </Badge>
+            )}
+          </div>
+
+          {/* Meta row */}
+          <div className="flex items-center gap-2 mt-1">
+            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${getPriorityBadge(item.priority)}`}>
+              {item.priority.toUpperCase()}
+            </span>
+            <span className="text-[10px] text-muted-foreground font-mono">
+              {item.id}
+            </span>
+            {item.artifact_role !== "none" && (
+              <Badge variant="outline" className="text-[10px] py-0">
+                {item.artifact_role}
+              </Badge>
+            )}
+          </div>
+        </div>
+
+        {/* Expand indicator */}
+        {hasDetails && (
+          <div className="text-muted-foreground">
+            {isExpanded ? (
+              <ChevronDown className="h-3 w-3" />
+            ) : (
+              <ChevronRight className="h-3 w-3" />
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Expanded details */}
+      {isExpanded && hasDetails && (
+        <div className="mt-2 ml-6 p-2 bg-muted/30 rounded border text-xs">
+          {item.notes && (
+            <div className="mb-2">
+              <span className="font-medium text-muted-foreground">Notes:</span>
+              <p className="mt-1 whitespace-pre-wrap">{item.notes}</p>
+            </div>
+          )}
+          {item.updated_at && (
+            <div className="text-muted-foreground">
+              Updated: {new Date(item.updated_at).toLocaleString()}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DebugPanel({
   events,
   isStreaming = false,
@@ -1882,35 +2124,44 @@ export function DebugPanel({
     const tracesCount = events.filter(e => e.type === "response.trace.completed").length;
     const toolsCount = processedEvents.filter(e => e.type === "response.function_call.complete").length
       + events.filter(e => getFunctionResultFromEvent(e) !== null).length;
-    return { eventsCount, tracesCount, toolsCount };
+    const tasksCount = extractWorkItems(events).length;
+    return { eventsCount, tracesCount, toolsCount, tasksCount };
   }, [events]);
 
   return (
     <div className="flex-1 border-l flex flex-col min-h-0">
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "events" | "traces" | "tools")} className="flex-1 flex flex-col min-h-0">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "events" | "traces" | "tools" | "tasks")} className="flex-1 flex flex-col min-h-0">
         <div className="px-3 pt-3 flex items-center gap-2 flex-shrink-0">
-          <TabsList className="flex-1">
-            <TabsTrigger value="events" className="flex-1 gap-1.5">
+          <TabsList className="flex-1 grid grid-cols-4">
+            <TabsTrigger value="events" className="gap-1 text-xs px-2">
               Events
               {counts.eventsCount > 0 && (
-                <span className="text-[10px] bg-muted-foreground/20 text-muted-foreground px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center">
+                <span className="text-[9px] bg-muted-foreground/20 text-muted-foreground px-1 py-0.5 rounded-full min-w-[1rem] text-center">
                   {counts.eventsCount}
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="traces" className="flex-1 gap-1.5">
+            <TabsTrigger value="traces" className="gap-1 text-xs px-2">
               Traces
               {counts.tracesCount > 0 && (
-                <span className="text-[10px] bg-muted-foreground/20 text-muted-foreground px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center">
+                <span className="text-[9px] bg-muted-foreground/20 text-muted-foreground px-1 py-0.5 rounded-full min-w-[1rem] text-center">
                   {counts.tracesCount}
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="tools" className="flex-1 gap-1.5">
+            <TabsTrigger value="tools" className="gap-1 text-xs px-2">
               Tools
               {counts.toolsCount > 0 && (
-                <span className="text-[10px] bg-muted-foreground/20 text-muted-foreground px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center">
+                <span className="text-[9px] bg-muted-foreground/20 text-muted-foreground px-1 py-0.5 rounded-full min-w-[1rem] text-center">
                   {counts.toolsCount}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="tasks" className="gap-1 text-xs px-2">
+              Tasks
+              {counts.tasksCount > 0 && (
+                <span className="text-[9px] bg-muted-foreground/20 text-muted-foreground px-1 py-0.5 rounded-full min-w-[1rem] text-center">
+                  {counts.tasksCount}
                 </span>
               )}
             </TabsTrigger>
@@ -1938,6 +2189,10 @@ export function DebugPanel({
 
         <TabsContent value="tools" className="flex-1 mt-0 overflow-hidden">
           <ToolsTab events={events} />
+        </TabsContent>
+
+        <TabsContent value="tasks" className="flex-1 mt-0 overflow-hidden">
+          <TasksTab events={events} />
         </TabsContent>
       </Tabs>
     </div>

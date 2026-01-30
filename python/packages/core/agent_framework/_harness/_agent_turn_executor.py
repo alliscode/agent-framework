@@ -27,7 +27,7 @@ from ._state import HarnessEvent, HarnessLifecycleEvent, RepairComplete, TurnCom
 
 if TYPE_CHECKING:
     from ._compaction import CompactionPlan
-    from ._work_items import WorkItemLedger, WorkItemTaskListProtocol
+    from ._work_items import WorkItemEventMiddleware, WorkItemLedger, WorkItemTaskListProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +87,12 @@ class AgentTurnExecutor(Executor):
         self._continuation_prompt = continuation_prompt or self.DEFAULT_CONTINUATION_PROMPT
         self._enable_compaction = enable_compaction
         self._task_list = task_list
+
+        # Create work item event middleware if task_list is provided
+        self._work_item_middleware: "WorkItemEventMiddleware | None" = None
+        if task_list is not None:
+            from ._work_items import WorkItemEventMiddleware
+            self._work_item_middleware = WorkItemEventMiddleware(task_list.ledger)
 
     @handler
     async def run_turn(self, trigger: RepairComplete, ctx: WorkflowContext[TurnComplete]) -> None:
@@ -254,9 +260,11 @@ class AgentTurnExecutor(Executor):
         # This prevents conflicts when DevUI passes its own thread
         run_kwargs = {k: v for k, v in run_kwargs.items() if k != "thread"}
 
-        # Inject work item tools if task_list is set
+        # Inject work item tools and middleware if task_list is set
         if self._task_list is not None:
             run_kwargs["tools"] = self._task_list.get_tools()
+            if self._work_item_middleware is not None:
+                run_kwargs["middleware"] = self._work_item_middleware
 
         # Apply compaction if enabled and plan exists
         messages_to_send = await self._get_messages_for_agent(ctx)
@@ -267,6 +275,9 @@ class AgentTurnExecutor(Executor):
             **run_kwargs,
         )
         await ctx.add_event(AgentRunEvent(self.id, response))
+
+        # Emit work item change events (real-time updates)
+        await self._emit_work_item_events(ctx)
 
         # Update cache with response messages (full cache, not compacted)
         self._cache.extend(response.messages)
@@ -290,9 +301,11 @@ class AgentTurnExecutor(Executor):
         # This prevents conflicts when DevUI passes its own thread
         run_kwargs = {k: v for k, v in run_kwargs.items() if k != "thread"}
 
-        # Inject work item tools if task_list is set
+        # Inject work item tools and middleware if task_list is set
         if self._task_list is not None:
             run_kwargs["tools"] = self._task_list.get_tools()
+            if self._work_item_middleware is not None:
+                run_kwargs["middleware"] = self._work_item_middleware
 
         # Apply compaction if enabled and plan exists
         messages_to_send = await self._get_messages_for_agent(ctx)
@@ -315,6 +328,9 @@ class AgentTurnExecutor(Executor):
                 content_types,
             )
             await ctx.add_event(AgentRunUpdateEvent(self.id, update))
+
+        # Emit work item change events (real-time updates)
+        await self._emit_work_item_events(ctx)
 
         # Build the final response
         if isinstance(self._agent, ChatAgent):
@@ -787,6 +803,31 @@ class AgentTurnExecutor(Executor):
             f"({len(ledger.get_incomplete_items())} items remaining)"
         )
 
+    async def _emit_work_item_events(self, ctx: WorkflowContext[Any]) -> None:
+        """Emit events for work item changes captured by the middleware.
+
+        This drains the middleware's event queue and emits each change as a
+        HarnessLifecycleEvent for real-time UI updates.
+
+        Args:
+            ctx: Workflow context for event emission.
+        """
+        if self._work_item_middleware is None:
+            return
+
+        events = self._work_item_middleware.drain_events()
+        for event_data in events:
+            await ctx.add_event(
+                HarnessLifecycleEvent(
+                    event_type="work_item_changed",
+                    data=event_data,
+                ),
+            )
+            logger.debug(
+                "AgentTurnExecutor: Emitted work_item_changed event for tool %s",
+                event_data.get("tool", "unknown"),
+            )
+
     async def _sync_work_item_ledger(self, ctx: WorkflowContext[Any]) -> None:
         """Sync the work item ledger to SharedState after each turn.
 
@@ -799,7 +840,7 @@ class AgentTurnExecutor(Executor):
         ledger = self._task_list.ledger
         await ctx.set_shared_state(HARNESS_WORK_ITEM_LEDGER_KEY, ledger.to_dict())
 
-        # Emit progress event whenever ledger has items (progress bar + deliverables)
+        # Emit progress event whenever ledger has items (progress bar + deliverables + all items)
         if ledger.items:
             deliverables = ledger.get_deliverables()
             total_items = len(ledger.items)
@@ -821,6 +862,21 @@ class AgentTurnExecutor(Executor):
                                 "content": i.artifact,
                             }
                             for i in deliverables
+                        ],
+                        # Full work item list for Tasks tab in DevUI
+                        "all_items": [
+                            {
+                                "id": item.id,
+                                "title": item.title,
+                                "status": item.status.value,
+                                "priority": item.priority.value,
+                                "artifact_role": item.artifact_role.value,
+                                "notes": item.notes,
+                                "requires_revision": item.requires_revision,
+                                "created_at": item.created_at,
+                                "updated_at": item.updated_at,
+                            }
+                            for item in ledger.items.values()
                         ],
                     },
                 )
