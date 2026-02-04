@@ -186,8 +186,7 @@ class SerializationMixin:
             #     "type": "chat_message_store_state",
             #     "messages": [
             #         {"type": "chat_message", "role": {...}, "contents": [...]},
-            #         {"type": "chat_message", "role": {...}, "contents": [...]}
-            #     ]
+            #         {"type": "chat_message", "role": {...}, "contents": [...]}]
             # }
 
             # AgentThreadState contains nested ChatMessageStoreState
@@ -212,7 +211,7 @@ class SerializationMixin:
 
 
             class WeatherTool(BaseTool):
-                \"\"\"Example tool that extends BaseTool with additional properties exclusion.\"\"\"
+                \"\"\"Example tool that extends BaseTool with additional properties exclusion.\"\"
 
                 # Inherits DEFAULT_EXCLUDE = {"additional_properties"} from BaseTool
 
@@ -244,7 +243,7 @@ class SerializationMixin:
 
 
             class CustomAgent(BaseAgent):
-                \"\"\"Custom agent extending BaseAgent with additional functionality.\"\"\"
+                \"\"\"Custom agent extending BaseAgent with additional functionality.\"\"
 
                 # Inherits DEFAULT_EXCLUDE = {"additional_properties"} from BaseAgent
 
@@ -386,7 +385,7 @@ class SerializationMixin:
         Returns:
             JSON string representation of the instance.
         """
-        return json.dumps(self.to_dict(exclude=exclude, exclude_none=exclude_none), **kwargs)
+        return json.dumps(self.to_dict(exclude=exclude, exclude_none=exclude_none), ensure_ascii=False, **kwargs)
 
     @classmethod
     def from_dict(

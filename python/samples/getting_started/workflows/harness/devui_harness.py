@@ -9,9 +9,10 @@ interactive testing and debugging. The harness provides:
 - Task contract verification (optional)
 - Context compaction (optional) - production-quality context management
 - Work item tracking (optional) - self-critique loop for multi-step tasks
+- MCP tool integration (optional) - connect to MCP servers for additional tools
 
 Usage:
-    python devui_harness.py [--sandbox PATH] [--port PORT] [--compaction] [--work-items]
+    python devui_harness.py [--sandbox PATH] [--port PORT] [--compaction] [--work-items] [--mcp NAME COMMAND ARGS...]
 
 Examples:
     # Basic usage
@@ -25,14 +26,22 @@ Examples:
 
     # With both compaction and work items
     python devui_harness.py --compaction --work-items
+
+    # With an MCP stdio server
+    python devui_harness.py --mcp compose compose mcp /path/to/project.json
+
+    # With multiple MCP servers
+    python devui_harness.py --mcp filesystem npx -y @modelcontextprotocol/server-filesystem /tmp --mcp compose compose mcp /path/to/project.json
 """
 
 import argparse
+import asyncio
 import logging
 import tempfile
 from pathlib import Path
 from typing import Any
 
+from agent_framework import MCPStdioTool
 from agent_framework._harness import (
     AgentHarness,
     InMemoryArtifactStore,
@@ -118,6 +127,7 @@ def create_harness_agent(
     sandbox_dir: Path,
     enable_compaction: bool = False,
     enable_work_items: bool = False,
+    mcp_tools: list[MCPStdioTool] | None = None,
 ) -> AgentHarness:
     """Create a harness-wrapped agent with coding tools.
 
@@ -129,10 +139,17 @@ def create_harness_agent(
         sandbox_dir: Directory for agent workspace.
         enable_compaction: Whether to enable production context compaction.
         enable_work_items: Whether to enable work item tracking (self-critique loop).
+        mcp_tools: Optional list of connected MCP tools to add to the agent.
     """
     # Create tools sandboxed to the directory
     tools = CodingTools(sandbox_dir)
     all_tools = tools.get_tools() + [get_task_complete_tool()]
+
+    # Add MCP tool functions if provided
+    if mcp_tools:
+        for mcp_tool in mcp_tools:
+            all_tools.extend(mcp_tool.functions)
+            print(f"Added {len(mcp_tool.functions)} tools from MCP server '{mcp_tool.name}'")
 
     # Create the underlying agent
     chat_client = AzureOpenAIChatClient(credential=AzureCliCredential())
@@ -182,7 +199,44 @@ def create_harness_agent(
     return harness
 
 
+def _connect_mcp_tools_sync(mcp_tools: list[MCPStdioTool]) -> list[MCPStdioTool]:
+    """Connect MCP tools synchronously before starting the event loop.
+
+    This runs the async connect() in an event loop, keeping the connections
+    alive for use with DevUI's event loop.
+
+    Args:
+        mcp_tools: List of MCP tools to connect.
+
+    Returns:
+        List of successfully connected MCP tools.
+    """
+    connected: list[MCPStdioTool] = []
+
+    async def connect_all():
+        for mcp_tool in mcp_tools:
+            try:
+                await mcp_tool.connect()
+                connected.append(mcp_tool)
+                print(f"Connected to MCP server '{mcp_tool.name}' - {len(mcp_tool.functions)} tools available")
+            except Exception as e:
+                print(f"Error connecting to MCP server '{mcp_tool.name}': {e}")
+
+    # Get or create event loop and run connection
+    # Note: We don't close the loop to keep MCP connections alive
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    loop.run_until_complete(connect_all())
+
+    return connected
+
+
 def main():
+    """Entry point for the DevUI harness."""
     parser = argparse.ArgumentParser(description="Run coding agent harness in DevUI")
     parser.add_argument(
         "--sandbox",
@@ -206,6 +260,13 @@ def main():
         action="store_true",
         help="Enable work item tracking (self-critique loop)",
     )
+    parser.add_argument(
+        "--mcp",
+        action="append",
+        nargs="+",
+        metavar=("NAME", "COMMAND"),
+        help="Add MCP stdio server: --mcp NAME COMMAND [ARGS...] (can be repeated)",
+    )
     args = parser.parse_args()
 
     # Determine sandbox directory
@@ -219,11 +280,37 @@ def main():
         sandbox_dir = Path(temp_dir)
         print(f"Using temp sandbox: {sandbox_dir}")
 
-    # Create the harness-wrapped agent
+    # Parse and create MCP tools
+    mcp_tools: list[MCPStdioTool] = []
+    if args.mcp:
+        for mcp_args in args.mcp:
+            if len(mcp_args) < 2:
+                print(f"Error: --mcp requires at least NAME and COMMAND, got: {mcp_args}")
+                return
+            name = mcp_args[0]
+            command = mcp_args[1]
+            command_args = mcp_args[2:] if len(mcp_args) > 2 else []
+            mcp_tool = MCPStdioTool(
+                name=name,
+                command=command,
+                args=command_args,
+                description=f"MCP server: {name}",
+                approval_mode="never_require",
+            )
+            mcp_tools.append(mcp_tool)
+            print(f"Configured MCP server '{name}': {command} {' '.join(command_args)}")
+
+    # Connect MCP tools before starting DevUI
+    connected_tools: list[MCPStdioTool] = []
+    if mcp_tools:
+        connected_tools = _connect_mcp_tools_sync(mcp_tools)
+
+    # Create the harness-wrapped agent with MCP tools
     harness = create_harness_agent(
         sandbox_dir,
         enable_compaction=args.compaction,
         enable_work_items=args.work_items,
+        mcp_tools=connected_tools if connected_tools else None,
     )
 
     # Wrap with MarkdownRenderer when work items are enabled
@@ -242,9 +329,11 @@ def main():
         print("Markdown renderer: ENABLED (activity verbs, progress bars)")
     else:
         print("Work item tracking: disabled")
+    if connected_tools:
+        total_mcp_tools = sum(len(t.functions) for t in connected_tools)
+        print(f"MCP servers: {len(connected_tools)} connected ({total_mcp_tools} tools)")
 
     # Launch DevUI with the harness
-    # Note: AgentHarness has run_stream(message) method that DevUI can call directly
     serve(
         entities=[harness],
         port=args.port,
