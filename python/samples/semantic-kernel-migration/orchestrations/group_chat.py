@@ -175,7 +175,7 @@ async def sk_agent_response_callback(message: ChatMessageContent | Sequence[Chat
     elif isinstance(message, Sequence) and not isinstance(message, (str, bytes)):
         messages = list(message)
     else:
-        messages = [cast(ChatMessageContent, message)]
+        messages = [cast("ChatMessageContent", message)]
 
     for item in messages:
         print(f"# {item.name}\n{item.content}\n")

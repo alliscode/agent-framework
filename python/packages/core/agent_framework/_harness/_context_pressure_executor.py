@@ -83,9 +83,7 @@ class ContextPressureExecutor(Executor):
         self._soft_threshold_percent = soft_threshold_percent
 
     @handler
-    async def check_pressure(
-        self, trigger: RepairComplete, ctx: WorkflowContext[ContextPressureComplete]
-    ) -> None:
+    async def check_pressure(self, trigger: RepairComplete, ctx: WorkflowContext[ContextPressureComplete]) -> None:
         """Check context pressure and apply strategies if needed.
 
         Args:
@@ -102,19 +100,16 @@ class ContextPressureExecutor(Executor):
         # 3. Check if under pressure
         if not budget.is_under_pressure:
             logger.debug(
-                f"ContextPressureExecutor: Under budget "
-                f"({budget.current_estimate}/{budget.soft_threshold} tokens)"
+                f"ContextPressureExecutor: Under budget ({budget.current_estimate}/{budget.soft_threshold} tokens)",
             )
             await self._save_budget(ctx, budget)
-            await ctx.send_message(
-                ContextPressureComplete(repairs_made=trigger.repairs_made)
-            )
+            await ctx.send_message(ContextPressureComplete(repairs_made=trigger.repairs_made))
             return
 
         logger.info(
             f"ContextPressureExecutor: Context pressure detected "
             f"({budget.current_estimate}/{budget.soft_threshold} tokens, "
-            f"{budget.tokens_over_threshold} over threshold)"
+            f"{budget.tokens_over_threshold} over threshold)",
         )
 
         # 4. Try strategies in order until pressure is relieved
@@ -132,7 +127,7 @@ class ContextPressureExecutor(Executor):
 
             logger.info(
                 f"ContextPressureExecutor: Applying strategy {strategy.name} "
-                f"(estimated {plan.estimated_token_reduction} tokens)"
+                f"(estimated {plan.estimated_token_reduction} tokens)",
             )
 
             # Apply the edit plan
@@ -151,7 +146,7 @@ class ContextPressureExecutor(Executor):
             if not budget.is_under_pressure:
                 logger.info(
                     f"ContextPressureExecutor: Pressure relieved "
-                    f"(now at {budget.current_estimate}/{budget.soft_threshold} tokens)"
+                    f"(now at {budget.current_estimate}/{budget.soft_threshold} tokens)",
                 )
                 break
 
@@ -164,7 +159,7 @@ class ContextPressureExecutor(Executor):
                 repairs_made=trigger.repairs_made,
                 edits_applied=total_edits,
                 tokens_freed=total_tokens_freed,
-            )
+            ),
         )
 
     async def _get_or_create_budget(self, ctx: WorkflowContext[Any]) -> TokenBudget:
@@ -179,7 +174,7 @@ class ContextPressureExecutor(Executor):
         try:
             budget_data = await ctx.get_shared_state(HARNESS_TOKEN_BUDGET_KEY)
             if budget_data and isinstance(budget_data, dict):
-                return TokenBudget.from_dict(cast(dict[str, Any], budget_data))
+                return TokenBudget.from_dict(cast("dict[str, Any]", budget_data))
         except KeyError:
             pass
 
@@ -255,9 +250,7 @@ class ContextPressureExecutor(Executor):
             await self._apply_drop_edit(edit, transcript)
         # Note: ExternalizeEdit would require file system access - deferred to future
 
-    async def _apply_clear_edit(
-        self, edit: ClearEdit, transcript: list[dict[str, Any]]
-    ) -> None:
+    async def _apply_clear_edit(self, edit: ClearEdit, transcript: list[dict[str, Any]]) -> None:
         """Apply a clear edit to the transcript.
 
         Args:
@@ -285,9 +278,7 @@ class ContextPressureExecutor(Executor):
                 "placeholder": placeholder,
             }
 
-    async def _apply_compact_edit(
-        self, edit: CompactEdit, transcript: list[dict[str, Any]]
-    ) -> None:
+    async def _apply_compact_edit(self, edit: CompactEdit, transcript: list[dict[str, Any]]) -> None:
         """Apply a compact edit to the transcript.
 
         This creates a summary of the compacted content and replaces it
@@ -327,9 +318,7 @@ class ContextPressureExecutor(Executor):
         # Replace compacted events with summary
         transcript[start:end] = [summary_event.to_dict()]
 
-    async def _apply_drop_edit(
-        self, edit: DropEdit, transcript: list[dict[str, Any]]
-    ) -> None:
+    async def _apply_drop_edit(self, edit: DropEdit, transcript: list[dict[str, Any]]) -> None:
         """Apply a drop edit to the transcript.
 
         Args:
@@ -444,9 +433,7 @@ class ContextPressureExecutor(Executor):
 
         return ". ".join(parts) + "." if parts else "Previous conversation compacted."
 
-    async def _record_edit(
-        self, ctx: WorkflowContext[Any], plan: ContextEditPlan, strategy_name: str
-    ) -> None:
+    async def _record_edit(self, ctx: WorkflowContext[Any], plan: ContextEditPlan, strategy_name: str) -> None:
         """Record a context edit in the history.
 
         Args:

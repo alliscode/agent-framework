@@ -3,6 +3,7 @@
 import ast
 import asyncio
 import os
+import pathlib
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -47,7 +48,7 @@ Installation:
 DIR = os.path.dirname(__file__)
 TEMP_DIR = os.path.join(DIR, "tmp")
 # Ensure the temporary directory exists
-os.makedirs(TEMP_DIR, exist_ok=True)
+pathlib.Path(TEMP_DIR).mkdir(exist_ok=True, parents=True)
 
 # Define a key for the shared state to store the data to be processed
 SHARED_STATE_DATA_KEY = "data_to_be_processed"
@@ -55,8 +56,6 @@ SHARED_STATE_DATA_KEY = "data_to_be_processed"
 
 class SplitCompleted:
     """Marker type published when splitting finishes. Triggers map executors."""
-
-    ...
 
 
 class Split(Executor):
@@ -180,7 +179,7 @@ class Shuffle(Executor):
         # Load all intermediate pairs.
         map_results: list[tuple[str, int]] = []
         for result in data:
-            async with aiofiles.open(result.file_path, "r") as f:
+            async with aiofiles.open(result.file_path) as f:
                 map_results.extend([
                     (line.strip().split(": ")[0], int(line.strip().split(": ")[1])) for line in await f.readlines()
                 ])
@@ -231,7 +230,7 @@ class Reduce(Executor):
             return
 
         # Read grouped values from the shuffle output.
-        async with aiofiles.open(data.file_path, "r") as f:
+        async with aiofiles.open(data.file_path) as f:
             lines = await f.readlines()
 
         # Sum values per key. Values are serialized Python lists like [1, 1, ...].
@@ -325,7 +324,7 @@ async def main():
         print("Tip: Install 'viz' extra to export workflow visualization: pip install agent-framework[viz] --pre")
 
     # Step 3: Open the text file and read its content.
-    async with aiofiles.open(os.path.join(DIR, "../resources", "long_text.txt"), "r") as f:
+    async with aiofiles.open(os.path.join(DIR, "../resources", "long_text.txt")) as f:
         raw_text = await f.read()
 
     # Step 4: Run the workflow with the raw text as input.

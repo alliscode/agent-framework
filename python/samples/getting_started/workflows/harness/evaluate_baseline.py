@@ -15,8 +15,8 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from agent_framework.azure import AzureOpenAIChatClient
 from agent_framework._types import ChatMessage
+from agent_framework.azure import AzureOpenAIChatClient
 from azure.identity import AzureCliCredential
 
 DEFAULT_PROMPT = """\
@@ -83,7 +83,7 @@ async def run_baseline(prompt: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run baseline agent (no harness) for comparison"
+        description="Run baseline agent (no harness) for comparison",
     )
     parser.add_argument("--prompt", type=str, default=None)
     parser.add_argument("--prompt-file", type=str, default=None)

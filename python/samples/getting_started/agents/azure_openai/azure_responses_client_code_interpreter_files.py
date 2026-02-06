@@ -1,7 +1,7 @@
 # Copyright (c) Microsoft. All rights reserved.
 
 import asyncio
-import os
+import pathlib
 import tempfile
 
 from agent_framework import ChatAgent, HostedCodeInterpreterTool
@@ -37,7 +37,7 @@ Frank Wilson,Engineering,88000,6
 
     # Upload file to Azure OpenAI
     print("Uploading file to Azure OpenAI...")
-    with open(temp_file_path, "rb") as file:
+    with pathlib.Path(temp_file_path).open("rb") as file:
         uploaded_file = await openai_client.files.create(
             file=file,
             purpose="assistants",  # Required for code interpreter
@@ -54,7 +54,7 @@ async def cleanup_files(openai_client: AsyncAzureOpenAI, temp_file_path: str, fi
     print(f"Cleaned up uploaded file: {file_id}")
 
     # Clean up temporary local file
-    os.unlink(temp_file_path)
+    pathlib.Path(temp_file_path).unlink()
     print(f"Cleaned up temporary file: {temp_file_path}")
 
 

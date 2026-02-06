@@ -173,24 +173,24 @@ class SmsRelay:
             whatsapp_channel_id: Channel Registration ID for WhatsApp Business Account.
         """
         self.connection_string = connection_string or os.environ.get(
-            "AZURE_COMMUNICATION_CONNECTION_STRING"
+            "AZURE_COMMUNICATION_CONNECTION_STRING",
         )
         self.from_phone_number = from_phone_number or os.environ.get(
-            "AZURE_COMMUNICATION_SMS_FROM_NUMBER"
+            "AZURE_COMMUNICATION_SMS_FROM_NUMBER",
         )
         whatsapp_id = whatsapp_channel_id or os.environ.get("WHATSAPP_CHANNEL_ID")
         # Strip quotes and whitespace that might come from .env file
         self.whatsapp_channel_id = whatsapp_id.strip().strip('"').strip("'") if whatsapp_id else None
-        
+
         logger.info(f"WhatsApp Channel ID from config: {self.whatsapp_channel_id}")
 
         if not self.connection_string:
             raise ValueError(
-                "Connection string required. Set AZURE_COMMUNICATION_CONNECTION_STRING"
+                "Connection string required. Set AZURE_COMMUNICATION_CONNECTION_STRING",
             )
         if not self.from_phone_number:
             raise ValueError(
-                "From phone number required. Set AZURE_COMMUNICATION_SMS_FROM_NUMBER"
+                "From phone number required. Set AZURE_COMMUNICATION_SMS_FROM_NUMBER",
             )
 
         # Lazy import to allow running without azure SDK for testing
@@ -205,16 +205,16 @@ class SmsRelay:
                 from azure.communication.messages import NotificationMessagesClient
 
                 self._whatsapp_client = NotificationMessagesClient.from_connection_string(
-                    self.connection_string
+                    self.connection_string,
                 )
                 logger.info(f"WhatsApp client initialized. Channel ID: {self.whatsapp_channel_id}")
             except ImportError:
                 logger.warning(
                     "azure-communication-messages package not installed. "
-                    "WhatsApp support disabled. Install with: pip install azure-communication-messages"
+                    "WhatsApp support disabled. Install with: pip install azure-communication-messages",
                 )
             except Exception as e:
-                logger.error(f"Failed to initialize WhatsApp client: {e}")
+                logger.error("Failed to initialize WhatsApp client: %s", e)
         else:
             logger.warning("No WHATSAPP_CHANNEL_ID configured - WhatsApp sending disabled")
 
@@ -238,7 +238,7 @@ class SmsRelay:
         return self._queues[phone_number]
 
     async def handle_inbound_message(
-        self, from_number: str, to_number: str, message: str, channel: str = "sms"
+        self, from_number: str, to_number: str, message: str, channel: str = "sms",
     ) -> SmsMessage:
         """Handle an inbound SMS or WhatsApp message.
 
@@ -332,7 +332,7 @@ class SmsRelay:
             return msg
 
         except Exception as e:
-            logger.error(f"Error sending SMS to {to_number}: {e}")
+            logger.error("Error sending SMS to %s: %s", to_number, e)
             return None
 
     def send_whatsapp(self, to_number: str, message: str) -> SmsMessage | None:
@@ -386,7 +386,7 @@ class SmsRelay:
             return msg
 
         except Exception as e:
-            logger.error(f"Error sending WhatsApp to {to_number}: {e}")
+            logger.error("Error sending WhatsApp to %s: %s", to_number, e)
             # Store the last error for better error reporting
             self._last_whatsapp_error = str(e)
             return None
@@ -447,7 +447,7 @@ class SmsRelay:
                     template_text = MessageTemplateText(name=name, text=text)
                     template_text_values.append(template_text)
                     binding_components.append(
-                        WhatsAppMessageTemplateBindingsComponent(ref_value=name)
+                        WhatsAppMessageTemplateBindingsComponent(ref_value=name),
                     )
 
                 template.template_values = template_text_values
@@ -480,11 +480,11 @@ class SmsRelay:
             )
 
             self._all_messages.append(msg)
-            logger.info(f"WhatsApp template '{template_name}' sent to {to_number}")
+            logger.info("WhatsApp template '%s' sent to %s", template_name, to_number)
             return msg
 
         except Exception as e:
-            logger.error(f"Error sending WhatsApp template to {to_number}: {e}")
+            logger.error("Error sending WhatsApp template to %s: %s", to_number, e)
             return None
 
     def get_messages(
@@ -601,7 +601,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
             # CloudEvents OPTIONS validation
             if request.method == "OPTIONS":
                 webhook_origin = request.headers.get("WebHook-Request-Origin", "")
-                logger.info(f"CloudEvents OPTIONS validation from: {webhook_origin}")
+                logger.info("CloudEvents OPTIONS validation from: %s", webhook_origin)
                 return web.Response(
                     status=200,
                     headers={
@@ -621,7 +621,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
                 # Validation handshake
                 if event_type == "Microsoft.EventGrid.SubscriptionValidationEvent":
                     validation_code = event["data"]["validationCode"]
-                    logger.info(f"Event Grid validation - code: {validation_code}")
+                    logger.info("Event Grid validation - code: %s", validation_code)
                     return web.json_response({"validationResponse": validation_code})
 
                 # SMS received
@@ -640,7 +640,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
                 if event_type == "Microsoft.Communication.SMSDeliveryReportReceived":
                     data = event.get("data", {})
                     logger.info(
-                        f"Delivery report: {data.get('deliveryStatus')} for {data.get('to')}"
+                        f"Delivery report: {data.get('deliveryStatus')} for {data.get('to')}",
                     )
                     return web.Response(status=200, text="OK")
 
@@ -650,7 +650,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
 
                 if event_type == "Microsoft.EventGrid.SubscriptionValidationEvent":
                     validation_code = body.get("data", {}).get("validationCode", "")
-                    logger.info(f"CloudEvents validation - code: {validation_code}")
+                    logger.info("CloudEvents validation - code: %s", validation_code)
                     return web.json_response({"validationResponse": validation_code})
 
                 if event_type == "Microsoft.Communication.SMSReceived":
@@ -670,7 +670,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
             logger.error("Invalid JSON in webhook request")
             return web.Response(status=400, text="Invalid JSON")
         except Exception as e:
-            logger.error(f"Webhook error: {e}")
+            logger.error("Webhook error: %s", e)
             return web.Response(status=500, text="Internal error")
 
     async def handle_whatsapp_webhook(request: web.Request) -> web.Response:
@@ -679,7 +679,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
             # CloudEvents OPTIONS validation
             if request.method == "OPTIONS":
                 webhook_origin = request.headers.get("WebHook-Request-Origin", "")
-                logger.info(f"CloudEvents OPTIONS validation (WhatsApp) from: {webhook_origin}")
+                logger.info("CloudEvents OPTIONS validation (WhatsApp) from: %s", webhook_origin)
                 return web.Response(
                     status=200,
                     headers={
@@ -699,7 +699,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
                 # Validation handshake
                 if event_type == "Microsoft.EventGrid.SubscriptionValidationEvent":
                     validation_code = event["data"]["validationCode"]
-                    logger.info(f"Event Grid validation (WhatsApp) - code: {validation_code}")
+                    logger.info("Event Grid validation (WhatsApp) - code: %s", validation_code)
                     return web.json_response({"validationResponse": validation_code})
 
                 # WhatsApp message received
@@ -712,7 +712,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
 
                     if from_number and content:
                         await relay.handle_inbound_message(
-                            from_number, to_number, content, channel=channel_type
+                            from_number, to_number, content, channel=channel_type,
                         )
 
                     return web.Response(status=200, text="OK")
@@ -722,7 +722,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
                     data = event.get("data", {})
                     status = data.get("status", "")
                     message_id = data.get("messageId", "")
-                    logger.info(f"WhatsApp delivery status: {status} for message {message_id}")
+                    logger.info("WhatsApp delivery status: %s for message %s", status, message_id)
                     return web.Response(status=200, text="OK")
 
             # CloudEvents schema (single object)
@@ -731,7 +731,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
 
                 if event_type == "Microsoft.EventGrid.SubscriptionValidationEvent":
                     validation_code = body.get("data", {}).get("validationCode", "")
-                    logger.info(f"CloudEvents validation (WhatsApp) - code: {validation_code}")
+                    logger.info("CloudEvents validation (WhatsApp) - code: %s", validation_code)
                     return web.json_response({"validationResponse": validation_code})
 
                 if event_type == "Microsoft.Communication.AdvancedMessageReceived":
@@ -743,7 +743,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
 
                     if from_number and content:
                         await relay.handle_inbound_message(
-                            from_number, to_number, content, channel=channel_type
+                            from_number, to_number, content, channel=channel_type,
                         )
 
                     return web.Response(status=200, text="OK")
@@ -752,7 +752,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
                     data = body.get("data", {})
                     status = data.get("status", "")
                     message_id = data.get("messageId", "")
-                    logger.info(f"WhatsApp delivery status: {status} for message {message_id}")
+                    logger.info("WhatsApp delivery status: %s for message %s", status, message_id)
                     return web.Response(status=200, text="OK")
 
             return web.Response(status=200, text="OK")
@@ -761,7 +761,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
             logger.error("Invalid JSON in WhatsApp webhook request")
             return web.Response(status=400, text="Invalid JSON")
         except Exception as e:
-            logger.error(f"WhatsApp webhook error: {e}")
+            logger.error("WhatsApp webhook error: %s", e)
             return web.Response(status=500, text="Internal error")
 
     async def handle_send(request: web.Request) -> web.Response:
@@ -789,8 +789,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
                     "message_id": result.id,
                     "delivered": result.delivered,
                 })
-            else:
-                return web.json_response({"success": False, "error": "Failed to send"}, status=500)
+            return web.json_response({"success": False, "error": "Failed to send"}, status=500)
 
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
@@ -828,13 +827,12 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
                     "channel": "whatsapp",
                     "delivered": result.delivered,
                 })
-            else:
-                error_detail = relay.get_last_whatsapp_error() or "Failed to send WhatsApp message"
-                return web.json_response({
-                    "success": False,
-                    "error": error_detail,
-                    "hint": "If 24h window expired, send a template message first via /send/whatsapp/template",
-                }, status=500)
+            error_detail = relay.get_last_whatsapp_error() or "Failed to send WhatsApp message"
+            return web.json_response({
+                "success": False,
+                "error": error_detail,
+                "hint": "If 24h window expired, send a template message first via /send/whatsapp/template",
+            }, status=500)
 
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
@@ -896,8 +894,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
                     "template": template_name,
                     "delivered": result.delivered,
                 })
-            else:
-                return web.json_response({"success": False, "error": "Failed to send WhatsApp template"}, status=500)
+            return web.json_response({"success": False, "error": "Failed to send WhatsApp template"}, status=500)
 
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
@@ -949,7 +946,7 @@ def create_relay_app(relay: SmsRelay, api_key: str) -> web.Application:
 
         if phone_number:
             queue = relay.subscribe_phone(phone_number)
-            logger.info(f"WebSocket connected for phone: {phone_number}")
+            logger.info("WebSocket connected for phone: %s", phone_number)
         else:
             queue = relay.subscribe_global()
             logger.info("WebSocket connected (global)")
@@ -1101,9 +1098,9 @@ def main():
 
     app = create_relay_app(relay, api_key)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("Messaging Relay Service Starting")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"From Number: {relay.from_phone_number}")
     if relay.whatsapp_channel_id:
         print(f"WhatsApp Channel ID: {relay.whatsapp_channel_id}")
@@ -1111,7 +1108,7 @@ def main():
         print("WhatsApp: Not configured (set WHATSAPP_CHANNEL_ID to enable)")
     print(f"\n** API Key: {api_key} **")
     print(f"   (Use header: {API_KEY_HEADER}: {api_key})")
-    print(f"\nEndpoints (🔒 = requires API key):")
+    print("\nEndpoints (🔒 = requires API key):")
     print(f"  SMS Webhook:       POST http://0.0.0.0:{args.port}/sms                    (open)")
     print(f"  WhatsApp Webhook:  POST http://0.0.0.0:{args.port}/whatsapp               (open)")
     print(f"  Send SMS:          POST http://0.0.0.0:{args.port}/send                   🔒")
@@ -1120,37 +1117,37 @@ def main():
     print(f"  Messages:          GET  http://0.0.0.0:{args.port}/messages               🔒")
     print(f"  WebSocket:         WS   ws://0.0.0.0:{args.port}/ws                       🔒")
     print(f"  Health:            GET  http://0.0.0.0:{args.port}/health                 (open)")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print("\nConfigure Azure Event Grid webhooks:")
-    print(f"  SMS Endpoint:      https://<your-domain>/sms")
-    print(f"  SMS Event:         Microsoft.Communication.SMSReceived")
-    print(f"  WhatsApp Endpoint: https://<your-domain>/whatsapp")
-    print(f"  WhatsApp Event:    Microsoft.Communication.AdvancedMessageReceived")
-    print(f"\nExample usage:")
-    print(f"  # Send SMS")
+    print("  SMS Endpoint:      https://<your-domain>/sms")
+    print("  SMS Event:         Microsoft.Communication.SMSReceived")
+    print("  WhatsApp Endpoint: https://<your-domain>/whatsapp")
+    print("  WhatsApp Event:    Microsoft.Communication.AdvancedMessageReceived")
+    print("\nExample usage:")
+    print("  # Send SMS")
     print(f"  curl -X POST http://localhost:{args.port}/send \\")
-    print(f"    -H 'Content-Type: application/json' \\")
+    print("    -H 'Content-Type: application/json' \\")
     print(f"    -H '{API_KEY_HEADER}: {api_key}' \\")
-    print(f"    -d '{{\"to\": \"+15551234567\", \"message\": \"Hello\"}}'")  
+    print("    -d '{\"to\": \"+15551234567\", \"message\": \"Hello\"}'")
     if relay.whatsapp_channel_id:
-        print(f"\n  # Send WhatsApp Template (required for first message to a user)")
+        print("\n  # Send WhatsApp Template (required for first message to a user)")
         print(f"  curl -X POST http://localhost:{args.port}/send/whatsapp/template \\")
-        print(f"    -H 'Content-Type: application/json' \\")
+        print("    -H 'Content-Type: application/json' \\")
         print(f"    -H '{API_KEY_HEADER}: {api_key}' \\")
-        print(f"    -d '{{")
-        print(f'      "to": "+15551234567",')
-        print(f'      "template": "appointment_reminder",')
-        print(f'      "values": {{')
-        print(f'        "first_name": "John", "last_name": "Doe",')
-        print(f'        "business": "Lamna Healthcare",')
-        print(f'        "datetime": "January 15, 2026 at 10:00 AM"')
-        print(f"      }}}}'")
-        print(f"\n  # Send WhatsApp (after user has replied)")
+        print("    -d '{")
+        print('      "to": "+15551234567",')
+        print('      "template": "appointment_reminder",')
+        print('      "values": {')
+        print('        "first_name": "John", "last_name": "Doe",')
+        print('        "business": "Lamna Healthcare",')
+        print('        "datetime": "January 15, 2026 at 10:00 AM"')
+        print("      }}'")
+        print("\n  # Send WhatsApp (after user has replied)")
         print(f"  curl -X POST http://localhost:{args.port}/send/whatsapp \\")
-        print(f"    -H 'Content-Type: application/json' \\")
+        print("    -H 'Content-Type: application/json' \\")
         print(f"    -H '{API_KEY_HEADER}: {api_key}' \\")
-        print(f"    -d '{{\"to\": \"+15551234567\", \"message\": \"Hello via WhatsApp!\"}}'")  
-    print(f"{'='*60}\n")
+        print("    -d '{\"to\": \"+15551234567\", \"message\": \"Hello via WhatsApp!\"}'")
+    print(f"{'=' * 60}\n")
 
     web.run_app(app, host="0.0.0.0", port=args.port)
 

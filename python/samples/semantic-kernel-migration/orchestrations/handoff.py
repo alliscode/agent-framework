@@ -225,7 +225,7 @@ def _collect_handoff_requests(events: list[WorkflowEvent]) -> list[RequestInfoEv
 def _extract_final_conversation(events: list[WorkflowEvent]) -> list[ChatMessage]:
     for event in events:
         if isinstance(event, WorkflowOutputEvent):
-            data = cast(list[ChatMessage], event.data)
+            data = cast("list[ChatMessage]", event.data)
             return data
     return []
 

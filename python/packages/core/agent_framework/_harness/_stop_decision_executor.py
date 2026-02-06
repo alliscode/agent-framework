@@ -92,7 +92,7 @@ class StopDecisionExecutor(Executor):
         turn_count = await self._get_turn_count(ctx)
         max_turns = await self._get_max_turns(ctx)
 
-        logger.debug(f"StopDecisionExecutor: Evaluating turn {turn_count}/{max_turns}")
+        logger.debug("StopDecisionExecutor: Evaluating turn %s/%s", turn_count, max_turns)
 
         # Layer 1: Hard stops - check for errors first
         if turn_result.error:
@@ -125,7 +125,7 @@ class StopDecisionExecutor(Executor):
                         turn_number=turn_count,
                         max_turns=max_turns,
                         data={"stall_turns": stall_turns},
-                    )
+                    ),
                 )
                 reason = StopReason(
                     kind="stalled",
@@ -144,8 +144,8 @@ class StopDecisionExecutor(Executor):
                 if not contract_satisfied:
                     # Contract not satisfied - log gap and continue
                     logger.info(
-                        f"StopDecisionExecutor: Agent signaled done but contract not satisfied. "
-                        f"Gaps: {gap_info}"
+                        "StopDecisionExecutor: Agent signaled done but contract not satisfied. Gaps: %s",
+                        gap_info,
                     )
                     # Record gap event
                     await self._append_event(
@@ -168,9 +168,7 @@ class StopDecisionExecutor(Executor):
             if self._enable_work_item_verification:
                 work_items_complete = await self._verify_work_items(ctx)
                 if not work_items_complete:
-                    logger.info(
-                        "StopDecisionExecutor: Agent signaled done but work items incomplete"
-                    )
+                    logger.info("StopDecisionExecutor: Agent signaled done but work items incomplete")
                     await self._append_event(
                         ctx,
                         HarnessEvent(
@@ -218,9 +216,7 @@ class StopDecisionExecutor(Executor):
         except KeyError:
             return 50
 
-    async def _check_stall(
-        self, ctx: WorkflowContext[Any, Any], turn_count: int
-    ) -> tuple[bool, int]:
+    async def _check_stall(self, ctx: WorkflowContext[Any, Any], turn_count: int) -> tuple[bool, int]:
         """Check if progress has stalled.
 
         Args:
@@ -269,12 +265,9 @@ class StopDecisionExecutor(Executor):
         try:
             ledger_data = await ctx.get_shared_state(HARNESS_WORK_ITEM_LEDGER_KEY)
             if ledger_data and isinstance(ledger_data, dict):
-                ledger = WorkItemLedger.from_dict(cast(dict[str, Any], ledger_data))
+                ledger = WorkItemLedger.from_dict(cast("dict[str, Any]", ledger_data))
                 if ledger.items:
-                    return {
-                        item_id: item.status.value
-                        for item_id, item in ledger.items.items()
-                    }
+                    return {item_id: item.status.value for item_id, item in ledger.items.items()}
         except KeyError:
             pass
         return None
@@ -286,7 +279,7 @@ class StopDecisionExecutor(Executor):
         try:
             tracker_data = await ctx.get_shared_state(HARNESS_PROGRESS_TRACKER_KEY)
             if tracker_data and isinstance(tracker_data, dict):
-                return ProgressTracker.from_dict(cast(dict[str, Any], tracker_data))
+                return ProgressTracker.from_dict(cast("dict[str, Any]", tracker_data))
         except KeyError:
             pass
 
@@ -299,7 +292,7 @@ class StopDecisionExecutor(Executor):
         try:
             ledger_data = await ctx.get_shared_state(HARNESS_COVERAGE_LEDGER_KEY)
             if ledger_data and isinstance(ledger_data, dict):
-                return CoverageLedger.from_dict(cast(dict[str, Any], ledger_data))
+                return CoverageLedger.from_dict(cast("dict[str, Any]", ledger_data))
         except KeyError:
             pass
 
@@ -315,9 +308,7 @@ class StopDecisionExecutor(Executor):
             pass
         return []
 
-    async def _verify_contract(
-        self, ctx: WorkflowContext[Any, Any]
-    ) -> tuple[bool, dict[str, Any]]:
+    async def _verify_contract(self, ctx: WorkflowContext[Any, Any]) -> tuple[bool, dict[str, Any]]:
         """Verify the task contract is satisfied.
 
         Args:
@@ -372,7 +363,7 @@ class StopDecisionExecutor(Executor):
         try:
             ledger_data = await ctx.get_shared_state(HARNESS_WORK_ITEM_LEDGER_KEY)
             if ledger_data and isinstance(ledger_data, dict):
-                ledger = WorkItemLedger.from_dict(cast(dict[str, Any], ledger_data))
+                ledger = WorkItemLedger.from_dict(cast("dict[str, Any]", ledger_data))
                 return ledger.is_all_complete()
         except KeyError:
             pass
@@ -387,7 +378,7 @@ class StopDecisionExecutor(Executor):
         try:
             contract_data = await ctx.get_shared_state(HARNESS_TASK_CONTRACT_KEY)
             if contract_data and isinstance(contract_data, dict):
-                return TaskContract.from_dict(cast(dict[str, Any], contract_data))
+                return TaskContract.from_dict(cast("dict[str, Any]", contract_data))
         except KeyError:
             pass
 
@@ -441,7 +432,7 @@ class StopDecisionExecutor(Executor):
                     "reason_kind": reason.kind,
                     "reason_message": reason.message,
                 },
-            )
+            ),
         )
 
         # Get transcript for final result
@@ -458,7 +449,7 @@ class StopDecisionExecutor(Executor):
             if ledger_data and isinstance(ledger_data, dict):
                 from ._work_items import WorkItemLedger
 
-                ledger = WorkItemLedger.from_dict(cast(dict[str, Any], ledger_data))
+                ledger = WorkItemLedger.from_dict(cast("dict[str, Any]", ledger_data))
                 for item in ledger.get_deliverables():
                     deliverables.append({
                         "item_id": item.id,

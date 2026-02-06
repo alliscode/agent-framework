@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterable
-from typing import cast
+from typing import Annotated, cast
 
 from agent_framework import (
     ChatAgent,
@@ -19,7 +19,6 @@ from agent_framework import (
 )
 from agent_framework.azure import AzureOpenAIChatClient
 from azure.identity import AzureCliCredential
-from typing import Annotated
 
 logging.basicConfig(level=logging.ERROR)
 
@@ -138,7 +137,7 @@ def _handle_events(events: list[WorkflowEvent]) -> list[RequestInfoEvent]:
     for event in events:
         # WorkflowOutputEvent: Contains the final conversation when workflow terminates
         if isinstance(event, WorkflowOutputEvent):
-            conversation = cast(list[ChatMessage], event.data)
+            conversation = cast("list[ChatMessage]", event.data)
             if isinstance(conversation, list):
                 print("\n=== Final Conversation Snapshot ===")
                 for message in conversation:
@@ -227,7 +226,7 @@ async def main() -> None:
             # which indicates the conversation has concluded naturally.
             lambda conversation: len(conversation) > 0
             and conversation[-1].author_name == "triage_agent"
-            and "welcome" in conversation[-1].text.lower()
+            and "welcome" in conversation[-1].text.lower(),
         )
     )
 

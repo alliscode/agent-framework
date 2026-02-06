@@ -24,10 +24,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Protocol
-
-if TYPE_CHECKING:
-    pass
+from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +73,7 @@ class CompactionEvent:
     turn_number: int
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     event_id: str = ""
-    metadata: dict[str, Any] = field(default_factory=lambda: {})
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Generate event_id if not provided."""
@@ -115,13 +112,11 @@ class CompactionCheckStartedEvent(CompactionEvent):
         """Set event type and generate ID."""
         self.event_type = CompactionEventType.COMPACTION_CHECK_STARTED
         super().__post_init__()
-        self.metadata.update(
-            {
-                "current_tokens": self.current_tokens,
-                "budget_limit": self.budget_limit,
-                "tokens_over_budget": self.tokens_over_budget,
-            }
-        )
+        self.metadata.update({
+            "current_tokens": self.current_tokens,
+            "budget_limit": self.budget_limit,
+            "tokens_over_budget": self.tokens_over_budget,
+        })
 
 
 @dataclass
@@ -146,15 +141,13 @@ class CompactionCompletedEvent(CompactionEvent):
         """Set event type and generate ID."""
         self.event_type = CompactionEventType.COMPACTION_COMPLETED
         super().__post_init__()
-        self.metadata.update(
-            {
-                "tokens_freed": self.tokens_freed,
-                "proposals_applied": self.proposals_applied,
-                "proposals_rejected": self.proposals_rejected,
-                "final_tokens": self.final_tokens,
-                "duration_ms": self.duration_ms,
-            }
-        )
+        self.metadata.update({
+            "tokens_freed": self.tokens_freed,
+            "proposals_applied": self.proposals_applied,
+            "proposals_rejected": self.proposals_rejected,
+            "final_tokens": self.final_tokens,
+            "duration_ms": self.duration_ms,
+        })
 
 
 @dataclass
@@ -177,14 +170,12 @@ class ProposalGeneratedEvent(CompactionEvent):
         """Set event type and generate ID."""
         self.event_type = CompactionEventType.PROPOSAL_GENERATED
         super().__post_init__()
-        self.metadata.update(
-            {
-                "strategy_name": self.strategy_name,
-                "action": self.action,
-                "span_id": self.span_id,
-                "estimated_savings": self.estimated_savings,
-            }
-        )
+        self.metadata.update({
+            "strategy_name": self.strategy_name,
+            "action": self.action,
+            "span_id": self.span_id,
+            "estimated_savings": self.estimated_savings,
+        })
 
 
 @dataclass
@@ -207,14 +198,12 @@ class ProposalRejectedEvent(CompactionEvent):
         """Set event type and generate ID."""
         self.event_type = CompactionEventType.PROPOSAL_REJECTED
         super().__post_init__()
-        self.metadata.update(
-            {
-                "strategy_name": self.strategy_name,
-                "action": self.action,
-                "span_id": self.span_id,
-                "rejection_reason": self.rejection_reason,
-            }
-        )
+        self.metadata.update({
+            "strategy_name": self.strategy_name,
+            "action": self.action,
+            "span_id": self.span_id,
+            "rejection_reason": self.rejection_reason,
+        })
 
 
 @dataclass
@@ -231,20 +220,18 @@ class ContentClearedEvent(CompactionEvent):
     span_id: str = ""
     message_count: int = 0
     tokens_cleared: int = 0
-    preserved_fields: list[str] = field(default_factory=lambda: [])
+    preserved_fields: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """Set event type and generate ID."""
         self.event_type = CompactionEventType.CONTENT_CLEARED
         super().__post_init__()
-        self.metadata.update(
-            {
-                "span_id": self.span_id,
-                "message_count": self.message_count,
-                "tokens_cleared": self.tokens_cleared,
-                "preserved_fields": self.preserved_fields,
-            }
-        )
+        self.metadata.update({
+            "span_id": self.span_id,
+            "message_count": self.message_count,
+            "tokens_cleared": self.tokens_cleared,
+            "preserved_fields": self.preserved_fields,
+        })
 
 
 @dataclass
@@ -271,15 +258,13 @@ class ContentSummarizedEvent(CompactionEvent):
         super().__post_init__()
         if self.original_tokens > 0:
             self.compression_ratio = self.summary_tokens / self.original_tokens
-        self.metadata.update(
-            {
-                "span_id": self.span_id,
-                "message_count": self.message_count,
-                "original_tokens": self.original_tokens,
-                "summary_tokens": self.summary_tokens,
-                "compression_ratio": self.compression_ratio,
-            }
-        )
+        self.metadata.update({
+            "span_id": self.span_id,
+            "message_count": self.message_count,
+            "original_tokens": self.original_tokens,
+            "summary_tokens": self.summary_tokens,
+            "compression_ratio": self.compression_ratio,
+        })
 
 
 @dataclass
@@ -304,15 +289,13 @@ class ContentExternalizedEvent(CompactionEvent):
         """Set event type and generate ID."""
         self.event_type = CompactionEventType.CONTENT_EXTERNALIZED
         super().__post_init__()
-        self.metadata.update(
-            {
-                "span_id": self.span_id,
-                "artifact_id": self.artifact_id,
-                "message_count": self.message_count,
-                "content_bytes": self.content_bytes,
-                "tokens_freed": self.tokens_freed,
-            }
-        )
+        self.metadata.update({
+            "span_id": self.span_id,
+            "artifact_id": self.artifact_id,
+            "message_count": self.message_count,
+            "content_bytes": self.content_bytes,
+            "tokens_freed": self.tokens_freed,
+        })
 
 
 @dataclass
@@ -335,14 +318,12 @@ class ContentDroppedEvent(CompactionEvent):
         """Set event type and generate ID."""
         self.event_type = CompactionEventType.CONTENT_DROPPED
         super().__post_init__()
-        self.metadata.update(
-            {
-                "span_id": self.span_id,
-                "message_count": self.message_count,
-                "tokens_dropped": self.tokens_dropped,
-                "drop_reason": self.drop_reason,
-            }
-        )
+        self.metadata.update({
+            "span_id": self.span_id,
+            "message_count": self.message_count,
+            "tokens_dropped": self.tokens_dropped,
+            "drop_reason": self.drop_reason,
+        })
 
 
 @dataclass
@@ -365,14 +346,12 @@ class ContentRehydratedEvent(CompactionEvent):
         """Set event type and generate ID."""
         self.event_type = CompactionEventType.CONTENT_REHYDRATED
         super().__post_init__()
-        self.metadata.update(
-            {
-                "artifact_id": self.artifact_id,
-                "content_tokens": self.content_tokens,
-                "was_truncated": self.was_truncated,
-                "trigger": self.trigger,
-            }
-        )
+        self.metadata.update({
+            "artifact_id": self.artifact_id,
+            "content_tokens": self.content_tokens,
+            "was_truncated": self.was_truncated,
+            "trigger": self.trigger,
+        })
 
 
 @dataclass
@@ -393,13 +372,11 @@ class RehydrationBlockedEvent(CompactionEvent):
         """Set event type and generate ID."""
         self.event_type = CompactionEventType.REHYDRATION_BLOCKED
         super().__post_init__()
-        self.metadata.update(
-            {
-                "artifact_id": self.artifact_id,
-                "block_reason": self.block_reason,
-                "cooldown_remaining_seconds": self.cooldown_remaining_seconds,
-            }
-        )
+        self.metadata.update({
+            "artifact_id": self.artifact_id,
+            "block_reason": self.block_reason,
+            "cooldown_remaining_seconds": self.cooldown_remaining_seconds,
+        })
 
 
 @dataclass
@@ -422,14 +399,12 @@ class CompactionErrorEvent(CompactionEvent):
         """Set event type and generate ID."""
         self.event_type = CompactionEventType.COMPACTION_ERROR
         super().__post_init__()
-        self.metadata.update(
-            {
-                "error_type": self.error_type,
-                "error_message": self.error_message,
-                "strategy_name": self.strategy_name,
-                "recoverable": self.recoverable,
-            }
-        )
+        self.metadata.update({
+            "error_type": self.error_type,
+            "error_message": self.error_message,
+            "strategy_name": self.strategy_name,
+            "recoverable": self.recoverable,
+        })
 
 
 @dataclass
@@ -450,13 +425,11 @@ class VersionConflictEvent(CompactionEvent):
         """Set event type and generate ID."""
         self.event_type = CompactionEventType.VERSION_CONFLICT
         super().__post_init__()
-        self.metadata.update(
-            {
-                "expected_version": self.expected_version,
-                "actual_version": self.actual_version,
-                "will_retry": self.will_retry,
-            }
-        )
+        self.metadata.update({
+            "expected_version": self.expected_version,
+            "actual_version": self.actual_version,
+            "will_retry": self.will_retry,
+        })
 
 
 @dataclass
@@ -490,8 +463,8 @@ class CompactionMetrics:
     average_duration_ms: float = 0.0
 
     # Internal tracking
-    _compression_ratios: list[float] = field(default_factory=lambda: [])
-    _durations_ms: list[float] = field(default_factory=lambda: [])
+    _compression_ratios: list[float] = field(default_factory=list)
+    _durations_ms: list[float] = field(default_factory=list)
 
     def record_compaction(
         self,
@@ -521,9 +494,7 @@ class CompactionMetrics:
         """Record a summarization with its compression ratio."""
         self._compression_ratios.append(compression_ratio)
         if self._compression_ratios:
-            self.average_compression_ratio = sum(self._compression_ratios) / len(
-                self._compression_ratios
-            )
+            self.average_compression_ratio = sum(self._compression_ratios) / len(self._compression_ratios)
 
     def record_error(self) -> None:
         """Record an error."""

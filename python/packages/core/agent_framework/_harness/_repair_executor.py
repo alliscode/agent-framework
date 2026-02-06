@@ -71,7 +71,7 @@ class RepairExecutor(Executor):
             for call in pending_calls:
                 logger.info(
                     f"RepairExecutor: Repairing dangling tool call {call.call_id} "
-                    f"(tool: {call.tool_name}) from turn {call.turn_number}"
+                    f"(tool: {call.tool_name}) from turn {call.turn_number}",
                 )
 
                 # Insert synthetic error result into transcript
@@ -92,7 +92,7 @@ class RepairExecutor(Executor):
             await ctx.set_shared_state(HARNESS_PENDING_TOOL_CALLS_KEY, [])
 
         if repairs_made > 0:
-            logger.info(f"RepairExecutor: Made {repairs_made} repair(s)")
+            logger.info("RepairExecutor: Made %s repair(s)", repairs_made)
 
         # 3. Signal completion
         await ctx.send_message(RepairComplete(repairs_made=repairs_made))
@@ -113,7 +113,7 @@ class RepairExecutor(Executor):
             result: list[PendingToolCall] = []
             for p in pending_data:
                 if isinstance(p, dict):
-                    result.append(PendingToolCall.from_dict(cast(dict[str, Any], p)))
+                    result.append(PendingToolCall.from_dict(cast("dict[str, Any]", p)))
                 elif isinstance(p, PendingToolCall):
                     result.append(p)
             return result
@@ -161,9 +161,9 @@ class RepairExecutor(Executor):
         try:
             run_kwargs = await ctx.get_shared_state(WORKFLOW_RUN_KWARGS_KEY)
             if run_kwargs and isinstance(run_kwargs, dict):
-                config = cast(dict[str, Any], run_kwargs).get(HARNESS_CONFIG_KEY)
+                config = cast("dict[str, Any]", run_kwargs).get(HARNESS_CONFIG_KEY)
                 if config and isinstance(config, dict):
-                    harness_config = cast(dict[str, Any], config)
+                    harness_config = cast("dict[str, Any]", config)
         except KeyError:
             pass
 
@@ -172,7 +172,7 @@ class RepairExecutor(Executor):
         # Get initial message from config
         initial_message = harness_config.get("initial_message")
 
-        logger.info(f"RepairExecutor: Initializing harness state with max_turns={max_turns}")
+        logger.info("RepairExecutor: Initializing harness state with max_turns=%s", max_turns)
 
         # Initialize harness state
         await ctx.set_shared_state(HARNESS_TRANSCRIPT_KEY, [])
@@ -189,7 +189,7 @@ class RepairExecutor(Executor):
                 event_type="harness_started",
                 max_turns=max_turns,
                 data={"initial_message_preview": str(initial_message)[:100] if initial_message else None},
-            )
+            ),
         )
 
         # Initialize task contract if provided (Phase 3)
@@ -203,7 +203,4 @@ class RepairExecutor(Executor):
             await ctx.set_shared_state(HARNESS_TASK_CONTRACT_KEY, contract.to_dict())
             await ctx.set_shared_state(HARNESS_COVERAGE_LEDGER_KEY, ledger.to_dict())
 
-            logger.info(
-                f"RepairExecutor: Initialized task contract with "
-                f"{len(contract.required_outputs)} requirements"
-            )
+            logger.info(f"RepairExecutor: Initialized task contract with {len(contract.required_outputs)} requirements")

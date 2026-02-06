@@ -69,8 +69,8 @@ async def security_filter_middleware(
                             ChatMessage(
                                 role=Role.ASSISTANT,
                                 text=error_message,
-                            )
-                        ]
+                            ),
+                        ],
                     )
 
                 context.terminate = True

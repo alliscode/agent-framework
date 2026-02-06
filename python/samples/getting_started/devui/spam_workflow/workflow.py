@@ -37,7 +37,7 @@ class SpamDecision(BaseModel):
     """User's decision on whether the email is spam."""
 
     decision: Literal["spam", "not spam"] = Field(
-        description="Enter 'spam' to mark as spam, or 'not spam' to mark as legitimate"
+        description="Enter 'spam' to mark as spam, or 'not spam' to mark as legitimate",
     )
 
 
@@ -141,7 +141,7 @@ class SpamDetector(Executor):
 
     @handler
     async def handle_email_content(
-        self, email_content: EmailContent, ctx: WorkflowContext[SpamApprovalRequest]
+        self, email_content: EmailContent, ctx: WorkflowContext[SpamApprovalRequest],
     ) -> None:
         """Analyze email content and determine if the message is spam, then request human approval."""
         await asyncio.sleep(2.0)  # Simulate analysis and detection time
@@ -205,7 +205,7 @@ class SpamDetector(Executor):
 
     @response_handler
     async def handle_human_response(
-        self, original_request: SpamApprovalRequest, response: SpamDecision, ctx: WorkflowContext[SpamDetectorResponse]
+        self, original_request: SpamApprovalRequest, response: SpamDecision, ctx: WorkflowContext[SpamDetectorResponse],
     ) -> None:
         """Process human approval response and continue workflow."""
         print(f"[SpamDetector] handle_human_response called with response: {response}")
@@ -238,7 +238,7 @@ class SpamDetector(Executor):
         )
 
         print(
-            f"[SpamDetector] Sending SpamDetectorResponse: is_spam={is_spam}, confidence={confidence_score}, human_reviewed=True"
+            f"[SpamDetector] Sending SpamDetectorResponse: is_spam={is_spam}, confidence={confidence_score}, human_reviewed=True",
         )
         await ctx.send_message(result)
         print("[SpamDetector] Message sent successfully")
@@ -338,7 +338,7 @@ class FinalProcessor(Executor):
 
             if result.was_human_reviewed:
                 ai_status = "SPAM" if result.ai_original_decision else "LEGITIMATE"
-                human_decision = result.human_override if result.human_override else "unknown"
+                human_decision = result.human_override or "unknown"
 
                 completion_message = (
                     f"Email classified as {classification}{review_status}.\n"
@@ -355,25 +355,24 @@ class FinalProcessor(Executor):
                     f"Action: Message quarantined for review\n"
                     f"Processing time: {total_time:.1f}s"
                 )
+        # For legitimate messages
+        elif result.was_human_reviewed:
+            ai_status = "SPAM" if result.ai_original_decision else "LEGITIMATE"
+            human_decision = result.human_override or "unknown"
+
+            completion_message = (
+                f"Email classified as {classification}{review_status}.\n"
+                f"AI detected: {ai_status} (confidence: {result.confidence_score:.2f})\n"
+                f"Human reviewer: {human_decision}\n"
+                f"Action: Delivered to inbox\n"
+                f"Processing time: {total_time:.1f}s"
+            )
         else:
-            # For legitimate messages
-            if result.was_human_reviewed:
-                ai_status = "SPAM" if result.ai_original_decision else "LEGITIMATE"
-                human_decision = result.human_override if result.human_override else "unknown"
-
-                completion_message = (
-                    f"Email classified as {classification}{review_status}.\n"
-                    f"AI detected: {ai_status} (confidence: {result.confidence_score:.2f})\n"
-                    f"Human reviewer: {human_decision}\n"
-                    f"Action: Delivered to inbox\n"
-                    f"Processing time: {total_time:.1f}s"
-                )
-            else:
-                completion_message = (
-                    f"Email classified as {classification} (confidence: {result.confidence_score:.2f}).\n"
-                    f"Action: Delivered to inbox\n"
-                    f"Processing time: {total_time:.1f}s"
-                )
+            completion_message = (
+                f"Email classified as {classification} (confidence: {result.confidence_score:.2f}).\n"
+                f"Action: Delivered to inbox\n"
+                f"Processing time: {total_time:.1f}s"
+            )
 
         await ctx.yield_output(completion_message)
 
@@ -408,7 +407,7 @@ workflow = (
         [
             Case(condition=lambda x: isinstance(x, SpamDetectorResponse) and x.is_spam, target=spam_handler),
             Default(
-                target=legitimate_message_handler
+                target=legitimate_message_handler,
             ),  # Default handles non-spam and non-SpamDetectorResponse messages
         ],
     )

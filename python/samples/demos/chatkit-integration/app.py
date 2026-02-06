@@ -138,7 +138,7 @@ def get_weather(
 
     Returns a string description with embedded WeatherData for widget creation.
     """
-    logger.info(f"Fetching weather for location: {location}")
+    logger.info("Fetching weather for location: %s", location)
 
     conditions = ["sunny", "cloudy", "rainy", "stormy", "snowy", "foggy"]
     temperature = randint(-5, 35)
@@ -218,7 +218,7 @@ class WeatherChatKitServer(ChatKitServer[dict[str, Any]]):
             )
             logger.info("Weather agent initialized successfully with Azure OpenAI")
         except Exception as e:
-            logger.error(f"Failed to initialize weather agent: {e}")
+            logger.error("Failed to initialize weather agent: %s", e)
             raise
 
         # Create ThreadItemConverter with attachment data fetcher
@@ -240,7 +240,7 @@ class WeatherChatKitServer(ChatKitServer[dict[str, Any]]):
         return await attachment_store.read_attachment_bytes(attachment_id)
 
     async def _update_thread_title(
-        self, thread: ThreadMetadata, thread_items: list[ThreadItem], context: dict[str, Any]
+        self, thread: ThreadMetadata, thread_items: list[ThreadItem], context: dict[str, Any],
     ) -> None:
         """Update thread title using LLM to generate a concise summary.
 
@@ -283,7 +283,7 @@ class WeatherChatKitServer(ChatKitServer[dict[str, Any]]):
                         f"that starts with:\n\n{conversation_context}\n\n"
                         "Respond with ONLY the title, nothing else."
                     ),
-                )
+                ),
             ]
 
             # Use the chat client directly for a quick, lightweight call
@@ -304,7 +304,7 @@ class WeatherChatKitServer(ChatKitServer[dict[str, Any]]):
                 logger.info(f"Updated thread {thread.id} title to: {title}")
 
         except Exception as e:
-            logger.warning(f"Failed to generate thread title, using fallback: {e}")
+            logger.warning("Failed to generate thread title, using fallback: %s", e)
             # Fallback to simple truncation
             first_message: str = user_messages[0]
             title: str = first_message[:50].strip()
@@ -412,7 +412,7 @@ class WeatherChatKitServer(ChatKitServer[dict[str, Any]]):
 
                 # Stream the widget
                 async for widget_event in stream_widget(
-                    thread_id=thread.id, widget=selector_widget, copy_text=selector_copy_text
+                    thread_id=thread.id, widget=selector_widget, copy_text=selector_copy_text,
                 ):
                     yield widget_event
                 logger.debug("City selector widget streamed successfully")
@@ -445,7 +445,7 @@ class WeatherChatKitServer(ChatKitServer[dict[str, Any]]):
             # Extract city information from the action payload
             city_label = action.payload.get("city_label", "Unknown")
 
-            logger.info(f"City selected: {city_label}")
+            logger.info("City selected: %s", city_label)
             logger.debug(f"Action payload: {action.payload}")
 
             # Track weather data for this request
@@ -552,7 +552,7 @@ async def chatkit_endpoint(request: Request):
         logger.debug("Returning non-streaming response")
         return Response(content=result.json, media_type="application/json")  # type: ignore[union-attr]
     except Exception as e:
-        logger.error(f"Error processing ChatKit request: {e}", exc_info=True)
+        logger.error("Error processing ChatKit request: %s", e, exc_info=True)
         raise
 
 
@@ -563,7 +563,7 @@ async def upload_file(attachment_id: str, file: UploadFile = File(...)):
     The client POSTs the file bytes here after creating the attachment
     via the ChatKit attachments.create endpoint.
     """
-    logger.info(f"Receiving file upload for attachment: {attachment_id}")
+    logger.info("Receiving file upload for attachment: %s", attachment_id)
 
     try:
         # Read file contents
@@ -588,7 +588,7 @@ async def upload_file(attachment_id: str, file: UploadFile = File(...)):
         return JSONResponse(content=attachment.model_dump(mode="json"))
 
     except Exception as e:
-        logger.error(f"Error uploading file for attachment {attachment_id}: {e}", exc_info=True)
+        logger.error("Error uploading file for attachment %s: %s", attachment_id, e, exc_info=True)
         return JSONResponse(status_code=500, content={"error": "Failed to upload file."})
 
 
@@ -599,7 +599,7 @@ async def preview_image(attachment_id: str):
     For simplicity, this serves the full image. In production, you should
     generate and cache thumbnails.
     """
-    logger.debug(f"Serving preview for attachment: {attachment_id}")
+    logger.debug("Serving preview for attachment: %s", attachment_id)
 
     try:
         file_path = attachment_store.get_file_path(attachment_id)
@@ -619,11 +619,11 @@ async def preview_image(attachment_id: str):
         return FileResponse(file_path, media_type=media_type)
 
     except Exception as e:
-        logger.error(f"Error serving preview for attachment {attachment_id}: {e}", exc_info=True)
+        logger.error("Error serving preview for attachment %s: %s", attachment_id, e, exc_info=True)
         return JSONResponse(status_code=500, content={"error": "Error serving preview for attachment."})
 
 
 if __name__ == "__main__":
     # Run the server
-    logger.info(f"Starting ChatKit Weather Agent server on {SERVER_HOST}:{SERVER_PORT}")
+    logger.info("Starting ChatKit Weather Agent server on %s:%s", SERVER_HOST, SERVER_PORT)
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info")

@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 _tiktoken_available = False
 try:
     import tiktoken
+
     _tiktoken_available = True
 except ImportError:
     tiktoken = None  # type: ignore
@@ -186,10 +187,7 @@ class TiktokenTokenizer:
             ImportError: If tiktoken is not installed.
         """
         if not TIKTOKEN_AVAILABLE:
-            raise ImportError(
-                "tiktoken is required for TiktokenTokenizer. "
-                "Install it with: pip install tiktoken"
-            )
+            raise ImportError("tiktoken is required for TiktokenTokenizer. Install it with: pip install tiktoken")
 
         self.model = model
         self.provider = provider
@@ -249,7 +247,7 @@ class TiktokenTokenizer:
             # Multi-part content (e.g., with images)
             for part in content:
                 if isinstance(part, dict):
-                    part_dict = cast(dict[str, Any], part)
+                    part_dict = cast("dict[str, Any]", part)
                     part_type = part_dict.get("type")
                     if part_type == "text":
                         text_content = part_dict.get("text")
@@ -460,13 +458,10 @@ def get_tokenizer(
     if fallback_to_simple:
         logger.warning(
             "tiktoken not available, using SimpleTokenizer. "
-            "Install tiktoken for accurate token counting: pip install tiktoken"
+            "Install tiktoken for accurate token counting: pip install tiktoken",
         )
         return SimpleTokenizer(provider=provider)
-    raise ImportError(
-        "tiktoken is required for accurate token counting. "
-        "Install it with: pip install tiktoken"
-    )
+    raise ImportError("tiktoken is required for accurate token counting. Install it with: pip install tiktoken")
 
 
 @dataclass

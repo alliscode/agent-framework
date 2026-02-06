@@ -206,7 +206,7 @@ def render_weather_widget(data: WeatherData) -> WidgetRoot:
                                 alt=data.condition,
                                 size=28,
                                 fit="contain",
-                            )
+                            ),
                         ],
                     ),
                 ],
@@ -285,7 +285,7 @@ def _detail_chip(label: str, value: str) -> Box:
                         children=[Text(value=value, weight="semibold", size="lg")],
                     ),
                 ],
-            )
+            ),
         ],
     )
 
@@ -323,7 +323,7 @@ def render_city_selector_widget() -> WidgetRoot:
         f'<path d="M32 8c-8.837 0-16 7.163-16 16 0 12 16 32 16 32s16-20 16-32c0-8.837-7.163-16-16-16z" '
         f'fill="{WEATHER_ICON_ACCENT}" stroke="{WEATHER_ICON_COLOR}" stroke-width="3" stroke-linejoin="round"/>'
         f'<circle cx="32" cy="24" r="6" fill="{WEATHER_ICON_COLOR}"/>'
-        "</svg>"
+        "</svg>",
     )
 
     # Header section
@@ -345,7 +345,7 @@ def render_city_selector_widget() -> WidgetRoot:
                                 alt="Location",
                                 size=28,
                                 fit="contain",
-                            )
+                            ),
                         ],
                     ),
                     Col(
@@ -395,7 +395,7 @@ def render_city_selector_widget() -> WidgetRoot:
                 wrap="wrap",
                 justify="start",
                 children=list(row_chips),  # Convert to generic list
-            )
+            ),
         )
 
     # Cities display section

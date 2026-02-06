@@ -19,26 +19,24 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-from agent_framework import WorkflowOutputEvent, AgentRunUpdateEvent
+from agent_framework import AgentRunUpdateEvent, WorkflowOutputEvent
 from agent_framework._harness import (
     AgentHarness,
     HarnessResult,
-    HarnessStatus,
-    TaskContract,
     Predicate,
     RequiredOutput,
+    TaskContract,
     get_task_complete_tool,
 )
 from agent_framework.azure import AzureOpenAIChatClient
 from azure.identity import AzureCliCredential
-
 from coding_tools import CodingTools
 
 
 def is_binary_file(path: Path) -> bool:
     """Check if a file is binary."""
     try:
-        with open(path, "rb") as f:
+        with Path(path).open("rb") as f:
             chunk = f.read(1024)
             return b"\x00" in chunk
     except Exception:
@@ -138,7 +136,7 @@ with add, subtract, multiply, and divide functions. Then create a test file
                 continue
             print(f"  {rel_path}")
             # Show file contents
-            print(f"    --- Contents ---")
+            print("    --- Contents ---")
             try:
                 content = f.read_text(encoding="utf-8")
                 for line in content.split("\n")[:10]:  # First 10 lines
@@ -268,7 +266,7 @@ Run the tests to verify everything works."""
                 continue
             print(f"  {rel_path}")
             # Show file contents
-            print(f"    --- Contents ---")
+            print("    --- Contents ---")
             try:
                 content = f.read_text(encoding="utf-8")
                 for line in content.split("\n")[:10]:  # First 10 lines

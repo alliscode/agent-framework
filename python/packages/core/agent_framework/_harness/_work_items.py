@@ -13,13 +13,17 @@ completeness before accepting the agent's done signal.
 
 import re
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Annotated, Any, Callable, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Annotated, Any, Protocol, runtime_checkable
 
 from .._middleware import FunctionInvocationContext, FunctionMiddleware
 from .._tools import ai_function
+
+if TYPE_CHECKING:
+    from .._tools import AIFunction
 
 # ============================================================
 # Artifact Contamination Detection
@@ -98,18 +102,12 @@ def _is_narration_line(line: str, patterns: list[re.Pattern[str]]) -> bool:
 
 def _has_content_before(line_idx: int, lines: list[str], narration_indices: set[int]) -> bool:
     """Check if there are non-empty, non-narration content lines before the given index."""
-    return any(
-        lines[i].strip() and i not in narration_indices
-        for i in range(line_idx)
-    )
+    return any(lines[i].strip() and i not in narration_indices for i in range(line_idx))
 
 
 def _has_content_after(line_idx: int, lines: list[str], narration_indices: set[int]) -> bool:
     """Check if there are non-empty, non-narration content lines after the given index."""
-    return any(
-        lines[i].strip() and i not in narration_indices
-        for i in range(line_idx + 1, len(lines))
-    )
+    return any(lines[i].strip() and i not in narration_indices for i in range(line_idx + 1, len(lines)))
 
 
 def _find_narration_lines(
@@ -356,12 +354,8 @@ class WorkItem:
     artifact_role: ArtifactRole = ArtifactRole.WORKING
     requires_revision: bool = False
     revision_of: str = ""
-    created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
-    updated_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
@@ -438,41 +432,31 @@ class WorkItemLedger:
     def get_incomplete_items(self) -> list[WorkItem]:
         """Get all items that are not done or skipped, plus unresolved revisions."""
         incomplete = [
-            item for item in self.items.values()
-            if item.status not in (WorkItemStatus.DONE, WorkItemStatus.SKIPPED)
+            item for item in self.items.values() if item.status not in (WorkItemStatus.DONE, WorkItemStatus.SKIPPED)
         ]
         # Also include done items that still require revision without a completed fix
         for item in self.items.values():
-            if (
-                item.requires_revision
-                and not self._has_completed_revision(item.id)
-                and item not in incomplete
-            ):
+            if item.requires_revision and not self._has_completed_revision(item.id) and item not in incomplete:
                 incomplete.append(item)
         return incomplete
 
     def _has_completed_revision(self, item_id: str) -> bool:
         """Check if an item has a completed revision child."""
         for item in self.items.values():
-            if (
-                item.revision_of == item_id
-                and item.status in (WorkItemStatus.DONE, WorkItemStatus.SKIPPED)
-            ):
+            if item.revision_of == item_id and item.status in (WorkItemStatus.DONE, WorkItemStatus.SKIPPED):
                 return True
         return False
 
     def get_items_needing_revision(self) -> list[WorkItem]:
         """Get items flagged for revision that don't have a completed fix."""
         return [
-            item for item in self.items.values()
-            if item.requires_revision and not self._has_completed_revision(item.id)
+            item for item in self.items.values() if item.requires_revision and not self._has_completed_revision(item.id)
         ]
 
     def get_deliverables(self) -> list[WorkItem]:
         """Get all items with deliverable role that have artifact content."""
         return [
-            item for item in self.items.values()
-            if item.artifact_role == ArtifactRole.DELIVERABLE and item.artifact
+            item for item in self.items.values() if item.artifact_role == ArtifactRole.DELIVERABLE and item.artifact
         ]
 
     def is_all_complete(self) -> bool:
@@ -486,8 +470,7 @@ class WorkItemLedger:
         if not self.items:
             return 100.0
         completed = sum(
-            1 for item in self.items.values()
-            if item.status in (WorkItemStatus.DONE, WorkItemStatus.SKIPPED)
+            1 for item in self.items.values() if item.status in (WorkItemStatus.DONE, WorkItemStatus.SKIPPED)
         )
         return (completed / len(self.items)) * 100.0
 
@@ -507,10 +490,7 @@ class WorkItemLedger:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "WorkItemLedger":
         """Deserialize from dictionary."""
-        items = {
-            item_id: WorkItem.from_dict(item_data)
-            for item_id, item_data in data.get("items", {}).items()
-        }
+        items = {item_id: WorkItem.from_dict(item_data) for item_id, item_data in data.get("items", {}).items()}
         return cls(items=items)
 
 
@@ -528,7 +508,7 @@ class WorkItemTaskListProtocol(Protocol):
         """Get the work item ledger."""
         ...
 
-    def get_tools(self) -> list[Callable[..., str]]:
+    def get_tools(self) -> "list[AIFunction[Any, str]]":
         """Get tool closures for the agent."""
         ...
 
@@ -550,7 +530,7 @@ class WorkItemTaskList:
         """Get the work item ledger."""
         return self._ledger
 
-    def get_tools(self) -> list[Callable[..., str]]:
+    def get_tools(self) -> "list[AIFunction[Any, str]]":
         """Get tool closures bound to the ledger.
 
         Returns:
@@ -564,7 +544,7 @@ class WorkItemTaskList:
             self._make_flag_revision_tool(),
         ]
 
-    def _make_add_tool(self) -> Callable[..., str]:
+    def _make_add_tool(self) -> "AIFunction[Any, str]":
         """Create the work_item_add tool closure."""
         ledger = self._ledger
 
@@ -616,7 +596,7 @@ class WorkItemTaskList:
 
         return work_item_add
 
-    def _make_update_tool(self) -> Callable[..., str]:
+    def _make_update_tool(self) -> "AIFunction[Any, str]":
         """Create the work_item_update tool closure."""
         ledger = self._ledger
 
@@ -653,15 +633,13 @@ class WorkItemTaskList:
 
         return work_item_update
 
-    def _make_list_tool(self) -> Callable[..., str]:
+    def _make_list_tool(self) -> "AIFunction[Any, str]":
         """Create the work_item_list tool closure."""
         ledger = self._ledger
 
         @ai_function(name="work_item_list", approval_mode="never_require")
         def work_item_list(
-            filter_status: Annotated[
-                str, "Filter by status: pending, in_progress, done, skipped, or 'all'"
-            ] = "all",
+            filter_status: Annotated[str, "Filter by status: pending, in_progress, done, skipped, or 'all'"] = "all",
         ) -> str:
             """List current work items with their status.
 
@@ -702,17 +680,10 @@ class WorkItemTaskList:
 
             for item in items:
                 icon = status_icons.get(item.status, "[ ]")
-                priority_tag = (
-                    f" ({item.priority.value})"
-                    if item.priority != WorkItemPriority.MEDIUM
-                    else ""
-                )
+                priority_tag = f" ({item.priority.value})" if item.priority != WorkItemPriority.MEDIUM else ""
                 revision_tag = " [NEEDS REVISION]" if item.requires_revision else ""
                 parent_tag = f" (revision of {item.revision_of})" if item.revision_of else ""
-                lines.append(
-                    f"  {icon} [{item.id}] {item.title}"
-                    f"{priority_tag}{revision_tag}{parent_tag}"
-                )
+                lines.append(f"  {icon} [{item.id}] {item.title}{priority_tag}{revision_tag}{parent_tag}")
                 if item.notes:
                     lines.append(f"      Notes: {item.notes}")
                 if item.artifact:
@@ -729,16 +700,14 @@ class WorkItemTaskList:
 
         return work_item_list
 
-    def _make_set_artifact_tool(self) -> Callable[..., str]:
+    def _make_set_artifact_tool(self) -> "AIFunction[Any, str]":
         """Create the work_item_set_artifact tool closure."""
         ledger = self._ledger
 
         @ai_function(name="work_item_set_artifact", approval_mode="never_require")
         def work_item_set_artifact(
             item_id: Annotated[str, "ID of the work item"],
-            artifact: Annotated[
-                str, "The structured output/artifact produced by this step"
-            ],
+            artifact: Annotated[str, "The structured output/artifact produced by this step"],
             role: Annotated[str, "Artifact role: deliverable, working, or control"] = "working",
         ) -> str:
             """Store the structured output (artifact) for a completed work item.
@@ -796,13 +765,11 @@ class WorkItemTaskList:
             item.artifact_role = role_enum
             item.updated_at = datetime.now(timezone.utc).isoformat()
             preview = artifact[:80] + "..." if len(artifact) > 80 else artifact
-            return (
-                f"Artifact stored for [{item_id}]: {preview}"
-            )
+            return f"Artifact stored for [{item_id}]: {preview}"
 
         return work_item_set_artifact
 
-    def _make_flag_revision_tool(self) -> Callable[..., str]:
+    def _make_flag_revision_tool(self) -> "AIFunction[Any, str]":
         """Create the work_item_flag_revision tool closure."""
         ledger = self._ledger
 
@@ -896,17 +863,13 @@ def format_work_item_reminder(ledger: WorkItemLedger) -> str:
         lines.append("Incomplete items:")
         for item in regular_incomplete:
             icon = status_icons.get(item.status, "[ ]")
-            priority_tag = (
-                f" ({item.priority.value})"
-                if item.priority != WorkItemPriority.MEDIUM
-                else ""
-            )
+            priority_tag = f" ({item.priority.value})" if item.priority != WorkItemPriority.MEDIUM else ""
             lines.append(f"  {icon} [{item.id}] {item.title}{priority_tag}")
 
     lines.append("")
     lines.append(
         "Complete remaining items, apply revisions (producing corrected artifacts), "
-        "or mark items as skipped if no longer needed. Then signal done again."
+        "or mark items as skipped if no longer needed. Then signal done again.",
     )
 
     return "\n".join(lines)

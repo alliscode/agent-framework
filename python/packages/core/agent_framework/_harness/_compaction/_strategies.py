@@ -67,7 +67,7 @@ class CompactionProposal:
     estimated_tokens_freed: int
     reason: str
     priority: int = 0
-    metadata: dict[str, Any] = field(default_factory=lambda: {})
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
@@ -90,7 +90,7 @@ class Summarizer(Protocol):
 
     async def summarize(
         self,
-        messages: list["ChatMessage"],
+        messages: list[ChatMessage],
         *,
         target_token_ratio: float = 0.25,
         preserve_facts: list[str] | None = None,
@@ -130,11 +130,11 @@ class CompactionStrategy(ABC):
     @abstractmethod
     async def analyze(
         self,
-        thread: "AgentThread",
+        thread: AgentThread,
         current_plan: CompactionPlan | None,
-        budget: "TokenBudget",
-        tokenizer: "ProviderAwareTokenizer",
-        turn_context: "TurnContext | None" = None,
+        budget: TokenBudget,
+        tokenizer: ProviderAwareTokenizer,
+        turn_context: TurnContext | None = None,
     ) -> list[CompactionProposal]:
         """Analyze thread and propose compactions.
 
@@ -154,8 +154,8 @@ class CompactionStrategy(ABC):
     async def execute(
         self,
         proposal: CompactionProposal,
-        thread: "AgentThread",
-        tokenizer: "ProviderAwareTokenizer",
+        thread: AgentThread,
+        tokenizer: ProviderAwareTokenizer,
     ) -> ClearRecord | SummarizationRecord | ExternalizationRecord | DropRecord:
         """Execute a proposed compaction.
 
@@ -208,11 +208,11 @@ class ClearStrategy(CompactionStrategy):
 
     async def analyze(
         self,
-        thread: "AgentThread",
+        thread: AgentThread,
         current_plan: CompactionPlan | None,
-        budget: "TokenBudget",
-        tokenizer: "ProviderAwareTokenizer",
-        turn_context: "TurnContext | None" = None,
+        budget: TokenBudget,
+        tokenizer: ProviderAwareTokenizer,
+        turn_context: TurnContext | None = None,
     ) -> list[CompactionProposal]:
         """Find clearable tool results."""
         proposals: list[CompactionProposal] = []
@@ -235,6 +235,7 @@ class ClearStrategy(CompactionStrategy):
             if current_plan is not None:
                 action, _ = current_plan.get_action(msg.message_id)
                 from ._types import CompactionAction
+
                 if action != CompactionAction.INCLUDE:
                     continue
 
@@ -276,26 +277,28 @@ class ClearStrategy(CompactionStrategy):
                 last_turn=msg_turn,
             )
 
-            proposals.append(CompactionProposal(
-                strategy=self.name,
-                span=span,
-                estimated_tokens_freed=token_count - 20,  # Placeholder ~20 tokens
-                reason=f"Clear {durability.value} tool result: {tool_name}",
-                priority=1 if durability == ToolDurability.EPHEMERAL else 2,
-                metadata={
-                    "tool_name": tool_name,
-                    "durability": durability.value,
-                    "original_tokens": token_count,
-                },
-            ))
+            proposals.append(
+                CompactionProposal(
+                    strategy=self.name,
+                    span=span,
+                    estimated_tokens_freed=token_count - 20,  # Placeholder ~20 tokens
+                    reason=f"Clear {durability.value} tool result: {tool_name}",
+                    priority=1 if durability == ToolDurability.EPHEMERAL else 2,
+                    metadata={
+                        "tool_name": tool_name,
+                        "durability": durability.value,
+                        "original_tokens": token_count,
+                    },
+                ),
+            )
 
         return proposals
 
     async def execute(
         self,
         proposal: CompactionProposal,
-        thread: "AgentThread",
-        tokenizer: "ProviderAwareTokenizer",
+        thread: AgentThread,
+        tokenizer: ProviderAwareTokenizer,
     ) -> ClearRecord:
         """Execute the clear operation."""
         # Extract preserved fields if any
@@ -368,11 +371,11 @@ class SummarizeStrategy(CompactionStrategy):
 
     async def analyze(
         self,
-        thread: "AgentThread",
+        thread: AgentThread,
         current_plan: CompactionPlan | None,
-        budget: "TokenBudget",
-        tokenizer: "ProviderAwareTokenizer",
-        turn_context: "TurnContext | None" = None,
+        budget: TokenBudget,
+        tokenizer: ProviderAwareTokenizer,
+        turn_context: TurnContext | None = None,
     ) -> list[CompactionProposal]:
         """Find spans suitable for summarization."""
         proposals: list[CompactionProposal] = []
@@ -405,7 +408,7 @@ class SummarizeStrategy(CompactionStrategy):
             turns.append(current_turn_msgs)
 
         # Don't summarize recent turns
-        summarizable_turns = turns[:-self._preserve_recent_turns] if len(turns) > self._preserve_recent_turns else []
+        summarizable_turns = turns[: -self._preserve_recent_turns] if len(turns) > self._preserve_recent_turns else []
 
         if not summarizable_turns:
             return proposals
@@ -423,6 +426,7 @@ class SummarizeStrategy(CompactionStrategy):
                     msg = messages[msg_idx]
                     if msg.message_id:
                         from ._types import CompactionAction
+
                         action, _ = current_plan.get_action(msg.message_id)
                         if action != CompactionAction.INCLUDE:
                             any_compacted = True
@@ -431,9 +435,9 @@ class SummarizeStrategy(CompactionStrategy):
             if any_compacted:
                 # Create proposal for current span if big enough
                 if span_tokens >= self._min_span_tokens and len(span_indices) >= self._min_span_messages:
-                    proposals.append(self._create_proposal(
-                        messages, span_indices, span_tokens, span_first_turn, turn_idx - 1
-                    ))
+                    proposals.append(
+                        self._create_proposal(messages, span_indices, span_tokens, span_first_turn, turn_idx - 1),
+                    )
                 span_indices = []
                 span_tokens = 0
                 continue
@@ -450,15 +454,17 @@ class SummarizeStrategy(CompactionStrategy):
 
         # Final span
         if span_tokens >= self._min_span_tokens and len(span_indices) >= self._min_span_messages:
-            proposals.append(self._create_proposal(
-                messages, span_indices, span_tokens, span_first_turn, len(summarizable_turns) - 1
-            ))
+            proposals.append(
+                self._create_proposal(
+                    messages, span_indices, span_tokens, span_first_turn, len(summarizable_turns) - 1
+                ),
+            )
 
         return proposals
 
     def _create_proposal(
         self,
-        messages: list["ChatMessage"],
+        messages: list[ChatMessage],
         indices: list[int],
         tokens: int,
         first_turn: int,
@@ -466,10 +472,7 @@ class SummarizeStrategy(CompactionStrategy):
     ) -> CompactionProposal:
         """Create a summarization proposal."""
         # Filter to messages with IDs (filter out None)
-        message_ids: list[str] = [
-            msg_id for i in indices
-            if (msg_id := messages[i].message_id) is not None
-        ]
+        message_ids: list[str] = [msg_id for i in indices if (msg_id := messages[i].message_id) is not None]
 
         span = SpanReference(
             message_ids=message_ids,
@@ -496,18 +499,15 @@ class SummarizeStrategy(CompactionStrategy):
     async def execute(
         self,
         proposal: CompactionProposal,
-        thread: "AgentThread",
-        tokenizer: "ProviderAwareTokenizer",
+        thread: AgentThread,
+        tokenizer: ProviderAwareTokenizer,
     ) -> SummarizationRecord:
         """Execute the summarization."""
         if thread.message_store is None:
             raise ValueError("Thread has no message store")
 
         messages = await thread.message_store.list_messages()
-        span_messages = [
-            msg for msg in messages
-            if msg.message_id in proposal.span.message_ids
-        ]
+        span_messages = [msg for msg in messages if msg.message_id in proposal.span.message_ids]
 
         # Call summarizer
         summary = await self._summarizer.summarize(
@@ -534,7 +534,7 @@ class ExternalizeStrategy(CompactionStrategy):
 
     def __init__(
         self,
-        artifact_store: "ArtifactStore",
+        artifact_store: ArtifactStore,
         summarizer: Summarizer,
         *,
         externalize_threshold_tokens: int = 1000,
@@ -569,11 +569,11 @@ class ExternalizeStrategy(CompactionStrategy):
 
     async def analyze(
         self,
-        thread: "AgentThread",
+        thread: AgentThread,
         current_plan: CompactionPlan | None,
-        budget: "TokenBudget",
-        tokenizer: "ProviderAwareTokenizer",
-        turn_context: "TurnContext | None" = None,
+        budget: TokenBudget,
+        tokenizer: ProviderAwareTokenizer,
+        turn_context: TurnContext | None = None,
     ) -> list[CompactionProposal]:
         """Find content suitable for externalization."""
         proposals: list[CompactionProposal] = []
@@ -599,6 +599,7 @@ class ExternalizeStrategy(CompactionStrategy):
             # Skip if already compacted
             if current_plan is not None:
                 from ._types import CompactionAction
+
                 action, _ = current_plan.get_action(msg.message_id)
                 if action != CompactionAction.INCLUDE:
                     continue
@@ -634,35 +635,34 @@ class ExternalizeStrategy(CompactionStrategy):
             estimated_summary_tokens = min(200, token_count // 5)
 
             content_type = "NON_REPLAYABLE" if is_non_replayable else "large"
-            proposals.append(CompactionProposal(
-                strategy=self.name,
-                span=span,
-                estimated_tokens_freed=token_count - estimated_summary_tokens - 50,  # ~50 tokens
-                reason=f"Externalize {content_type} content ({token_count} tokens)",
-                priority=0 if is_non_replayable else 1,  # NON_REPLAYABLE has highest priority
-                metadata={
-                    "original_tokens": token_count,
-                    "is_non_replayable": is_non_replayable,
-                },
-            ))
+            proposals.append(
+                CompactionProposal(
+                    strategy=self.name,
+                    span=span,
+                    estimated_tokens_freed=token_count - estimated_summary_tokens - 50,  # ~50 tokens
+                    reason=f"Externalize {content_type} content ({token_count} tokens)",
+                    priority=0 if is_non_replayable else 1,  # NON_REPLAYABLE has highest priority
+                    metadata={
+                        "original_tokens": token_count,
+                        "is_non_replayable": is_non_replayable,
+                    },
+                ),
+            )
 
         return proposals
 
     async def execute(
         self,
         proposal: CompactionProposal,
-        thread: "AgentThread",
-        tokenizer: "ProviderAwareTokenizer",
+        thread: AgentThread,
+        tokenizer: ProviderAwareTokenizer,
     ) -> ExternalizationRecord:
         """Execute the externalization."""
         if thread.message_store is None:
             raise ValueError("Thread has no message store")
 
         messages = await thread.message_store.list_messages()
-        span_messages = [
-            msg for msg in messages
-            if msg.message_id in proposal.span.message_ids
-        ]
+        span_messages = [msg for msg in messages if msg.message_id in proposal.span.message_ids]
 
         if not span_messages:
             raise ValueError(f"No messages found for span {proposal.span.message_ids}")
@@ -672,6 +672,7 @@ class ExternalizeStrategy(CompactionStrategy):
 
         # Create metadata
         from ._renderer import ArtifactMetadata
+
         metadata = ArtifactMetadata(
             thread_id=str(uuid.uuid4()),  # Should be actual thread ID
             sensitivity=self._default_sensitivity,
@@ -689,11 +690,13 @@ class ExternalizeStrategy(CompactionStrategy):
         )
 
         # Add artifact reference to summary
-        summary.artifacts.append(ArtifactReference(
-            artifact_id=artifact_id,
-            description=f"Content from turns {proposal.span.first_turn}-{proposal.span.last_turn}",
-            rehydrate_hint="Read if you need the full content",
-        ))
+        summary.artifacts.append(
+            ArtifactReference(
+                artifact_id=artifact_id,
+                description=f"Content from turns {proposal.span.first_turn}-{proposal.span.last_turn}",
+                rehydrate_hint="Read if you need the full content",
+            ),
+        )
 
         return ExternalizationRecord(
             span=proposal.span,
@@ -734,11 +737,11 @@ class DropStrategy(CompactionStrategy):
 
     async def analyze(
         self,
-        thread: "AgentThread",
+        thread: AgentThread,
         current_plan: CompactionPlan | None,
-        budget: "TokenBudget",
-        tokenizer: "ProviderAwareTokenizer",
-        turn_context: "TurnContext | None" = None,
+        budget: TokenBudget,
+        tokenizer: ProviderAwareTokenizer,
+        turn_context: TurnContext | None = None,
     ) -> list[CompactionProposal]:
         """Find content that can be dropped."""
         proposals: list[CompactionProposal] = []
@@ -774,21 +777,23 @@ class DropStrategy(CompactionStrategy):
             # Estimate tokens (cleared content is small, ~20 tokens)
             estimated_freed = 20
 
-            proposals.append(CompactionProposal(
-                strategy=self.name,
-                span=span,
-                estimated_tokens_freed=estimated_freed,
-                reason=f"Drop cleared ephemeral content from turns {span.first_turn}-{span.last_turn}",
-                priority=span.first_turn,  # Older first
-            ))
+            proposals.append(
+                CompactionProposal(
+                    strategy=self.name,
+                    span=span,
+                    estimated_tokens_freed=estimated_freed,
+                    reason=f"Drop cleared ephemeral content from turns {span.first_turn}-{span.last_turn}",
+                    priority=span.first_turn,  # Older first
+                ),
+            )
 
         return proposals
 
     async def execute(
         self,
         proposal: CompactionProposal,
-        thread: "AgentThread",
-        tokenizer: "ProviderAwareTokenizer",
+        thread: AgentThread,
+        tokenizer: ProviderAwareTokenizer,
     ) -> DropRecord:
         """Execute the drop operation."""
         return DropRecord(
@@ -848,13 +853,13 @@ class CompactionCoordinator:
 
     async def compact(
         self,
-        thread: "AgentThread",
+        thread: AgentThread,
         current_plan: CompactionPlan | None,
-        budget: "TokenBudget",
-        tokenizer: "ProviderAwareTokenizer",
+        budget: TokenBudget,
+        tokenizer: ProviderAwareTokenizer,
         *,
         tokens_to_free: int = 0,
-        turn_context: "TurnContext | None" = None,
+        turn_context: TurnContext | None = None,
     ) -> CompactionResult:
         """Run compaction to free tokens.
 

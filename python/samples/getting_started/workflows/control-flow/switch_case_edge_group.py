@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import pathlib
 from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import uuid4
@@ -99,7 +100,7 @@ async def store_email(email_text: str, ctx: WorkflowContext[AgentExecutorRequest
 
     # Kick off the detector by forwarding the email as a user message to the spam_detection_agent.
     await ctx.send_message(
-        AgentExecutorRequest(messages=[ChatMessage(Role.USER, text=new_email.email_content)], should_respond=True)
+        AgentExecutorRequest(messages=[ChatMessage(Role.USER, text=new_email.email_content)], should_respond=True),
     )
 
 
@@ -120,7 +121,7 @@ async def submit_to_email_assistant(detection: DetectionResult, ctx: WorkflowCon
     # Load the original content from shared state using the id carried in DetectionResult.
     email: Email = await ctx.get_shared_state(f"{EMAIL_STATE_PREFIX}{detection.email_id}")
     await ctx.send_message(
-        AgentExecutorRequest(messages=[ChatMessage(Role.USER, text=email.email_content)], should_respond=True)
+        AgentExecutorRequest(messages=[ChatMessage(Role.USER, text=email.email_content)], should_respond=True),
     )
 
 
@@ -146,7 +147,7 @@ async def handle_uncertain(detection: DetectionResult, ctx: WorkflowContext[Neve
     if detection.spam_decision == "Uncertain":
         email: Email | None = await ctx.get_shared_state(f"{EMAIL_STATE_PREFIX}{detection.email_id}")
         await ctx.yield_output(
-            f"Email marked as uncertain: {detection.reason}. Email content: {getattr(email, 'email_content', '')}"
+            f"Email marked as uncertain: {detection.reason}. Email content: {getattr(email, 'email_content', '')}",
         )
     else:
         raise RuntimeError("This executor should only handle Uncertain messages.")
@@ -207,10 +208,10 @@ async def main():
 
     # Read ambiguous email if available. Otherwise use a simple inline sample.
     resources_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "resources", "ambiguous_email.txt"
+        os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "resources", "ambiguous_email.txt",
     )
-    if os.path.exists(resources_path):
-        with open(resources_path, encoding="utf-8") as f:  # noqa: ASYNC230
+    if pathlib.Path(resources_path).exists():
+        with pathlib.Path(resources_path).open(encoding="utf-8") as f:  # noqa: ASYNC230
             email = f.read()
     else:
         print("Unable to find resource file, using default text.")

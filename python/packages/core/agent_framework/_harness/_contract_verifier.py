@@ -239,9 +239,7 @@ class ContractVerifier:
             message=f"File not found: {path}",
         )
 
-    def _verify_contains_text(
-        self, predicate: Predicate, context: dict[str, Any]
-    ) -> VerificationResult:
+    def _verify_contains_text(self, predicate: Predicate, context: dict[str, Any]) -> VerificationResult:
         """Verify a contains_text predicate."""
         pattern = predicate.args.get("pattern", "")
         field = predicate.args.get("field", "response")
@@ -257,6 +255,7 @@ class ContractVerifier:
         elif field == "transcript":
             # Search entire transcript
             import json
+
             text = json.dumps(self._transcript)
         else:
             # Check context
@@ -285,27 +284,23 @@ class ContractVerifier:
         for event in reversed(self._transcript):
             if event.get("event_type") == "tool_result":
                 data = event.get("data", {})
-                if data.get("tool_name") == tool_name:
-                    # Check for success (no error field)
-                    if not data.get("error"):
-                        return VerificationResult(
-                            success=True,
-                            message=f"Tool {tool_name} succeeded",
-                            evidence=Evidence(
-                                event_ref=event.get("event_id", "unknown"),
-                                kind="tool_result",
-                                value=f"Tool {tool_name} completed successfully",
-                            ),
-                        )
+                if data.get("tool_name") == tool_name and not data.get("error"):
+                    return VerificationResult(
+                        success=True,
+                        message=f"Tool {tool_name} succeeded",
+                        evidence=Evidence(
+                            event_ref=event.get("event_id", "unknown"),
+                            kind="tool_result",
+                            value=f"Tool {tool_name} completed successfully",
+                        ),
+                    )
 
         return VerificationResult(
             success=False,
             message=f"No successful result found for tool: {tool_name}",
         )
 
-    def _verify_json_schema(
-        self, predicate: Predicate, context: dict[str, Any]
-    ) -> VerificationResult:
+    def _verify_json_schema(self, predicate: Predicate, context: dict[str, Any]) -> VerificationResult:
         """Verify a json_schema_valid predicate."""
         # Basic JSON schema validation
         # For full validation, would need jsonschema library
@@ -354,9 +349,7 @@ class ContractVerifier:
             ),
         )
 
-    def _verify_custom(
-        self, predicate: Predicate, context: dict[str, Any]
-    ) -> VerificationResult:
+    def _verify_custom(self, predicate: Predicate, context: dict[str, Any]) -> VerificationResult:
         """Verify a custom predicate.
 
         Custom predicates can use a 'check' function in args that

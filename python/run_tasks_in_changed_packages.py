@@ -63,8 +63,7 @@ def get_changed_packages(projects: list[Path], changed_files: list[str], workspa
     for file_path in changed_files:
         # Strip 'python/' prefix if present (when git diff is run from repo root)
         file_path_str = str(file_path)
-        if file_path_str.startswith("python/"):
-            file_path_str = file_path_str[7:]  # Remove 'python/' prefix
+        file_path_str = file_path_str.removeprefix("python/")  # Remove 'python/' prefix
 
         # Convert to absolute path if relative
         abs_path = Path(file_path_str)

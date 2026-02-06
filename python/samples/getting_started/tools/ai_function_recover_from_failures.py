@@ -60,10 +60,10 @@ async def main():
         for content in msg.contents:
             if isinstance(content, FunctionCallContent):
                 print(
-                    f"{idx + 1}  {msg.author_name}: calling function: {content.name} with arguments: {content.arguments}"
+                    f"{idx + 1}  {msg.author_name}: calling function: {content.name} with arguments: {content.arguments}",
                 )
             if isinstance(content, FunctionResultContent):
-                print(f"{idx + 1}  {msg.role}: {content.result if content.result else content.exception}")
+                print(f"{idx + 1}  {msg.role}: {content.result or content.exception}")
 
 
 """

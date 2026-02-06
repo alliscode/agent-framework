@@ -216,7 +216,7 @@ async def main() -> None:
     pending_messages = _pending_message_count(post_plan_checkpoint)
     print(
         f"Resuming from checkpoint {post_plan_checkpoint.checkpoint_id} at iteration "
-        f"{post_plan_checkpoint.iteration_count} (pending messages: {pending_messages})"
+        f"{post_plan_checkpoint.iteration_count} (pending messages: {pending_messages})",
     )
     if pending_messages == 0:
         print("Checkpoint has no pending messages; no additional work expected on resume.")

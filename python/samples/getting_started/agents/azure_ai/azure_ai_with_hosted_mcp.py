@@ -23,12 +23,12 @@ async def handle_approvals_without_thread(query: str, agent: "AgentProtocol") ->
         for user_input_needed in result.user_input_requests:
             print(
                 f"User Input Request for function from {agent.name}: {user_input_needed.function_call.name}"
-                f" with arguments: {user_input_needed.function_call.arguments}"
+                f" with arguments: {user_input_needed.function_call.arguments}",
             )
             new_inputs.append(ChatMessage(role="assistant", contents=[user_input_needed]))
             user_approval = input("Approve function call? (y/n): ")
             new_inputs.append(
-                ChatMessage(role="user", contents=[user_input_needed.create_response(user_approval.lower() == "y")])
+                ChatMessage(role="user", contents=[user_input_needed.create_response(user_approval.lower() == "y")]),
             )
 
         result = await agent.run(new_inputs, store=False)
@@ -44,14 +44,14 @@ async def handle_approvals_with_thread(query: str, agent: "AgentProtocol", threa
         for user_input_needed in result.user_input_requests:
             print(
                 f"User Input Request for function from {agent.name}: {user_input_needed.function_call.name}"
-                f" with arguments: {user_input_needed.function_call.arguments}"
+                f" with arguments: {user_input_needed.function_call.arguments}",
             )
             user_approval = input("Approve function call? (y/n): ")
             new_input.append(
                 ChatMessage(
                     role="user",
                     contents=[user_input_needed.create_response(user_approval.lower() == "y")],
-                )
+                ),
             )
         result = await agent.run(new_input, thread=thread)
     return result

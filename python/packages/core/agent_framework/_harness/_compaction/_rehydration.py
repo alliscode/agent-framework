@@ -142,7 +142,7 @@ class RehydrationInterceptor:
     def __init__(
         self,
         config: RehydrationConfig,
-        tokenizer: "ProviderAwareTokenizer",
+        tokenizer: ProviderAwareTokenizer,
     ):
         """Initialize the rehydration interceptor.
 
@@ -180,10 +180,10 @@ class RehydrationInterceptor:
         self,
         agent_message: str,
         pending_tool_calls: list[ToolCall],
-        compaction_plan: "CompactionPlan",
-        artifact_store: "ArtifactStore",
+        compaction_plan: CompactionPlan,
+        artifact_store: ArtifactStore,
         current_turn: int,
-        security_context: "SecurityContext | None" = None,
+        security_context: SecurityContext | None = None,
     ) -> list[RehydrationResult]:
         """Check if rehydration is needed and return content to inject.
 
@@ -229,7 +229,7 @@ class RehydrationInterceptor:
         self,
         agent_message: str,
         pending_tool_calls: list[ToolCall],
-        compaction_plan: "CompactionPlan",
+        compaction_plan: CompactionPlan,
         current_turn: int,
     ) -> list[tuple[str, str]]:
         """Find artifacts referenced in message or tool calls.
@@ -319,11 +319,9 @@ class RehydrationInterceptor:
                     return True
             elif isinstance(arg_value, dict):
                 # Check nested dict values (cast to suppress Unknown type warning)
-                nested_dict = cast(dict[str, Any], arg_value)
+                nested_dict = cast("dict[str, Any]", arg_value)
                 for nested_value in nested_dict.values():
-                    if isinstance(nested_value, str) and self._is_valid_artifact_ref(
-                        artifact_id, nested_value
-                    ):
+                    if isinstance(nested_value, str) and self._is_valid_artifact_ref(artifact_id, nested_value):
                         return True
         return False
 
@@ -345,9 +343,9 @@ class RehydrationInterceptor:
     async def _retrieve_artifacts(
         self,
         needed_artifacts: list[tuple[str, str]],
-        artifact_store: "ArtifactStore",
+        artifact_store: ArtifactStore,
         current_turn: int,
-        security_context: "SecurityContext | None",
+        security_context: SecurityContext | None,
     ) -> list[RehydrationResult]:
         """Retrieve artifact content with budget enforcement.
 
@@ -415,7 +413,7 @@ class RehydrationInterceptor:
                     content=content,
                     token_count=token_count,
                     truncated=truncated,
-                )
+                ),
             )
 
             # Track injection
@@ -430,7 +428,7 @@ class RehydrationInterceptor:
                     truncated=truncated,
                     trigger=trigger,
                     turn_number=current_turn,
-                )
+                ),
             )
 
             logger.debug(
@@ -446,7 +444,7 @@ class RehydrationInterceptor:
     def _check_sensitivity(
         self,
         artifact_id: str,
-        metadata: "ArtifactMetadata",
+        metadata: ArtifactMetadata,
         current_turn: int,
     ) -> bool:
         """Check if artifact can be auto-rehydrated based on sensitivity.
@@ -475,7 +473,7 @@ class RehydrationInterceptor:
                     artifact_id=artifact_id,
                     reason=f"Sensitivity '{sensitivity}' requires explicit read_artifact() call",
                     turn_number=current_turn,
-                )
+                ),
             )
             return False
 
@@ -550,7 +548,7 @@ class RehydrationState:
         config: Rehydration configuration.
     """
 
-    recent_injections: dict[str, int] = field(default_factory=lambda: {})
+    recent_injections: dict[str, int] = field(default_factory=dict)
     config: RehydrationConfig | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -574,7 +572,7 @@ class RehydrationState:
 
 
 def create_rehydration_interceptor(
-    tokenizer: "ProviderAwareTokenizer",
+    tokenizer: ProviderAwareTokenizer,
     *,
     enabled: bool = True,
     max_artifacts_per_turn: int = 3,

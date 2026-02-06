@@ -47,7 +47,7 @@ async def main() -> None:
         "\033[0mUser: (default)\033[0m\n"
         "\033[0mAgent: (default)\033[0m\n"
         "\033[32mAgent Reasoning: (green)\033[0m\n"
-        "\033[34mUsage: (blue)\033[0m\n"
+        "\033[34mUsage: (blue)\033[0m\n",
     )
     query = "Create a presentation about renewable energy with 5 slides"
     print(f"User: {query}")
@@ -67,7 +67,6 @@ async def main() -> None:
                     files.append(content)
                 case _:
                     logger.debug("Unhandled content type: %s", content.type)
-                    pass
 
     print("\n")
     if files:
@@ -77,9 +76,9 @@ async def main() -> None:
         print("Generated files:")
         for idx, file in enumerate(files):
             file_content = await client.anthropic_client.beta.files.download(
-                file_id=file.file_id, betas=["files-api-2025-04-14"]
+                file_id=file.file_id, betas=["files-api-2025-04-14"],
             )
-            with open(Path(__file__).parent / f"renewable_energy-{idx}.pptx", "wb") as f:
+            with Path(Path(__file__).parent / f"renewable_energy-{idx}.pptx").open("wb") as f:
                 await file_content.write_to_file(f.name)
             print(f"File {idx}: renewable_energy-{idx}.pptx saved to disk.")
 

@@ -4,6 +4,7 @@
 
 import asyncio
 import os
+import pathlib
 from dataclasses import dataclass
 from typing import Literal
 from uuid import uuid4
@@ -92,7 +93,7 @@ async def store_email(email_text: str, ctx: WorkflowContext[AgentExecutorRequest
     await ctx.set_shared_state(CURRENT_EMAIL_ID_KEY, new_email.email_id)
 
     await ctx.send_message(
-        AgentExecutorRequest(messages=[ChatMessage(Role.USER, text=new_email.email_content)], should_respond=True)
+        AgentExecutorRequest(messages=[ChatMessage(Role.USER, text=new_email.email_content)], should_respond=True),
     )
 
 
@@ -108,7 +109,7 @@ async def to_analysis_result(response: AgentExecutorResponse, ctx: WorkflowConte
             email_length=len(email.email_content),
             email_summary="",
             email_id=email_id,
-        )
+        ),
     )
 
 
@@ -119,7 +120,7 @@ async def submit_to_email_assistant(analysis: AnalysisResult, ctx: WorkflowConte
 
     email: Email = await ctx.get_shared_state(f"{EMAIL_STATE_PREFIX}{analysis.email_id}")
     await ctx.send_message(
-        AgentExecutorRequest(messages=[ChatMessage(Role.USER, text=email.email_content)], should_respond=True)
+        AgentExecutorRequest(messages=[ChatMessage(Role.USER, text=email.email_content)], should_respond=True),
     )
 
 
@@ -134,7 +135,7 @@ async def summarize_email(analysis: AnalysisResult, ctx: WorkflowContext[AgentEx
     # Only called for long NotSpam emails by selection_func
     email: Email = await ctx.get_shared_state(f"{EMAIL_STATE_PREFIX}{analysis.email_id}")
     await ctx.send_message(
-        AgentExecutorRequest(messages=[ChatMessage(Role.USER, text=email.email_content)], should_respond=True)
+        AgentExecutorRequest(messages=[ChatMessage(Role.USER, text=email.email_content)], should_respond=True),
     )
 
 
@@ -151,7 +152,7 @@ async def merge_summary(response: AgentExecutorResponse, ctx: WorkflowContext[An
             email_length=len(email.email_content),
             email_summary=summary.summary,
             email_id=email_id,
-        )
+        ),
     )
 
 
@@ -168,7 +169,7 @@ async def handle_uncertain(analysis: AnalysisResult, ctx: WorkflowContext[Never,
     if analysis.spam_decision == "Uncertain":
         email: Email | None = await ctx.get_shared_state(f"{EMAIL_STATE_PREFIX}{analysis.email_id}")
         await ctx.yield_output(
-            f"Email marked as uncertain: {analysis.reason}. Email content: {getattr(email, 'email_content', '')}"
+            f"Email marked as uncertain: {analysis.reason}. Email content: {getattr(email, 'email_content', '')}",
         )
     else:
         raise RuntimeError("This executor should only handle Uncertain messages.")
@@ -268,8 +269,8 @@ async def main() -> None:
         "resources",
         "email.txt",
     )
-    if os.path.exists(resources_path):
-        with open(resources_path, encoding="utf-8") as f:  # noqa: ASYNC230
+    if pathlib.Path(resources_path).exists():
+        with pathlib.Path(resources_path).open(encoding="utf-8") as f:  # noqa: ASYNC230
             email = f.read()
     else:
         print("Unable to find resource file, using default text.")

@@ -17,7 +17,7 @@ the thread stores and retrieves them automatically.
 
 @ai_function(approval_mode="always_require")
 def add_to_calendar(
-    event_name: Annotated[str, "Name of the event"], date: Annotated[str, "Date of the event"]
+    event_name: Annotated[str, "Name of the event"], date: Annotated[str, "Date of the event"],
 ) -> str:
     """Add an event to the calendar (requires approval)."""
     print(f">>> EXECUTING: add_to_calendar(event_name='{event_name}', date='{date}')")

@@ -114,7 +114,7 @@ def build_credential() -> Any:
     if not client_id:
         raise RuntimeError(
             "PURVIEW_CLIENT_APP_ID is required for interactive browser authentication; "
-            "set PURVIEW_USE_CERT_AUTH=true for certificate mode instead."
+            "set PURVIEW_USE_CERT_AUTH=true for certificate mode instead.",
         )
 
     if use_cert_auth:
@@ -184,7 +184,7 @@ async def run_with_chat_middleware() -> None:
                 PurviewSettings(
                     app_name="Agent Framework Sample App (Chat)",
                 ),
-            )
+            ),
         ],
     )
 
@@ -200,7 +200,7 @@ async def run_with_chat_middleware() -> None:
             role=Role.USER,
             text="Give me a short clean joke.",
             additional_properties={"user_id": user_id},
-        )
+        ),
     )
     print("First response (chat middleware):\n", first)
 
@@ -209,7 +209,7 @@ async def run_with_chat_middleware() -> None:
             role=Role.USER,
             text="One more please.",
             additional_properties={"user_id": user_id},
-        )
+        ),
     )
     print("Second response (chat middleware):\n", second)
 
@@ -246,12 +246,12 @@ async def run_with_custom_cache_provider() -> None:
     print("Using SimpleDictCacheProvider")
 
     first: AgentRunResponse = await agent.run(
-        ChatMessage(role=Role.USER, text="Tell me a joke about a programmer.", additional_properties={"user_id": user_id})
+        ChatMessage(role=Role.USER, text="Tell me a joke about a programmer.", additional_properties={"user_id": user_id}),
     )
     print("First response (custom provider):\n", first)
 
     second: AgentRunResponse = await agent.run(
-        ChatMessage(role=Role.USER, text="That's hilarious! One more?", additional_properties={"user_id": user_id})
+        ChatMessage(role=Role.USER, text="That's hilarious! One more?", additional_properties={"user_id": user_id}),
     )
     print("Second response (custom provider):\n", second)
 
@@ -286,12 +286,12 @@ async def run_with_custom_cache_provider() -> None:
     print("Using default InMemoryCacheProvider with settings-based configuration")
 
     first: AgentRunResponse = await agent.run(
-        ChatMessage(role=Role.USER, text="Tell me a joke about AI.", additional_properties={"user_id": user_id})
+        ChatMessage(role=Role.USER, text="Tell me a joke about AI.", additional_properties={"user_id": user_id}),
     )
     print("First response (default cache):\n", first)
 
     second: AgentRunResponse = await agent.run(
-        ChatMessage(role=Role.USER, text="Nice! Another AI joke please.", additional_properties={"user_id": user_id})
+        ChatMessage(role=Role.USER, text="Nice! Another AI joke please.", additional_properties={"user_id": user_id}),
     )
     print("Second response (default cache):\n", second)
 

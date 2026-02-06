@@ -58,7 +58,7 @@ async def main() -> None:
     tool = AIFunction.from_dict(definition, dependencies={"ai_function": {"name:add_numbers": {"func": func}}})
 
     agent = OpenAIResponsesClient().create_agent(
-        name="FunctionToolAgent", instructions="You are a helpful assistant.", tools=tool
+        name="FunctionToolAgent", instructions="You are a helpful assistant.", tools=tool,
     )
     response = await agent.run("What is 5 + 3?")
     print(f"Response: {response.text}")

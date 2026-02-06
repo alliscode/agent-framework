@@ -60,8 +60,6 @@ from pathlib import Path
 from typing import Any
 
 import aiohttp
-from dotenv import load_dotenv
-
 from agent_framework import MCPStdioTool
 from agent_framework._harness import (
     AgentHarness,
@@ -77,6 +75,7 @@ from agent_framework.azure import AzureOpenAIChatClient
 from agent_framework_devui import serve
 from azure.identity import AzureCliCredential
 from coding_tools import CodingTools
+from dotenv import load_dotenv
 
 # Load .env file for SMS configuration
 load_dotenv()
@@ -84,7 +83,7 @@ load_dotenv()
 # Enable debug logging for harness and mapper
 logging.basicConfig(
     level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logging.getLogger("agent_framework._harness").setLevel(logging.DEBUG)
 logging.getLogger("agent_framework._workflows").setLevel(logging.DEBUG)
@@ -193,7 +192,7 @@ class SmsRelayClient:
         """Get or create HTTP session with auth headers."""
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
-                headers={"X-API-Key": self.api_key}
+                headers={"X-API-Key": self.api_key},
             )
         return self._session
 
@@ -222,11 +221,10 @@ class SmsRelayClient:
                 if result.get("success"):
                     logger.info(f"SMS sent to {to_number}: {message[:50]}...")
                     return True
-                else:
-                    logger.error(f"SMS failed to {to_number}: {result.get('error')}")
-                    return False
+                logger.error(f"SMS failed to {to_number}: {result.get('error')}")
+                return False
         except Exception as e:
-            logger.error(f"Error sending SMS via relay: {e}")
+            logger.error("Error sending SMS via relay: %s", e)
             return False
 
     async def send_whatsapp(self, to_number: str, message: str) -> bool:
@@ -250,15 +248,14 @@ class SmsRelayClient:
                 if result.get("success"):
                     logger.info(f"WhatsApp sent to {to_number}: {message[:50]}...")
                     return True
-                else:
-                    error = result.get("error", "Unknown error")
-                    hint = result.get("hint", "")
-                    logger.error(f"WhatsApp failed to {to_number}: {error}")
-                    if hint:
-                        logger.info(f"Hint: {hint}")
-                    return False
+                error = result.get("error", "Unknown error")
+                hint = result.get("hint", "")
+                logger.error("WhatsApp failed to %s: %s", to_number, error)
+                if hint:
+                    logger.info("Hint: %s", hint)
+                return False
         except Exception as e:
-            logger.error(f"Error sending WhatsApp via relay: {e}")
+            logger.error("Error sending WhatsApp via relay: %s", e)
             return False
 
     async def send_message(self, to_number: str, message: str, channel: str = "sms") -> bool:
@@ -274,8 +271,7 @@ class SmsRelayClient:
         """
         if channel == "whatsapp":
             return await self.send_whatsapp(to_number, message)
-        else:
-            return await self.send_sms(to_number, message)
+        return await self.send_sms(to_number, message)
 
     async def poll_messages(
         self,
@@ -306,7 +302,7 @@ class SmsRelayClient:
                 result = await response.json()
                 return result.get("messages", [])
         except Exception as e:
-            logger.error(f"Error polling messages: {e}")
+            logger.error("Error polling messages: %s", e)
             return []
 
     async def stream_messages(
@@ -345,10 +341,10 @@ class SmsRelayClient:
                             logger.info("WebSocket closed")
                             break
             except aiohttp.ClientError as e:
-                logger.error(f"WebSocket connection error: {e}")
+                logger.error("WebSocket connection error: %s", e)
                 await asyncio.sleep(5)  # Retry after delay
             except Exception as e:
-                logger.error(f"Unexpected WebSocket error: {e}")
+                logger.error("Unexpected WebSocket error: %s", e)
                 await asyncio.sleep(5)
 
 
@@ -393,9 +389,9 @@ class SmsHarness:
         # Track conversations by phone number
         self._conversations: dict[str, SmsConversation] = {}
 
-        logger.info(f"SMS Harness initialized. Relay: {relay_url}")
+        logger.info("SMS Harness initialized. Relay: %s", relay_url)
         if phone_filter:
-            logger.info(f"Filtering for phone: {phone_filter}")
+            logger.info("Filtering for phone: %s", phone_filter)
 
     def _create_harness_for_conversation(self) -> AgentHarness:
         """Create a new harness instance for a conversation."""
@@ -431,7 +427,7 @@ class SmsHarness:
         if phone_number not in self._conversations:
             harness = self._create_harness_for_conversation()
             self._conversations[phone_number] = SmsConversation(phone_number, harness)
-            logger.info(f"New conversation started with {phone_number}")
+            logger.info("New conversation started with %s", phone_number)
         else:
             self._conversations[phone_number].last_activity = datetime.now()
 
@@ -447,7 +443,7 @@ class SmsHarness:
         Returns:
             The agent's response text.
         """
-        logger.info(f"Incoming SMS from {from_number}: {message}")
+        logger.info("Incoming SMS from %s: %s", from_number, message)
 
         # Get or create conversation
         conversation = self._get_or_create_conversation(from_number)
@@ -471,7 +467,7 @@ class SmsHarness:
                 response_text = "I received your message but couldn't generate a response. Please try again."
 
         except Exception as e:
-            logger.error(f"Error processing message: {e}", exc_info=True)
+            logger.error("Error processing message: %s", e, exc_info=True)
             response_text = "Sorry, I encountered an error. Please try again."
 
         return response_text
@@ -487,7 +483,7 @@ class SmsHarness:
         Args:
             poll_interval: Seconds between polls.
         """
-        logger.info(f"Starting polling mode (interval: {poll_interval}s)")
+        logger.info("Starting polling mode (interval: %ss)", poll_interval)
 
         while True:
             try:
@@ -512,7 +508,7 @@ class SmsHarness:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Polling error: {e}")
+                logger.error("Polling error: %s", e)
                 await asyncio.sleep(poll_interval)
 
     async def run_websocket(self):
@@ -530,7 +526,7 @@ class SmsHarness:
                         await self.process_and_respond(from_number, text, channel=channel)
 
             except Exception as e:
-                logger.error(f"Error processing WebSocket message: {e}")
+                logger.error("Error processing WebSocket message: %s", e)
 
     async def close(self):
         """Clean up resources."""
@@ -540,7 +536,7 @@ class SmsHarness:
         """Reset conversation state for a phone number."""
         if phone_number in self._conversations:
             del self._conversations[phone_number]
-            logger.info(f"Conversation reset for {phone_number}")
+            logger.info("Conversation reset for %s", phone_number)
 
 
 # =============================================================================
@@ -662,7 +658,7 @@ def _connect_mcp_tools_sync(mcp_tools: list[MCPStdioTool]) -> list[MCPStdioTool]
 def main():
     """Entry point for the DevUI or SMS harness."""
     parser = argparse.ArgumentParser(
-        description="Run coding agent harness in DevUI or SMS mode"
+        description="Run coding agent harness in DevUI or SMS mode",
     )
 
     # Common arguments
@@ -774,9 +770,9 @@ def _run_sms_mode(args):
 
     args.api_key = api_key
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("SMS/WhatsApp Agent Harness Starting")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Relay URL: {args.relay_url}")
     print(f"Mode: {args.sms_mode}")
     if args.phone:
@@ -786,7 +782,7 @@ def _run_sms_mode(args):
     if args.compaction:
         print("Context compaction: ENABLED")
     print("Channels: SMS and WhatsApp (auto-detected from incoming messages)")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     try:
         asyncio.run(_run_sms_harness(args))
@@ -837,7 +833,7 @@ def _run_devui_mode(args):
         sandbox_dir,
         enable_compaction=args.compaction,
         enable_work_items=args.work_items,
-        mcp_tools=connected_tools if connected_tools else None,
+        mcp_tools=connected_tools or None,
     )
 
     # Wrap with MarkdownRenderer when work items are enabled

@@ -102,7 +102,7 @@ def spam_detection_orchestration(context: DurableOrchestrationContext):
         response_format=SpamDetectionResult,
     )
 
-    spam_result = cast(SpamDetectionResult, spam_result_raw.value)
+    spam_result = cast("SpamDetectionResult", spam_result_raw.value)
 
     if spam_result.is_spam:
         result = yield context.call_activity("handle_spam_email", spam_result.reason)
@@ -123,7 +123,7 @@ def spam_detection_orchestration(context: DurableOrchestrationContext):
         response_format=EmailResponse,
     )
 
-    email_result = cast(EmailResponse, email_result_raw.value)
+    email_result = cast("EmailResponse", email_result_raw.value)
 
     result = yield context.call_activity("send_email", email_result.response)
     return result

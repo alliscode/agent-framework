@@ -11,7 +11,7 @@ HARNESS_STOP_REASON_KEY = "harness.stop_reason"
 HARNESS_PENDING_TOOL_CALLS_KEY = "harness.pending_tool_calls"
 
 # Context pressure state keys (Phase 2)
-HARNESS_TOKEN_BUDGET_KEY = "harness.token_budget"
+HARNESS_TOKEN_BUDGET_KEY = "harness.token_budget"  # noqa: S105  # nosec B105
 HARNESS_CONTEXT_EDIT_HISTORY_KEY = "harness.context_edit_history"
 
 # Compaction state keys (Phase 9 - Production Compaction)

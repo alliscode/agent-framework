@@ -19,12 +19,11 @@ a sandboxed directory.
 import argparse
 import asyncio
 import logging
-import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from agent_framework import WorkflowOutputEvent, AgentRunUpdateEvent
+from agent_framework import AgentRunUpdateEvent, WorkflowOutputEvent
 from agent_framework._harness import (
     AgentHarness,
     HarnessResult,
@@ -32,16 +31,13 @@ from agent_framework._harness import (
     get_task_complete_tool,
 )
 from agent_framework._workflows._events import (
-    ExecutorInvokedEvent,
     ExecutorCompletedEvent,
+    ExecutorInvokedEvent,
     SuperStepStartedEvent,
-    SuperStepCompletedEvent,
 )
 from agent_framework.azure import AzureOpenAIChatClient
 from azure.identity import AzureCliCredential
-
 from coding_tools import CodingTools
-
 
 # Debug logger - writes to file for analysis
 debug_logger: logging.Logger | None = None
@@ -53,11 +49,11 @@ def setup_debug_logging(log_file: Path) -> logging.Logger:
     logger.setLevel(logging.DEBUG)
 
     # File handler
-    fh = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+    fh = logging.FileHandler(log_file, mode="w", encoding="utf-8")
     fh.setLevel(logging.DEBUG)
 
     # Format with timestamps
-    formatter = logging.Formatter('%(asctime)s.%(msecs)03d | %(message)s', datefmt='%H:%M:%S')
+    formatter = logging.Formatter("%(asctime)s.%(msecs)03d | %(message)s", datefmt="%H:%M:%S")
     fh.setFormatter(formatter)
 
     logger.addHandler(fh)
@@ -138,9 +134,9 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 20, verbose: bool = False
     # Also enable harness-level logging to the same file
     harness_logger = logging.getLogger("agent_framework._harness")
     harness_logger.setLevel(logging.DEBUG)
-    harness_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+    harness_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
     harness_handler.setLevel(logging.DEBUG)
-    harness_handler.setFormatter(logging.Formatter('%(asctime)s.%(msecs)03d | HARNESS | %(message)s', datefmt='%H:%M:%S'))
+    harness_handler.setFormatter(logging.Formatter("%(asctime)s.%(msecs)03d | HARNESS | %(message)s", datefmt="%H:%M:%S"))
     harness_logger.addHandler(harness_handler)
 
     debug(f"=== REPL Started at {datetime.now().isoformat()} ===")
@@ -280,8 +276,8 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 20, verbose: bool = False
                         print_lifecycle(f"Turn {turn_count + 1} completed")
 
                 if isinstance(event, SuperStepStartedEvent):
-                    debug(f"  SuperStepStarted")
-                    pass  # Could track supersteps if needed
+                    debug("  SuperStepStarted")
+                    # Could track supersteps if needed
 
                 # Show agent streaming updates
                 if isinstance(event, AgentRunUpdateEvent):
@@ -299,7 +295,7 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 20, verbose: bool = False
                     if hasattr(update, "role") and str(update.role) == "user":
                         if hasattr(update, "text") and "completed ALL" in str(update.text):
                             print()
-                            print_lifecycle(f"Continuation prompt sent (verifying task completion)")
+                            print_lifecycle("Continuation prompt sent (verifying task completion)")
                             continuation_count += 1
                             print(f"\n{Colors.BLUE}Agent:{Colors.RESET} ", end="", flush=True)
                             continue

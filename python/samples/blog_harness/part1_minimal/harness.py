@@ -71,8 +71,6 @@ class HarnessResult:
 class StartTurn:
     """Trigger to start an agent turn."""
 
-    pass
-
 
 @dataclass
 class TurnComplete:
@@ -105,7 +103,7 @@ class AgentTurnExecutor(Executor):
         self._thread = agent.get_new_thread()
 
     async def execute(
-        self, trigger: StartTurn, ctx: WorkflowContext[Any]
+        self, trigger: StartTurn, ctx: WorkflowContext[Any],
     ) -> TurnComplete:
         """Run one agent turn."""
         # Get current conversation from shared state
@@ -129,7 +127,7 @@ class AgentTurnExecutor(Executor):
 
         # Emit an event so external observers can track progress
         await ctx.add_event(
-            WorkflowEvent(data={"turn": turn_count, "response": response_text[:200]})
+            WorkflowEvent(data={"turn": turn_count, "response": response_text[:200]}),
         )
 
         return TurnComplete(response_text=response_text, has_tool_calls=has_tool_calls)
@@ -152,7 +150,7 @@ class StopDecisionExecutor(Executor):
     """
 
     async def execute(
-        self, trigger: TurnComplete, ctx: WorkflowContext[Any]
+        self, trigger: TurnComplete, ctx: WorkflowContext[Any],
     ) -> StartTurn | HarnessResult:
         """Decide whether to continue or stop."""
         turn_count = await ctx.get_shared_state(TURN_COUNT_KEY)
@@ -168,7 +166,7 @@ class StopDecisionExecutor(Executor):
                     status=HarnessStatus.COMPLETE,
                     turn_count=turn_count,
                     final_response=trigger.response_text,
-                )
+                ),
             )
             # Return None to end the workflow (no next executor)
             return None  # type: ignore[return-value]
@@ -180,7 +178,7 @@ class StopDecisionExecutor(Executor):
                     status=HarnessStatus.MAX_TURNS,
                     turn_count=turn_count,
                     final_response=trigger.response_text,
-                )
+                ),
             )
             return None  # type: ignore[return-value]
 

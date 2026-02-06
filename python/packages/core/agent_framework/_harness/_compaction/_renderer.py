@@ -50,7 +50,7 @@ class ArtifactStore(Protocol):
     async def store(
         self,
         content: str,
-        metadata: "ArtifactMetadata",
+        metadata: ArtifactMetadata,
     ) -> str:
         """Store content securely.
 
@@ -66,7 +66,7 @@ class ArtifactStore(Protocol):
     async def get_metadata(
         self,
         artifact_id: str,
-    ) -> "ArtifactMetadata | None":
+    ) -> ArtifactMetadata | None:
         """Get metadata without retrieving content.
 
         Used for sensitivity gating in auto-rehydration.
@@ -82,7 +82,7 @@ class ArtifactStore(Protocol):
     async def retrieve(
         self,
         artifact_id: str,
-        requester_context: "SecurityContext | None" = None,
+        requester_context: SecurityContext | None = None,
     ) -> str | None:
         """Retrieve content with access control.
 
@@ -190,7 +190,7 @@ class RenderedPrompt:
 
     messages: list[ChatMessage]
     system_prompt: str | None = None
-    tools: list[dict[str, Any]] = field(default_factory=lambda: [])
+    tools: list[dict[str, Any]] = field(default_factory=list)
     token_count: int = 0
     compaction_applied: bool = False
     spans_summarized: int = 0
@@ -236,7 +236,7 @@ class PromptRenderer:
 
     def __init__(
         self,
-        tokenizer: "ProviderAwareTokenizer | None" = None,
+        tokenizer: ProviderAwareTokenizer | None = None,
     ):
         """Initialize the renderer.
 
@@ -248,7 +248,7 @@ class PromptRenderer:
 
     async def render(
         self,
-        thread: "AgentThread",
+        thread: AgentThread,
         plan: CompactionPlan | None = None,
         *,
         system_prompt: str | None = None,
@@ -381,10 +381,7 @@ class PromptRenderer:
         span = record.span
         summary_text = record.summary.render_as_message()
 
-        content = (
-            f"[Context Summary - Turns {span.first_turn}-{span.last_turn}]\n"
-            f"{summary_text}"
-        )
+        content = f"[Context Summary - Turns {span.first_turn}-{span.last_turn}]\n{summary_text}"
 
         return ChatMessage(
             role="assistant",
@@ -438,13 +435,11 @@ class PromptRenderer:
 
         if record is not None and record.preserved_fields:
             # Sort keys for determinism
-            fields = ", ".join(
-                f"{k}={v}" for k, v in sorted(record.preserved_fields.items())
-            )
+            fields = ", ".join(f"{k}={v}" for k, v in sorted(record.preserved_fields.items()))
             parts.append(f"Key data: {fields}")
 
         # Cast role to expected type (validated at runtime by ChatMessage)
-        role = cast(Literal["system", "user", "assistant", "tool"], role_value)
+        role = cast("Literal['system', 'user', 'assistant', 'tool']", role_value)
 
         return ChatMessage(
             role=role,
@@ -466,10 +461,7 @@ class PromptRenderer:
         """
         truncation_note = " (truncated)" if result.truncated else ""
 
-        content = (
-            f"[Rehydrated Content - artifact:{result.artifact_id}{truncation_note}]\n"
-            f"{result.content}"
-        )
+        content = f"[Rehydrated Content - artifact:{result.artifact_id}{truncation_note}]\n{result.content}"
 
         return ChatMessage(
             role="assistant",
@@ -542,10 +534,7 @@ def render_summary_text(summary: StructuredSummary, span_first_turn: int, span_l
     Returns:
         Formatted summary text.
     """
-    return (
-        f"[Context Summary - Turns {span_first_turn}-{span_last_turn}]\n"
-        f"{summary.render_as_message()}"
-    )
+    return f"[Context Summary - Turns {span_first_turn}-{span_last_turn}]\n{summary.render_as_message()}"
 
 
 def render_externalization_text(

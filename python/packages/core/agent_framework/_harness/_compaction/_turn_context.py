@@ -35,7 +35,7 @@ class TurnContext:
     turn_number: int
     rehydration_happened: bool = False
     rehydrated_tokens: int = 0
-    rehydrated_artifact_ids: list[str] = field(default_factory=lambda: [])
+    rehydrated_artifact_ids: list[str] = field(default_factory=list)
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def should_skip_aggressive_compaction(self) -> bool:
@@ -131,9 +131,7 @@ class RehydrationConfig:
     max_tokens_per_artifact: int = 4000
     total_budget_tokens: int = 8000
     cooldown_turns: int = 2
-    auto_rehydrate_sensitivities: set[str] = field(
-        default_factory=lambda: {"public", "internal"}
-    )
+    auto_rehydrate_sensitivities: set[str] = field(default_factory=lambda: {"public", "internal"})
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
@@ -155,7 +153,5 @@ class RehydrationConfig:
             max_tokens_per_artifact=data.get("max_tokens_per_artifact", 4000),
             total_budget_tokens=data.get("total_budget_tokens", 8000),
             cooldown_turns=data.get("cooldown_turns", 2),
-            auto_rehydrate_sensitivities=set(
-                data.get("auto_rehydrate_sensitivities", ["public", "internal"])
-            ),
+            auto_rehydrate_sensitivities=set(data.get("auto_rehydrate_sensitivities", ["public", "internal"])),
         )

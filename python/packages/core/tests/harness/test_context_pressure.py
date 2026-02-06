@@ -259,9 +259,7 @@ async def test_context_pressure_executor_no_pressure() -> None:
 
     class TestExecutor(Executor):
         @handler
-        async def handle(
-            self, msg: ContextPressureComplete, ctx: WorkflowContext[None, TestOutput]
-        ) -> None:
+        async def handle(self, msg: ContextPressureComplete, ctx: WorkflowContext[None, TestOutput]) -> None:
             await ctx.yield_output(TestOutput(edits_applied=msg.edits_applied, tokens_freed=msg.tokens_freed))
 
     # Create small transcript that won't trigger pressure
@@ -269,9 +267,12 @@ async def test_context_pressure_executor_no_pressure() -> None:
         @handler
         async def setup(self, msg: str, ctx: WorkflowContext[RepairTrigger]) -> None:
             # Small transcript - won't trigger pressure
-            await ctx.set_shared_state(HARNESS_TRANSCRIPT_KEY, [
-                {"event_type": "turn_start", "data": {"turn_number": 1}},
-            ])
+            await ctx.set_shared_state(
+                HARNESS_TRANSCRIPT_KEY,
+                [
+                    {"event_type": "turn_start", "data": {"turn_number": 1}},
+                ],
+            )
             await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, 1)
             await ctx.set_shared_state(HARNESS_MAX_TURNS_KEY, 50)
             await ctx.set_shared_state(HARNESS_STATUS_KEY, HarnessStatus.RUNNING.value)
@@ -317,16 +318,14 @@ async def test_context_pressure_executor_under_pressure() -> None:
 
     class TestExecutor(Executor):
         @handler
-        async def handle(
-            self, msg: ContextPressureComplete, ctx: WorkflowContext[None, TestOutput]
-        ) -> None:
+        async def handle(self, msg: ContextPressureComplete, ctx: WorkflowContext[None, TestOutput]) -> None:
             edit_history = await ctx.get_shared_state(HARNESS_CONTEXT_EDIT_HISTORY_KEY) or []
             await ctx.yield_output(
                 TestOutput(
                     edits_applied=msg.edits_applied,
                     tokens_freed=msg.tokens_freed,
                     edit_history=edit_history,
-                )
+                ),
             )
 
     # Create large transcript with tool results that will trigger pressure
@@ -388,18 +387,19 @@ async def test_context_pressure_executor_saves_budget() -> None:
 
     class TestExecutor(Executor):
         @handler
-        async def handle(
-            self, msg: ContextPressureComplete, ctx: WorkflowContext[None, TestOutput]
-        ) -> None:
+        async def handle(self, msg: ContextPressureComplete, ctx: WorkflowContext[None, TestOutput]) -> None:
             budget = await ctx.get_shared_state(HARNESS_TOKEN_BUDGET_KEY)
             await ctx.yield_output(TestOutput(budget=budget))
 
     class SetupExecutor(Executor):
         @handler
         async def setup(self, msg: str, ctx: WorkflowContext[RepairTrigger]) -> None:
-            await ctx.set_shared_state(HARNESS_TRANSCRIPT_KEY, [
-                {"event_type": "turn_start", "data": {"turn_number": 1}},
-            ])
+            await ctx.set_shared_state(
+                HARNESS_TRANSCRIPT_KEY,
+                [
+                    {"event_type": "turn_start", "data": {"turn_number": 1}},
+                ],
+            )
             await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, 1)
             await ctx.set_shared_state(HARNESS_MAX_TURNS_KEY, 50)
             await ctx.set_shared_state(HARNESS_STATUS_KEY, HarnessStatus.RUNNING.value)

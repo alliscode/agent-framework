@@ -211,14 +211,14 @@ async def _create_workflow(project_client, credential):
 
     # Create separate client for Final Coordinator
     final_coordinator_client = AzureAIClient(
-        project_client=project_client, credential=credential, agent_name="final-coordinator"
+        project_client=project_client, credential=credential, agent_name="final-coordinator",
     )
     final_coordinator = ResearchLead(chat_client=final_coordinator_client, id="final-coordinator")
 
     # Agent 1: Travel Request Handler (initial coordinator)
     # Create separate client with unique agent_name
     travel_request_handler_client = AzureAIClient(
-        project_client=project_client, credential=credential, agent_name="travel-request-handler"
+        project_client=project_client, credential=credential, agent_name="travel-request-handler",
     )
     travel_request_handler = travel_request_handler_client.create_agent(
         id="travel-request-handler",
@@ -231,7 +231,7 @@ async def _create_workflow(project_client, credential):
 
     # Agent 2: Hotel Search Executor
     hotel_search_client = AzureAIClient(
-        project_client=project_client, credential=credential, agent_name="hotel-search-agent"
+        project_client=project_client, credential=credential, agent_name="hotel-search-agent",
     )
     hotel_search_agent = hotel_search_client.create_agent(
         id="hotel-search-agent",
@@ -245,7 +245,7 @@ async def _create_workflow(project_client, credential):
 
     # Agent 3: Flight Search Executor
     flight_search_client = AzureAIClient(
-        project_client=project_client, credential=credential, agent_name="flight-search-agent"
+        project_client=project_client, credential=credential, agent_name="flight-search-agent",
     )
     flight_search_agent = flight_search_client.create_agent(
         id="flight-search-agent",
@@ -259,7 +259,7 @@ async def _create_workflow(project_client, credential):
 
     # Agent 4: Activity Search Executor
     activity_search_client = AzureAIClient(
-        project_client=project_client, credential=credential, agent_name="activity-search-agent"
+        project_client=project_client, credential=credential, agent_name="activity-search-agent",
     )
     activity_search_agent = activity_search_client.create_agent(
         id="activity-search-agent",
@@ -273,7 +273,7 @@ async def _create_workflow(project_client, credential):
 
     # Agent 5: Booking Confirmation Executor
     booking_confirmation_client = AzureAIClient(
-        project_client=project_client, credential=credential, agent_name="booking-confirmation-agent"
+        project_client=project_client, credential=credential, agent_name="booking-confirmation-agent",
     )
     booking_confirmation_agent = booking_confirmation_client.create_agent(
         id="booking-confirmation-agent",
@@ -287,7 +287,7 @@ async def _create_workflow(project_client, credential):
 
     # Agent 6: Booking Payment Executor
     booking_payment_client = AzureAIClient(
-        project_client=project_client, credential=credential, agent_name="booking-payment-agent"
+        project_client=project_client, credential=credential, agent_name="booking-payment-agent",
     )
     booking_payment_agent = booking_payment_client.create_agent(
         id="booking-payment-agent",
@@ -301,7 +301,7 @@ async def _create_workflow(project_client, credential):
 
     # Agent 7: Booking Information Aggregation Executor
     booking_info_client = AzureAIClient(
-        project_client=project_client, credential=credential, agent_name="booking-info-aggregation-agent"
+        project_client=project_client, credential=credential, agent_name="booking-info-aggregation-agent",
     )
     booking_info_aggregation_agent = booking_info_client.create_agent(
         id="booking-info-aggregation-agent",
@@ -331,7 +331,7 @@ async def _create_workflow(project_client, credential):
         .add_edge(booking_info_aggregation_agent, booking_confirmation_agent)
         .add_edge(booking_confirmation_agent, booking_payment_agent)
         .add_fan_in_edges(
-            [booking_info_aggregation_agent, booking_payment_agent, activity_search_agent], final_coordinator
+            [booking_info_aggregation_agent, booking_payment_agent, activity_search_agent], final_coordinator,
         )
         .build()
     )

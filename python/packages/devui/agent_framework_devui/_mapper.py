@@ -189,15 +189,24 @@ class MessageMapper:
             # This must be checked BEFORE generic WorkflowEvent check
             if isinstance(raw_event, AgentRunUpdateEvent):
                 # Debug: log what we received
-                logger.debug(f"Mapper: AgentRunUpdateEvent - executor_id={raw_event.executor_id}, data_type={type(raw_event.data).__name__ if raw_event.data else None}")
+                data_type = type(raw_event.data).__name__ if raw_event.data else None
+                logger.debug(
+                    "Mapper: AgentRunUpdateEvent - executor_id=%s, data_type=%s",
+                    raw_event.executor_id,
+                    data_type,
+                )
                 # Extract the AgentRunResponseUpdate from the event's data attribute
                 if raw_event.data and isinstance(raw_event.data, AgentRunResponseUpdate):
                     # Preserve executor_id in context for proper output routing
                     context["current_executor_id"] = raw_event.executor_id
-                    logger.debug(f"Mapper: Converting AgentRunUpdateEvent to agent update - contents={[type(c).__name__ for c in (raw_event.data.contents or [])]}")
+                    contents_types = [type(c).__name__ for c in (raw_event.data.contents or [])]
+                    logger.debug(
+                        "Mapper: Converting AgentRunUpdateEvent to agent update - contents=%s",
+                        contents_types,
+                    )
                     return await self._convert_agent_update(raw_event.data, context)
                 # If no data, treat as generic workflow event
-                logger.debug(f"Mapper: AgentRunUpdateEvent has no valid data, treating as workflow event")
+                logger.debug("Mapper: AgentRunUpdateEvent has no valid data, treating as workflow event")
                 return await self._convert_workflow_event(raw_event, context)
 
             # Handle complete agent response (AgentRunResponse) - for non-streaming agent execution
@@ -1190,10 +1199,7 @@ class MessageMapper:
                 # Extract status from data for completed events
                 status = event_data.get("status") if harness_event_type == "harness_completed" else None
 
-                logger.debug(
-                    f"HarnessLifecycleEvent: {harness_event_type} "
-                    f"(turn {turn_number}/{max_turns})"
-                )
+                logger.debug(f"HarnessLifecycleEvent: {harness_event_type} (turn {turn_number}/{max_turns})")
 
                 return [
                     ResponseHarnessLifecycleEvent(
@@ -1212,16 +1218,16 @@ class MessageMapper:
             if event_class in ["WorkflowStatusEvent", "WorkflowWarningEvent", "WorkflowErrorEvent"]:
                 # These are informational events that don't map to OpenAI lifecycle events
                 # Convert them to trace events for debugging visibility
-                event_data: dict[str, Any] = {}
+                info_event_data: dict[str, Any] = {}
 
                 # Extract relevant data based on event type
                 if event_class == "WorkflowStatusEvent":
-                    event_data["state"] = str(getattr(event, "state", "unknown"))
+                    info_event_data["state"] = str(getattr(event, "state", "unknown"))
                 elif event_class == "WorkflowWarningEvent":
-                    event_data["message"] = str(getattr(event, "message", ""))
+                    info_event_data["message"] = str(getattr(event, "message", ""))
                 elif event_class == "WorkflowErrorEvent":
-                    event_data["message"] = str(getattr(event, "message", ""))
-                    event_data["error"] = str(getattr(event, "error", ""))
+                    info_event_data["message"] = str(getattr(event, "message", ""))
+                    info_event_data["error"] = str(getattr(event, "error", ""))
 
                 # Create a trace event for debugging
                 trace_event = ResponseTraceEventComplete(
@@ -1229,7 +1235,7 @@ class MessageMapper:
                     data={
                         "trace_type": "workflow_info",
                         "event_type": event_class,
-                        "data": event_data,
+                        "data": info_event_data,
                         "timestamp": datetime.now().isoformat(),
                     },
                     span_id=f"workflow_info_{uuid4().hex[:8]}",

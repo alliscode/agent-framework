@@ -13,10 +13,11 @@ See CONTEXT_COMPACTION_DESIGN.md for full architecture details.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from ._tokenizer import ProviderAwareTokenizer
@@ -163,7 +164,7 @@ class ToolDurabilityPolicy:
     """
 
     durability: ToolDurability
-    must_preserve_fields: list[str] = field(default_factory=lambda: [])
+    must_preserve_fields: list[str] = field(default_factory=list)
     externalize_threshold_tokens: int = 1000
     replay_cost: Literal["free", "cheap", "expensive"] = "cheap"
     capture_determinism: Callable[..., DeterminismMetadata] | None = None
@@ -241,13 +242,13 @@ class ToolResultEnvelope:
     tool_call_id: str
     outcome: Literal["success", "failure", "partial"]
     content: str | dict[str, Any]
-    key_fields: dict[str, Any] = field(default_factory=lambda: {})
+    key_fields: dict[str, Any] = field(default_factory=dict)
     durability: ToolDurability | None = None
     determinism: DeterminismMetadata | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
-    def get_token_count(self, tokenizer: "ProviderAwareTokenizer") -> int:
+    def get_token_count(self, tokenizer: ProviderAwareTokenizer) -> int:
         """Get token count of content.
 
         Args:
@@ -269,9 +270,7 @@ class ToolResultEnvelope:
         parts = [f"[{self.tool_name}: {self.outcome}]"]
         if self.key_fields:
             # Sort keys for determinism
-            fields = ", ".join(
-                f"{k}={v}" for k, v in sorted(self.key_fields.items())
-            )
+            fields = ", ".join(f"{k}={v}" for k, v in sorted(self.key_fields.items()))
             parts.append(f"Key data: {fields}")
         return "\n".join(parts)
 

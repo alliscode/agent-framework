@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import pathlib
 from typing import Any
 
 from agent_framework import (  # Core chat primitives used to build requests
@@ -116,7 +117,7 @@ async def handle_spam_classifier_response(response: AgentExecutorResponse, ctx: 
 
 @executor(id="to_email_assistant_request")
 async def to_email_assistant_request(
-    response: AgentExecutorResponse, ctx: WorkflowContext[AgentExecutorRequest]
+    response: AgentExecutorResponse, ctx: WorkflowContext[AgentExecutorRequest],
 ) -> None:
     """Transform detection result into an AgentExecutorRequest for the email assistant.
 
@@ -183,7 +184,7 @@ async def main() -> None:
     # This keeps the sample deterministic since the model sees the same email every run.
     email_path = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "resources", "email.txt")
 
-    with open(email_path) as email_file:  # noqa: ASYNC230
+    with pathlib.Path(email_path).open() as email_file:  # noqa: ASYNC230
         email = email_file.read()
 
     # Execute the workflow. Since the start is an AgentExecutor, pass an AgentExecutorRequest.

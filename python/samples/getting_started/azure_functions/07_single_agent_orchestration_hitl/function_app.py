@@ -111,14 +111,14 @@ def content_generation_hitl_orchestration(context: DurableOrchestrationContext):
     while attempt < payload.max_review_attempts:
         attempt += 1
         context.set_custom_status(
-            f"Requesting human feedback. Iteration #{attempt}. Timeout: {payload.approval_timeout_hours} hour(s)."
+            f"Requesting human feedback. Iteration #{attempt}. Timeout: {payload.approval_timeout_hours} hour(s).",
         )
 
         yield context.call_activity("notify_user_for_approval", content.model_dump())
 
         approval_task = context.wait_for_external_event(HUMAN_APPROVAL_EVENT)
         timeout_task = context.create_timer(
-            context.current_utc_datetime + timedelta(hours=payload.approval_timeout_hours)
+            context.current_utc_datetime + timedelta(hours=payload.approval_timeout_hours),
         )
 
         winner = yield context.task_any([approval_task, timeout_task])
@@ -131,12 +131,12 @@ def content_generation_hitl_orchestration(context: DurableOrchestrationContext):
                 context.set_custom_status("Content approved by human reviewer. Publishing content...")
                 yield context.call_activity("publish_content", content.model_dump())
                 context.set_custom_status(
-                    f"Content published successfully at {context.current_utc_datetime:%Y-%m-%dT%H:%M:%S}"
+                    f"Content published successfully at {context.current_utc_datetime:%Y-%m-%dT%H:%M:%S}",
                 )
                 return {"content": content.content}
 
             context.set_custom_status(
-                "Content rejected by human reviewer. Incorporating feedback and regenerating..."
+                "Content rejected by human reviewer. Incorporating feedback and regenerating...",
             )
             rewrite_prompt = (
                 "The content was rejected by a human reviewer. Please rewrite the article incorporating their feedback.\n\n"
@@ -155,10 +155,10 @@ def content_generation_hitl_orchestration(context: DurableOrchestrationContext):
             content = rewritten_value
         else:
             context.set_custom_status(
-                f"Human approval timed out after {payload.approval_timeout_hours} hour(s). Treating as rejection."
+                f"Human approval timed out after {payload.approval_timeout_hours} hour(s). Treating as rejection.",
             )
             raise TimeoutError(
-                f"Human approval timed out after {payload.approval_timeout_hours} hour(s)."
+                f"Human approval timed out after {payload.approval_timeout_hours} hour(s).",
             )
 
     raise RuntimeError(f"Content could not be approved after {payload.max_review_attempts} iteration(s).")

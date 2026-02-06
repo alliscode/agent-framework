@@ -159,7 +159,7 @@ def _handle_events(events: list[WorkflowEvent]) -> list[RequestInfoEvent]:
 
         # WorkflowOutputEvent: Contains the final conversation when workflow terminates
         elif isinstance(event, WorkflowOutputEvent):
-            conversation = cast(list[ChatMessage], event.data)
+            conversation = cast("list[ChatMessage]", event.data)
             if isinstance(conversation, list):
                 print("\n=== Final Conversation Snapshot ===")
                 for message in conversation:
@@ -241,7 +241,7 @@ async def main() -> None:
             # which indicates the conversation has concluded naturally.
             lambda conversation: len(conversation) > 0
             and conversation[-1].author_name == "triage_agent"
-            and "welcome" in conversation[-1].text.lower()
+            and "welcome" in conversation[-1].text.lower(),
         )
         .build()
     )

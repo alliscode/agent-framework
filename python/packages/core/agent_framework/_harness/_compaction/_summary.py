@@ -151,7 +151,7 @@ class ToolOutcome:
 
     tool_name: str
     outcome: Literal["success", "failure", "partial"]
-    key_fields: dict[str, Any] = field(default_factory=lambda: {})
+    key_fields: dict[str, Any] = field(default_factory=dict)
     error_message: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -197,11 +197,11 @@ class StructuredSummary:
     """
 
     span: SpanReference
-    facts: list[str] = field(default_factory=lambda: [])
-    decisions: list[Decision] = field(default_factory=lambda: [])
-    open_items: list[OpenItem] = field(default_factory=lambda: [])
-    artifacts: list[ArtifactReference] = field(default_factory=lambda: [])
-    tool_outcomes: list[ToolOutcome] = field(default_factory=lambda: [])
+    facts: list[str] = field(default_factory=list)
+    decisions: list[Decision] = field(default_factory=list)
+    open_items: list[OpenItem] = field(default_factory=list)
+    artifacts: list[ArtifactReference] = field(default_factory=list)
+    tool_outcomes: list[ToolOutcome] = field(default_factory=list)
     current_task: str | None = None
     current_plan: list[str] | None = None
 
@@ -263,9 +263,7 @@ class StructuredSummary:
                 line = f"- {marker} {outcome.tool_name}"
                 if outcome.key_fields:
                     # Sort keys for determinism
-                    fields = ", ".join(
-                        f"{k}={v}" for k, v in sorted(outcome.key_fields.items())
-                    )
+                    fields = ", ".join(f"{k}={v}" for k, v in sorted(outcome.key_fields.items()))
                     line += f" ({fields})"
                 if outcome.error_message:
                     line += f" Error: {outcome.error_message}"
@@ -349,10 +347,7 @@ class SummaryCacheKey:
 
     def to_string(self) -> str:
         """Convert to cache key string."""
-        return (
-            f"{self.content_hash}:{self.schema_version}:"
-            f"{self.policy_version}:{self.model_id}:{self.prompt_version}"
-        )
+        return f"{self.content_hash}:{self.schema_version}:{self.policy_version}:{self.model_id}:{self.prompt_version}"
 
     @classmethod
     def from_string(cls, key: str) -> SummaryCacheKey:

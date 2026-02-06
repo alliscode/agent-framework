@@ -297,10 +297,7 @@ class ClearToolResultsStrategy:
 
         # Check for tool results in older entries (not recent)
         cutoff = max(0, len(transcript) - 3)
-        for event in transcript[:cutoff]:
-            if event.get("event_type") == "tool_result":
-                return True
-        return False
+        return any(event.get("event_type") == "tool_result" for event in transcript[:cutoff])
 
     async def propose(
         self,

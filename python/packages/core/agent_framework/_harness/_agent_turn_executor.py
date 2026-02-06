@@ -50,9 +50,7 @@ class AgentTurnExecutor(Executor):
     """
 
     # Default continuation prompt - gentle nudge, not accusatory
-    DEFAULT_CONTINUATION_PROMPT = (
-        "Continue if there's more to do, or just say 'done' if finished."
-    )
+    DEFAULT_CONTINUATION_PROMPT = "Continue if there's more to do, or just say 'done' if finished."
 
     def __init__(
         self,
@@ -92,6 +90,7 @@ class AgentTurnExecutor(Executor):
         self._work_item_middleware: "WorkItemEventMiddleware | None" = None
         if task_list is not None:
             from ._work_items import WorkItemEventMiddleware
+
             self._work_item_middleware = WorkItemEventMiddleware(task_list.ledger)
 
     @handler
@@ -473,7 +472,7 @@ class AgentTurnExecutor(Executor):
             fields = ", ".join(f"{k}={v}" for k, v in sorted(record.preserved_fields.items()))
             parts.append(f"Key data: {fields}")
 
-        return ChatMessage(
+        return ChatMessage(  # type: ignore[call-overload]
             role=role_value,  # type: ignore[arg-type]
             text="\n".join(parts),
             message_id=getattr(original_msg, "message_id", None),
@@ -493,10 +492,7 @@ class AgentTurnExecutor(Executor):
         span = record.span
         summary_text = record.summary.render_as_message()
 
-        content = (
-            f"[Context Summary - Turns {span.first_turn}-{span.last_turn}]\n"
-            f"{summary_text}"
-        )
+        content = f"[Context Summary - Turns {span.first_turn}-{span.last_turn}]\n{summary_text}"
 
         return ChatMessage(
             role="assistant",
@@ -799,8 +795,7 @@ class AgentTurnExecutor(Executor):
         )
 
         logger.info(
-            f"AgentTurnExecutor: Injected work item reminder "
-            f"({len(ledger.get_incomplete_items())} items remaining)"
+            f"AgentTurnExecutor: Injected work item reminder ({len(ledger.get_incomplete_items())} items remaining)"
         )
 
     async def _emit_work_item_events(self, ctx: WorkflowContext[Any]) -> None:
@@ -844,10 +839,7 @@ class AgentTurnExecutor(Executor):
         if ledger.items:
             deliverables = ledger.get_deliverables()
             total_items = len(ledger.items)
-            done_items = sum(
-                1 for item in ledger.items.values()
-                if item.status.value in ("done", "skipped")
-            )
+            done_items = sum(1 for item in ledger.items.values() if item.status.value in ("done", "skipped"))
             await ctx.add_event(
                 HarnessLifecycleEvent(
                     event_type="deliverables_updated",
@@ -886,6 +878,7 @@ class AgentTurnExecutor(Executor):
         invariant_prompt = self._check_control_invariants(ledger)
         if invariant_prompt:
             from .._types import ChatMessage
+
             self._cache.append(ChatMessage(role="user", text=invariant_prompt))
             await self._append_event(
                 ctx,
@@ -906,7 +899,7 @@ class AgentTurnExecutor(Executor):
 
         from ._work_items import ArtifactRole, WorkItemStatus
 
-        failed_control_items: list[tuple[str, list[dict]]] = []
+        failed_control_items: list[tuple[str, list[dict[str, Any]]]] = []
 
         for item in ledger.items.values():
             if (
@@ -917,10 +910,7 @@ class AgentTurnExecutor(Executor):
                 try:
                     data = json.loads(item.artifact)
                     if data.get("verdict") == "fail":
-                        failed_checks = [
-                            c for c in data.get("checks", [])
-                            if c.get("result") == "fail"
-                        ]
+                        failed_checks = [c for c in data.get("checks", []) if c.get("result") == "fail"]
                         if failed_checks:
                             failed_control_items.append((item.id, failed_checks))
                 except (json.JSONDecodeError, ValueError, AttributeError):
@@ -930,15 +920,13 @@ class AgentTurnExecutor(Executor):
             return None
 
         # Check if any revision items exist in the ledger
-        has_revisions = any(
-            item.revision_of for item in ledger.items.values()
-        )
+        has_revisions = any(item.revision_of for item in ledger.items.values())
 
         if has_revisions:
             return None  # Revisions exist, invariant satisfied
 
         # Build continuation prompt
-        check_names = []
+        check_names: list[str] = []
         for _, checks in failed_control_items:
             check_names.extend(c.get("name", "unnamed") for c in checks)
 

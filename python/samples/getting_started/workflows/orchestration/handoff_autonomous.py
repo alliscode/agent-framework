@@ -90,7 +90,7 @@ def _display_event(event: WorkflowEvent) -> None:
             print(f"\n- {update.author_name}: ", flush=True, end="")
         print(event.data, flush=True, end="")
     elif isinstance(event, WorkflowOutputEvent):
-        conversation = cast(list[ChatMessage], event.data)
+        conversation = cast("list[ChatMessage]", event.data)
         print("\n=== Final Conversation (Autonomous with Iteration) ===")
         for message in conversation:
             speaker = message.author_name or message.role.value
@@ -120,7 +120,7 @@ async def main() -> None:
         .with_termination_condition(
             # Terminate after coordinator provides 5 assistant responses
             lambda conv: sum(1 for msg in conv if msg.author_name == "coordinator" and msg.role.value == "assistant")
-            >= 5
+            >= 5,
         )
         .build()
     )

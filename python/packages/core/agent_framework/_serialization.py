@@ -131,7 +131,7 @@ def is_serializable(value: Any) -> bool:
 
 
 class SerializationMixin:
-    """Mixin class providing comprehensive serialization and deserialization capabilities.
+    r"""Mixin class providing comprehensive serialization and deserialization capabilities.
 
     .. note::
         SerializationMixin is in active development. The API may change in future versions

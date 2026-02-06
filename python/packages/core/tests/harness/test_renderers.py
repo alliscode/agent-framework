@@ -211,7 +211,8 @@ class TestMarkdownRenderer:
 
         # Same item again
         result = renderer.on_deliverables_updated({
-            "done_items": 2, "total_items": 2,
+            "done_items": 2,
+            "total_items": 2,
             "items": [{"item_id": "abc", "title": "Report", "content": "content"}],
         })
         # Should still have progress bar (done changed) but no deliverable block
@@ -221,7 +222,8 @@ class TestMarkdownRenderer:
         """Test that inline deliverables can be disabled."""
         renderer = MarkdownRenderer(show_deliverables_inline=False)
         data = {
-            "done_items": 1, "total_items": 2,
+            "done_items": 1,
+            "total_items": 2,
             "items": [{"item_id": "abc", "title": "Report", "content": "content"}],
         }
         result = renderer.on_deliverables_updated(data)
@@ -263,7 +265,8 @@ class TestMarkdownRenderer:
         renderer = MarkdownRenderer(show_deliverables_inline=True)
         # Simulate seeing a deliverable inline
         renderer.on_deliverables_updated({
-            "done_items": 1, "total_items": 1,
+            "done_items": 1,
+            "total_items": 1,
             "items": [{"item_id": "abc", "title": "Report", "content": "data"}],
         })
 
@@ -323,9 +326,15 @@ class TestRenderStream:
         events = [
             HarnessLifecycleEvent(event_type="turn_started", data={"turn_number": 1}),
             AgentRunUpdateEvent(executor_id="agent", data=AgentRunResponseUpdate(text="Hello ")),
-            HarnessLifecycleEvent(event_type="deliverables_updated", data={
-                "done_items": 1, "total_items": 2, "count": 0, "items": [],
-            }),
+            HarnessLifecycleEvent(
+                event_type="deliverables_updated",
+                data={
+                    "done_items": 1,
+                    "total_items": 2,
+                    "count": 0,
+                    "items": [],
+                },
+            ),
             AgentRunUpdateEvent(executor_id="agent", data=AgentRunResponseUpdate(text="world")),
         ]
         harness = mock_harness(events)
@@ -339,7 +348,8 @@ class TestRenderStream:
         # Passthrough suppresses turn_started and deliverables_updated text injection
         # but lifecycle events are always yielded
         text_events = [
-            e for e in collected
+            e
+            for e in collected
             if isinstance(e, AgentRunUpdateEvent) and e.data and hasattr(e.data, "text") and e.data.text
         ]
         assert len(text_events) == 2
@@ -364,7 +374,8 @@ class TestRenderStream:
             collected.append(event)
 
         text_events = [
-            e for e in collected
+            e
+            for e in collected
             if isinstance(e, AgentRunUpdateEvent) and e.data and hasattr(e.data, "text") and e.data.text
         ]
 
@@ -377,9 +388,15 @@ class TestRenderStream:
     async def test_markdown_injects_progress_bar(self, mock_harness) -> None:
         """Test that MarkdownRenderer injects progress bar."""
         events = [
-            HarnessLifecycleEvent(event_type="deliverables_updated", data={
-                "done_items": 2, "total_items": 4, "count": 0, "items": [],
-            }),
+            HarnessLifecycleEvent(
+                event_type="deliverables_updated",
+                data={
+                    "done_items": 2,
+                    "total_items": 4,
+                    "count": 0,
+                    "items": [],
+                },
+            ),
         ]
         harness = mock_harness(events)
         renderer = MarkdownRenderer()
@@ -389,8 +406,10 @@ class TestRenderStream:
             collected.append(event)
 
         from agent_framework._workflows._events import AgentRunUpdateEvent
+
         text_events = [
-            e for e in collected
+            e
+            for e in collected
             if isinstance(e, AgentRunUpdateEvent) and e.data and hasattr(e.data, "text") and e.data.text
         ]
 
@@ -402,9 +421,15 @@ class TestRenderStream:
         """Test that lifecycle events are always yielded regardless of renderer."""
         events = [
             HarnessLifecycleEvent(event_type="turn_started", data={"turn_number": 1}),
-            HarnessLifecycleEvent(event_type="deliverables_updated", data={
-                "done_items": 0, "total_items": 1, "count": 0, "items": [],
-            }),
+            HarnessLifecycleEvent(
+                event_type="deliverables_updated",
+                data={
+                    "done_items": 0,
+                    "total_items": 1,
+                    "count": 0,
+                    "items": [],
+                },
+            ),
         ]
         harness = mock_harness(events)
 
@@ -457,7 +482,8 @@ class TestRenderStream:
             collected.append(event)
 
         text_events = [
-            e for e in collected
+            e
+            for e in collected
             if isinstance(e, AgentRunUpdateEvent) and e.data and hasattr(e.data, "text") and e.data.text
         ]
         assert len(text_events) == 1
@@ -494,7 +520,8 @@ class TestRenderStream:
             collected.append(event)
 
         text_events = [
-            e for e in collected
+            e
+            for e in collected
             if isinstance(e, AgentRunUpdateEvent) and e.data and hasattr(e.data, "text") and e.data.text
         ]
         assert len(text_events) == 1
@@ -530,7 +557,8 @@ class TestRenderStream:
             collected.append(event)
 
         text_events = [
-            e for e in collected
+            e
+            for e in collected
             if isinstance(e, AgentRunUpdateEvent) and e.data and hasattr(e.data, "text") and e.data.text
         ]
         assert len(text_events) == 0
@@ -550,10 +578,7 @@ class TestRenderStream:
         async for event in render_stream(harness, "test", renderer):
             collected.append(event)
 
-        injected = [
-            e for e in collected
-            if isinstance(e, AgentRunUpdateEvent) and e.executor_id == "harness_renderer"
-        ]
+        injected = [e for e in collected if isinstance(e, AgentRunUpdateEvent) and e.executor_id == "harness_renderer"]
         assert len(injected) == 1  # the turn indicator
 
 

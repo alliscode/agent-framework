@@ -422,7 +422,8 @@ class CoverageLedger:
             return 100.0
 
         met_count = sum(
-            1 for req_id in required_ids
+            1
+            for req_id in required_ids
             if self.coverage.get(req_id, RequirementCoverage(req_id)).status == RequirementStatus.MET
         )
         return (met_count / len(required_ids)) * 100.0
@@ -564,10 +565,7 @@ class ProgressFingerprint:
 
         if ledger:
             # Include coverage status in fingerprint
-            state["coverage"] = {
-                req_id: cov.status.value
-                for req_id, cov in ledger.coverage.items()
-            }
+            state["coverage"] = {req_id: cov.status.value for req_id, cov in ledger.coverage.items()}
 
         if work_item_statuses:
             # Include work item statuses so changes count as progress
@@ -597,7 +595,7 @@ class ProgressTracker:
         self.fingerprints.append(fingerprint)
         # Keep only recent history
         if len(self.fingerprints) > self.stall_threshold * 2:
-            self.fingerprints = self.fingerprints[-self.stall_threshold * 2:]
+            self.fingerprints = self.fingerprints[-self.stall_threshold * 2 :]
 
     def is_stalled(self) -> bool:
         """Check if progress has stalled.
@@ -607,7 +605,7 @@ class ProgressTracker:
         if len(self.fingerprints) < self.stall_threshold:
             return False
 
-        recent = self.fingerprints[-self.stall_threshold:]
+        recent = self.fingerprints[-self.stall_threshold :]
         return all(fp.fingerprint == recent[0].fingerprint for fp in recent)
 
     def get_stall_duration(self) -> int:
@@ -686,10 +684,7 @@ class GapReport:
             if req:
                 unmet.append({"id": req_id, "description": req.description})
 
-        unanswered = [
-            q.question for q in contract.questions
-            if not q.asked or q.answer is None
-        ]
+        unanswered = [q.question for q in contract.questions if not q.asked or q.answer is None]
 
         suggestions = []
         if unmet:

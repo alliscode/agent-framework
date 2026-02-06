@@ -19,7 +19,8 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Protocol, runtime_checkable
+from collections.abc import AsyncIterator
+from typing import Any, Protocol, runtime_checkable
 
 from .._types import AgentRunResponseUpdate
 from .._workflows._events import AgentRunUpdateEvent, WorkflowOutputEvent
@@ -194,17 +195,16 @@ class MarkdownRenderer:
         parts = [f"\n\n---\n\n**{status_icon} Complete** ({result.turn_count} turns)\n"]
 
         # Show any deliverables not already rendered inline
-        unseen = [
-            d for d in result.deliverables
-            if d.get("item_id") not in self._seen_deliverable_ids
-        ]
+        unseen = [d for d in result.deliverables if d.get("item_id") not in self._seen_deliverable_ids]
         if unseen:
             parts.append(f"\n**Deliverables ({len(unseen)}):**\n")
             for d in unseen:
-                parts.append(self._format_deliverable(
-                    d.get("title", "Untitled"),
-                    d.get("content", ""),
-                ))
+                parts.append(
+                    self._format_deliverable(
+                        d.get("title", "Untitled"),
+                        d.get("content", ""),
+                    ),
+                )
 
         return "".join(parts)
 
@@ -253,9 +253,7 @@ async def render_stream(
         # Handle lifecycle events
         if isinstance(event, HarnessLifecycleEvent):
             if event.event_type == "turn_started":
-                turn_number = (
-                    event.data.get("turn_number", 1) if event.data else 1
-                )
+                turn_number = event.data.get("turn_number", 1) if event.data else 1
                 text = renderer.on_turn_started(turn_number)
                 if text:
                     yield _make_text_event(text)

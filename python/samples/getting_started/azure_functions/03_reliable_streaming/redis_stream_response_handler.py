@@ -8,9 +8,9 @@ as a message broker. It enables clients to disconnect and reconnect without losi
 
 import asyncio
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import timedelta
-from collections.abc import AsyncIterator
 
 import redis.asyncio as aioredis
 
@@ -84,7 +84,7 @@ class RedisStreamResponseHandler:
                 "text": text,
                 "sequence": str(sequence),
                 "timestamp": str(int(time.time() * 1000)),
-            }
+            },
         )
         await self._redis.expire(stream_key, self._stream_ttl)
 
@@ -107,7 +107,7 @@ class RedisStreamResponseHandler:
                 "sequence": str(sequence),
                 "timestamp": str(int(time.time() * 1000)),
                 "done": "true",
-            }
+            },
         )
         await self._redis.expire(stream_key, self._stream_ttl)
 
@@ -130,7 +130,7 @@ class RedisStreamResponseHandler:
             StreamChunk instances containing text content or status markers.
         """
         stream_key = self._get_stream_key(conversation_id)
-        start_id = cursor if cursor else "0-0"
+        start_id = cursor or "0-0"
 
         empty_read_count = 0
         has_seen_data = False
@@ -152,7 +152,7 @@ class RedisStreamResponseHandler:
                             timeout_seconds = self.MAX_EMPTY_READS * self.POLL_INTERVAL_MS / 1000
                             yield StreamChunk(
                                 entry_id=start_id,
-                                error=f"Stream not found or timed out after {timeout_seconds} seconds"
+                                error=f"Stream not found or timed out after {timeout_seconds} seconds",
                             )
                             return
 

@@ -133,7 +133,7 @@ class ExternalizationRecord:
 
     span: SpanReference
     artifact_id: str
-    summary: "StructuredSummary"
+    summary: StructuredSummary
     rehydrate_hint: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -161,7 +161,7 @@ class SummarizationRecord:
     """
 
     span: SpanReference
-    summary: "StructuredSummary"
+    summary: StructuredSummary
     summary_token_count: int
 
     def to_dict(self) -> dict[str, Any]:
@@ -244,18 +244,16 @@ class CompactionPlan:
     thread_id: str
     thread_version: int
     created_at: datetime
-    externalizations: list[ExternalizationRecord] = field(default_factory=lambda: [])
-    summarizations: list[SummarizationRecord] = field(default_factory=lambda: [])
-    clearings: list[ClearRecord] = field(default_factory=lambda: [])
-    drops: list[DropRecord] = field(default_factory=lambda: [])
+    externalizations: list[ExternalizationRecord] = field(default_factory=list)
+    summarizations: list[SummarizationRecord] = field(default_factory=list)
+    clearings: list[ClearRecord] = field(default_factory=list)
+    drops: list[DropRecord] = field(default_factory=list)
     original_token_count: int = 0
     compacted_token_count: int = 0
 
     # Internal: normalized action map (built in __post_init__)
-    _action_map: dict[str, tuple[CompactionAction, Any]] = field(
-        default_factory=lambda: {}, repr=False
-    )
-    _normalization_warnings: list[str] = field(default_factory=lambda: [], repr=False)
+    _action_map: dict[str, tuple[CompactionAction, Any]] = field(default_factory=dict, repr=False)
+    _normalization_warnings: list[str] = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
         """Build normalized action map from records."""
@@ -289,7 +287,7 @@ class CompactionPlan:
                         if COMPACTION_PRECEDENCE[action] > COMPACTION_PRECEDENCE[prev_action]:
                             warnings.append(
                                 f"Message {msg_id} in both {prev_type} and {record_type}; "
-                                f"{record_type} takes precedence"
+                                f"{record_type} takes precedence",
                             )
                         else:
                             # Lower or equal precedence, skip
@@ -334,12 +332,7 @@ class CompactionPlan:
     @property
     def is_empty(self) -> bool:
         """True if this plan has no compaction records."""
-        return (
-            not self.externalizations
-            and not self.summarizations
-            and not self.clearings
-            and not self.drops
-        )
+        return not self.externalizations and not self.summarizations and not self.clearings and not self.drops
 
     def rebuild_action_map(self) -> None:
         """Rebuild the action map after modifying records.

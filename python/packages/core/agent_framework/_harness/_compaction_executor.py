@@ -164,7 +164,7 @@ class CompactionExecutor(Executor):
                 ExternalizeStrategy(
                     self._artifact_store,
                     self._summarizer,
-                )
+                ),
             )
 
         # Always include DropStrategy (last resort)
@@ -173,9 +173,7 @@ class CompactionExecutor(Executor):
         return strategies
 
     @handler
-    async def check_compaction(
-        self, trigger: RepairComplete, ctx: WorkflowContext[CompactionComplete]
-    ) -> None:
+    async def check_compaction(self, trigger: RepairComplete, ctx: WorkflowContext[CompactionComplete]) -> None:
         """Check context pressure and apply compaction if needed.
 
         Args:
@@ -255,7 +253,7 @@ class CompactionExecutor(Executor):
                     "tokens_freed": tokens_freed,
                     "proposals_applied": proposals_applied,
                 },
-            )
+            ),
         )
 
         # 10. Signal completion
@@ -265,7 +263,7 @@ class CompactionExecutor(Executor):
                 plan_updated=plan_updated,
                 tokens_freed=tokens_freed,
                 proposals_applied=proposals_applied,
-            )
+            ),
         )
 
     async def compact_thread(
@@ -292,9 +290,7 @@ class CompactionExecutor(Executor):
         # This should be provided by the caller or calculated from thread
         if thread.message_store is not None:
             messages = await thread.message_store.list_messages()
-            current_tokens = sum(
-                self._tokenizer.count_tokens(msg.text) for msg in messages
-            )
+            current_tokens = sum(self._tokenizer.count_tokens(msg.text) for msg in messages)
         else:
             current_tokens = 0
 
@@ -332,7 +328,7 @@ class CompactionExecutor(Executor):
         try:
             budget_data = await ctx.get_shared_state(HARNESS_TOKEN_BUDGET_KEY)
             if budget_data and isinstance(budget_data, dict):
-                budget_dict = cast(dict[str, Any], budget_data)
+                budget_dict = cast("dict[str, Any]", budget_data)
                 return TokenBudget.from_dict(budget_dict)
         except KeyError:
             pass
@@ -354,9 +350,7 @@ class CompactionExecutor(Executor):
         except KeyError:
             return 0
 
-    async def _load_plan(
-        self, ctx: WorkflowContext[Any]
-    ) -> tuple[CompactionPlan | None, int]:
+    async def _load_plan(self, ctx: WorkflowContext[Any]) -> tuple[CompactionPlan | None, int]:
         """Load the current compaction plan from shared state.
 
         Note: Full deserialization is not yet implemented. For now, we check
@@ -365,7 +359,7 @@ class CompactionExecutor(Executor):
         try:
             plan_data = await ctx.get_shared_state(HARNESS_COMPACTION_PLAN_KEY)
             if plan_data and isinstance(plan_data, dict):
-                plan_dict = cast(dict[str, Any], plan_data)
+                plan_dict = cast("dict[str, Any]", plan_data)
                 version = int(plan_dict.get("_version", 1))
                 thread_id = str(plan_dict.get("thread_id", "harness"))
                 # Note: Full deserialization will be added when from_dict is added to CompactionPlan
@@ -375,22 +369,16 @@ class CompactionExecutor(Executor):
             pass
         return None, 0
 
-    async def _save_plan(
-        self, ctx: WorkflowContext[Any], plan: CompactionPlan, version: int
-    ) -> None:
+    async def _save_plan(self, ctx: WorkflowContext[Any], plan: CompactionPlan, version: int) -> None:
         """Save the compaction plan to shared state."""
         plan_data = plan.to_dict()
         plan_data["_version"] = version + 1
         await ctx.set_shared_state(HARNESS_COMPACTION_PLAN_KEY, plan_data)
 
-    async def _save_metrics(
-        self, ctx: WorkflowContext[Any], metrics: dict[str, Any]
-    ) -> None:
+    async def _save_metrics(self, ctx: WorkflowContext[Any], metrics: dict[str, Any]) -> None:
         """Save compaction metrics to shared state."""
         try:
-            existing: list[dict[str, Any]] = list(
-                await ctx.get_shared_state(HARNESS_COMPACTION_METRICS_KEY) or []
-            )
+            existing: list[dict[str, Any]] = list(await ctx.get_shared_state(HARNESS_COMPACTION_METRICS_KEY) or [])
         except KeyError:
             existing = []
 

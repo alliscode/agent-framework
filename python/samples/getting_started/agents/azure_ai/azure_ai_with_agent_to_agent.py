@@ -26,11 +26,11 @@ async def main() -> None:
         "type": "a2a_preview",
         "project_connection_id": os.environ["A2A_PROJECT_CONNECTION_ID"],
     }
-    
+
     # If the connection is missing a target, we need to set the A2A endpoint URL
     if os.environ.get("A2A_ENDPOINT"):
         a2a_tool["base_url"] = os.environ["A2A_ENDPOINT"]
-    
+
     async with (
         AzureCliCredential() as credential,
         AzureAIClient(credential=credential).create_agent(

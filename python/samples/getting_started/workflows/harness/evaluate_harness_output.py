@@ -137,7 +137,7 @@ def word_wrap(text: str, width: int) -> list[str]:
             current_line = word
     if current_line:
         lines.append(current_line)
-    return lines if lines else [""]
+    return lines or [""]
 
 
 def render_progress_bar(done: int, total: int) -> None:
@@ -283,7 +283,7 @@ def analyze_result(
         analysis["issues"].append(
             "NO_DELIVERABLES: No items were classified as deliverable. "
             "For a multi-step task, the agent should classify user-facing outputs "
-            "with role='deliverable'."
+            "with role='deliverable'.",
         )
 
     # --- Score 2: Double Emission ---
@@ -308,7 +308,7 @@ def analyze_result(
         analysis["issues"].append(
             f"DOUBLE_EMISSION: Response text reproduces {max_overlap:.0%} of "
             f"deliverable artifact content. Agent should only describe what it "
-            f"produced, not reproduce the content."
+            f"produced, not reproduce the content.",
         )
 
     # --- Score 3: Meta-references ---
@@ -321,7 +321,7 @@ def analyze_result(
     if meta_refs:
         analysis["issues"].append(
             f"META_REFERENCES: Found {len(meta_refs)} references to internal "
-            f"mechanics (tools, artifacts, work items) in response text."
+            f"mechanics (tools, artifacts, work items) in response text.",
         )
 
     # --- Score 4: Response Brevity ---
@@ -339,7 +339,7 @@ def analyze_result(
             analysis["issues"].append(
                 f"VERBOSE_RESPONSE: Response text ({len(response_text)} chars) is "
                 f"{brevity_ratio:.1f}x the length of deliverable content "
-                f"({total_artifact_length} chars). Agent should be concise."
+                f"({total_artifact_length} chars). Agent should be concise.",
             )
     else:
         analysis["scores"]["response_brevity"] = {
@@ -605,7 +605,7 @@ async def run_evaluation(prompt: str, max_turns: int = 20, rich_display: bool = 
 def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Evaluate Agent Harness output for anti-double-emission compliance"
+        description="Evaluate Agent Harness output for anti-double-emission compliance",
     )
     parser.add_argument(
         "--prompt", type=str, default=None,

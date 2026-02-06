@@ -8,6 +8,8 @@ from enum import Enum
 from typing import Any, Literal
 from uuid import uuid4
 
+from .._workflows._events import WorkflowEvent
+
 
 class HarnessStatus(Enum):
     """Status of the harness execution."""
@@ -72,6 +74,7 @@ class HarnessEvent:
         "stall_detected",
         "context_pressure",
         "work_item_reminder",
+        "control_invariant_violation",
     ]
     data: dict[str, Any]
     event_id: str = field(default_factory=lambda: str(uuid4()))
@@ -163,8 +166,6 @@ class HarnessResult:
 
 # Workflow event for streaming harness lifecycle to DevUI
 
-from .._workflows._events import WorkflowEvent
-
 
 class HarnessLifecycleEvent(WorkflowEvent):
     """Workflow event for streaming harness lifecycle updates.
@@ -191,6 +192,7 @@ class HarnessLifecycleEvent(WorkflowEvent):
             "context_pressure",
             "deliverables_updated",
             "harness_completed",
+            "work_item_changed",
         ],
         *,
         turn_number: int = 0,

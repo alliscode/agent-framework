@@ -513,9 +513,7 @@ class InMemorySummaryCache:
         removed = 0
 
         with self._lock:
-            expired_keys = [
-                key for key, entry in self._entries.items() if entry.is_expired()
-            ]
+            expired_keys = [key for key, entry in self._entries.items() if entry.is_expired()]
 
             for key in expired_keys:
                 del self._entries[key]
@@ -542,7 +540,7 @@ def compute_content_hash(content: str) -> str:
 
 
 def create_summary_cache_key(
-    span: "SpanReference",
+    span: SpanReference,
     messages_content: str,
     *,
     policy_version: str = "v1.0",

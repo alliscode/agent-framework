@@ -2,7 +2,6 @@
 
 """Tests for the Agent Harness Work Item tracking module."""
 
-
 import pytest
 
 from agent_framework._harness import (
@@ -231,10 +230,14 @@ class TestWorkItemLedger:
         ledger = WorkItemLedger()
         ledger.add_item(WorkItem(id="a", title="T1", status=WorkItemStatus.DONE, requires_revision=True))
         # Add a completed revision child
-        ledger.add_item(WorkItem(
-            id="rev_a", title="Revise: T1",
-            status=WorkItemStatus.DONE, revision_of="a",
-        ))
+        ledger.add_item(
+            WorkItem(
+                id="rev_a",
+                title="Revise: T1",
+                status=WorkItemStatus.DONE,
+                revision_of="a",
+            ),
+        )
 
         needing = ledger.get_items_needing_revision()
         assert len(needing) == 0
@@ -254,10 +257,14 @@ class TestWorkItemLedger:
         """Test that a skipped revision child also resolves the parent."""
         ledger = WorkItemLedger()
         ledger.add_item(WorkItem(id="a", title="T1", status=WorkItemStatus.DONE, requires_revision=True))
-        ledger.add_item(WorkItem(
-            id="rev_a", title="Revise: T1",
-            status=WorkItemStatus.SKIPPED, revision_of="a",
-        ))
+        ledger.add_item(
+            WorkItem(
+                id="rev_a",
+                title="Revise: T1",
+                status=WorkItemStatus.SKIPPED,
+                revision_of="a",
+            ),
+        )
 
         assert ledger.is_all_complete()
 
@@ -265,10 +272,14 @@ class TestWorkItemLedger:
         """Test that a pending revision child keeps parent unresolved."""
         ledger = WorkItemLedger()
         ledger.add_item(WorkItem(id="a", title="T1", status=WorkItemStatus.DONE, requires_revision=True))
-        ledger.add_item(WorkItem(
-            id="rev_a", title="Revise: T1",
-            status=WorkItemStatus.PENDING, revision_of="a",
-        ))
+        ledger.add_item(
+            WorkItem(
+                id="rev_a",
+                title="Revise: T1",
+                status=WorkItemStatus.PENDING,
+                revision_of="a",
+            ),
+        )
 
         incomplete = ledger.get_incomplete_items()
         # Both the parent (needs revision) and the child (pending) are incomplete
@@ -533,10 +544,7 @@ class TestWorkItemTaskList:
 
         # A new revision child should exist
         assert len(task_list.ledger.items) == 2
-        revision_items = [
-            i for i in task_list.ledger.items.values()
-            if i.revision_of == item_id
-        ]
+        revision_items = [i for i in task_list.ledger.items.values() if i.revision_of == item_id]
         assert len(revision_items) == 1
         assert revision_items[0].title.startswith("Revise:")
         assert revision_items[0].priority == WorkItemPriority.HIGH
@@ -571,10 +579,7 @@ class TestWorkItemTaskList:
         assert not task_list.ledger.is_all_complete()
 
         # Complete the revision child
-        revision_id = [
-            i.id for i in task_list.ledger.items.values()
-            if i.revision_of == item_id
-        ][0]
+        revision_id = [i.id for i in task_list.ledger.items.values() if i.revision_of == item_id][0]
         update_tool(item_id=revision_id, status="done")
         assert task_list.ledger.is_all_complete()
 
@@ -660,14 +665,22 @@ class TestFormatWorkItemReminder:
     def test_revision_items_in_reminder(self) -> None:
         """Test reminder format with revision-flagged items."""
         ledger = WorkItemLedger()
-        ledger.add_item(WorkItem(
-            id="abc123", title="Write timeline",
-            status=WorkItemStatus.DONE, requires_revision=True,
-        ))
-        ledger.add_item(WorkItem(
-            id="def456", title="Revise: Write timeline",
-            status=WorkItemStatus.PENDING, revision_of="abc123",
-        ))
+        ledger.add_item(
+            WorkItem(
+                id="abc123",
+                title="Write timeline",
+                status=WorkItemStatus.DONE,
+                requires_revision=True,
+            ),
+        )
+        ledger.add_item(
+            WorkItem(
+                id="def456",
+                title="Revise: Write timeline",
+                status=WorkItemStatus.PENDING,
+                revision_of="abc123",
+            ),
+        )
 
         result = format_work_item_reminder(ledger)
         assert "unresolved work items" in result
@@ -892,13 +905,22 @@ class TestStopDecisionWorkItemVerification:
 
         ledger = WorkItemLedger()
         # Item is done but flagged for revision, no revision child completed
-        ledger.add_item(WorkItem(
-            id="a", title="T1", status=WorkItemStatus.DONE, requires_revision=True,
-        ))
-        ledger.add_item(WorkItem(
-            id="rev_a", title="Revise: T1",
-            status=WorkItemStatus.PENDING, revision_of="a",
-        ))
+        ledger.add_item(
+            WorkItem(
+                id="a",
+                title="T1",
+                status=WorkItemStatus.DONE,
+                requires_revision=True,
+            ),
+        )
+        ledger.add_item(
+            WorkItem(
+                id="rev_a",
+                title="Revise: T1",
+                status=WorkItemStatus.PENDING,
+                revision_of="a",
+            ),
+        )
         mock_ctx._state[HARNESS_WORK_ITEM_LEDGER_KEY] = ledger.to_dict()
 
         turn_result = TurnComplete(agent_done=True)
@@ -917,13 +939,22 @@ class TestStopDecisionWorkItemVerification:
         )
 
         ledger = WorkItemLedger()
-        ledger.add_item(WorkItem(
-            id="a", title="T1", status=WorkItemStatus.DONE, requires_revision=True,
-        ))
-        ledger.add_item(WorkItem(
-            id="rev_a", title="Revise: T1",
-            status=WorkItemStatus.DONE, revision_of="a",
-        ))
+        ledger.add_item(
+            WorkItem(
+                id="a",
+                title="T1",
+                status=WorkItemStatus.DONE,
+                requires_revision=True,
+            ),
+        )
+        ledger.add_item(
+            WorkItem(
+                id="rev_a",
+                title="Revise: T1",
+                status=WorkItemStatus.DONE,
+                revision_of="a",
+            ),
+        )
         mock_ctx._state[HARNESS_WORK_ITEM_LEDGER_KEY] = ledger.to_dict()
 
         turn_result = TurnComplete(agent_done=True)
@@ -1204,33 +1235,19 @@ class TestArtifactValidation:
 
     def test_heavy_artifact_stored_interior(self) -> None:
         """Test 'artifact stored' meta-reference in interior triggers HEAVY."""
-        content = (
-            "## Timeline\n"
-            "09:00 - Start\n"
-            "The artifact stored above is incomplete.\n"
-            "09:15 - End"
-        )
+        content = "## Timeline\n09:00 - Start\nThe artifact stored above is incomplete.\n09:15 - End"
         result = validate_artifact_content(content)
         assert result.level == ArtifactContaminationLevel.HEAVY
 
     def test_heavy_task_complete_reference(self) -> None:
         """Test task_complete reference triggers HEAVY."""
-        content = (
-            "## Report\n"
-            "Data here.\n"
-            "After this I will call task_complete.\n"
-            "More data."
-        )
+        content = "## Report\nData here.\nAfter this I will call task_complete.\nMore data."
         result = validate_artifact_content(content)
         assert result.level == ArtifactContaminationLevel.HEAVY
 
     def test_heavy_work_item_set_artifact_reference(self) -> None:
         """Test work_item_set_artifact reference triggers HEAVY."""
-        content = (
-            "## Output\n"
-            "Using work_item_set_artifact to store this.\n"
-            "Content follows."
-        )
+        content = "## Output\nUsing work_item_set_artifact to store this.\nContent follows."
         result = validate_artifact_content(content)
         assert result.level == ArtifactContaminationLevel.HEAVY
 
@@ -1332,13 +1349,7 @@ class TestArtifactValidation:
 
     def test_three_boundary_lines_is_light(self) -> None:
         """Test that exactly 3 boundary narration lines is still LIGHT."""
-        content = (
-            "I will now write this.\n"
-            "Let me be thorough.\n"
-            "## Report\n"
-            "Content here.\n"
-            "I've stored this artifact."
-        )
+        content = "I will now write this.\nLet me be thorough.\n## Report\nContent here.\nI've stored this artifact."
         result = validate_artifact_content(content)
         assert result.level == ArtifactContaminationLevel.LIGHT
         assert len(result.removed_lines) == 3
@@ -1408,12 +1419,7 @@ class TestSetArtifactToolValidation:
         add_tool(title="Write analysis", role="deliverable")
         item_id = list(task_list.ledger.items.keys())[0]
 
-        artifact = (
-            "## Analysis\n"
-            "Finding 1.\n"
-            "I'll update the work item with this.\n"
-            "Finding 2."
-        )
+        artifact = "## Analysis\nFinding 1.\nI'll update the work item with this.\nFinding 2."
         result = set_artifact_tool(item_id=item_id, artifact=artifact)
         assert "Error" in result
         assert "rejected" in result
@@ -1435,12 +1441,7 @@ class TestSetArtifactToolValidation:
         assert task_list.ledger.items[item_id].artifact == "## Original\nClean content."
 
         # Second: attempt contaminated artifact
-        bad_artifact = (
-            "## Updated\n"
-            "New content.\n"
-            "I stored the artifact saved above.\n"
-            "More content."
-        )
+        bad_artifact = "## Updated\nNew content.\nI stored the artifact saved above.\nMore content."
         result = set_artifact_tool(item_id=item_id, artifact=bad_artifact)
         assert "Error" in result
         # Original artifact preserved
@@ -1534,8 +1535,10 @@ class TestArtifactRole:
     def test_serialization_round_trip(self) -> None:
         """Test artifact_role survives serialization."""
         item = WorkItem(
-            id="abc", title="Report",
-            artifact="content", artifact_role=ArtifactRole.DELIVERABLE,
+            id="abc",
+            title="Report",
+            artifact="content",
+            artifact_role=ArtifactRole.DELIVERABLE,
         )
         data = item.to_dict()
         assert data["artifact_role"] == "deliverable"
@@ -1552,8 +1555,10 @@ class TestArtifactRole:
     def test_serialization_invalid_role_defaults_to_working(self) -> None:
         """Test that invalid artifact_role in dict defaults to WORKING."""
         data = {
-            "id": "abc", "title": "Test",
-            "status": "pending", "priority": "medium",
+            "id": "abc",
+            "title": "Test",
+            "status": "pending",
+            "priority": "medium",
             "artifact_role": "nonexistent_role",
         }
         item = WorkItem.from_dict(data)
@@ -1670,10 +1675,7 @@ class TestRevisionRoleInheritance:
 
         flag_revision_tool(item_id=item_id, reason="Needs fixes")
 
-        revision_items = [
-            i for i in task_list.ledger.items.values()
-            if i.revision_of == item_id
-        ]
+        revision_items = [i for i in task_list.ledger.items.values() if i.revision_of == item_id]
         assert len(revision_items) == 1
         assert revision_items[0].artifact_role == ArtifactRole.DELIVERABLE
 
@@ -1691,10 +1693,7 @@ class TestRevisionRoleInheritance:
 
         flag_revision_tool(item_id=item_id, reason="Incorrect check")
 
-        revision_items = [
-            i for i in task_list.ledger.items.values()
-            if i.revision_of == item_id
-        ]
+        revision_items = [i for i in task_list.ledger.items.values() if i.revision_of == item_id]
         assert len(revision_items) == 1
         assert revision_items[0].artifact_role == ArtifactRole.CONTROL
 
@@ -1712,10 +1711,7 @@ class TestRevisionRoleInheritance:
 
         flag_revision_tool(item_id=item_id, reason="Incomplete")
 
-        revision_items = [
-            i for i in task_list.ledger.items.values()
-            if i.revision_of == item_id
-        ]
+        revision_items = [i for i in task_list.ledger.items.values() if i.revision_of == item_id]
         assert len(revision_items) == 1
         assert revision_items[0].artifact_role == ArtifactRole.WORKING
 
@@ -1736,14 +1732,22 @@ class TestLedgerGetDeliverables:
     def test_only_deliverables_with_content(self) -> None:
         """Test that only items with DELIVERABLE role and artifact are returned."""
         ledger = WorkItemLedger()
-        ledger.add_item(WorkItem(
-            id="a", title="Report",
-            artifact="report content", artifact_role=ArtifactRole.DELIVERABLE,
-        ))
-        ledger.add_item(WorkItem(
-            id="b", title="Empty deliverable",
-            artifact="", artifact_role=ArtifactRole.DELIVERABLE,
-        ))
+        ledger.add_item(
+            WorkItem(
+                id="a",
+                title="Report",
+                artifact="report content",
+                artifact_role=ArtifactRole.DELIVERABLE,
+            ),
+        )
+        ledger.add_item(
+            WorkItem(
+                id="b",
+                title="Empty deliverable",
+                artifact="",
+                artifact_role=ArtifactRole.DELIVERABLE,
+            ),
+        )
         deliverables = ledger.get_deliverables()
         assert len(deliverables) == 1
         assert deliverables[0].id == "a"
@@ -1751,22 +1755,38 @@ class TestLedgerGetDeliverables:
     def test_mixed_roles(self) -> None:
         """Test filtering across mixed roles."""
         ledger = WorkItemLedger()
-        ledger.add_item(WorkItem(
-            id="a", title="Report",
-            artifact="report content", artifact_role=ArtifactRole.DELIVERABLE,
-        ))
-        ledger.add_item(WorkItem(
-            id="b", title="Notes",
-            artifact="scratch data", artifact_role=ArtifactRole.WORKING,
-        ))
-        ledger.add_item(WorkItem(
-            id="c", title="Check",
-            artifact='{"pass": true}', artifact_role=ArtifactRole.CONTROL,
-        ))
-        ledger.add_item(WorkItem(
-            id="d", title="Final doc",
-            artifact="## Document\nContent", artifact_role=ArtifactRole.DELIVERABLE,
-        ))
+        ledger.add_item(
+            WorkItem(
+                id="a",
+                title="Report",
+                artifact="report content",
+                artifact_role=ArtifactRole.DELIVERABLE,
+            ),
+        )
+        ledger.add_item(
+            WorkItem(
+                id="b",
+                title="Notes",
+                artifact="scratch data",
+                artifact_role=ArtifactRole.WORKING,
+            ),
+        )
+        ledger.add_item(
+            WorkItem(
+                id="c",
+                title="Check",
+                artifact='{"pass": true}',
+                artifact_role=ArtifactRole.CONTROL,
+            ),
+        )
+        ledger.add_item(
+            WorkItem(
+                id="d",
+                title="Final doc",
+                artifact="## Document\nContent",
+                artifact_role=ArtifactRole.DELIVERABLE,
+            ),
+        )
 
         deliverables = ledger.get_deliverables()
         assert len(deliverables) == 2
@@ -1776,19 +1796,27 @@ class TestLedgerGetDeliverables:
     def test_working_items_not_returned(self) -> None:
         """Test that working-role items are not deliverables."""
         ledger = WorkItemLedger()
-        ledger.add_item(WorkItem(
-            id="a", title="Draft",
-            artifact="content", artifact_role=ArtifactRole.WORKING,
-        ))
+        ledger.add_item(
+            WorkItem(
+                id="a",
+                title="Draft",
+                artifact="content",
+                artifact_role=ArtifactRole.WORKING,
+            ),
+        )
         assert ledger.get_deliverables() == []
 
     def test_control_items_not_returned(self) -> None:
         """Test that control-role items are not deliverables."""
         ledger = WorkItemLedger()
-        ledger.add_item(WorkItem(
-            id="a", title="Audit",
-            artifact='{"valid": true}', artifact_role=ArtifactRole.CONTROL,
-        ))
+        ledger.add_item(
+            WorkItem(
+                id="a",
+                title="Audit",
+                artifact='{"valid": true}',
+                artifact_role=ArtifactRole.CONTROL,
+            ),
+        )
         assert ledger.get_deliverables() == []
 
 
@@ -1861,7 +1889,8 @@ class TestDeliverableLifecycleEvent:
 
         # Check that the deliverables_updated event was emitted
         lifecycle_events = [
-            e for e in mock_ctx._events
+            e
+            for e in mock_ctx._events
             if isinstance(e, HarnessLifecycleEvent) and e.event_type == "deliverables_updated"
         ]
         assert len(lifecycle_events) == 1
@@ -1892,7 +1921,8 @@ class TestDeliverableLifecycleEvent:
         await executor._sync_work_item_ledger(mock_ctx)
 
         lifecycle_events = [
-            e for e in mock_ctx._events
+            e
+            for e in mock_ctx._events
             if isinstance(e, HarnessLifecycleEvent) and e.event_type == "deliverables_updated"
         ]
         # Event IS emitted (for progress bar) but with empty deliverables list
@@ -1920,7 +1950,8 @@ class TestDeliverableLifecycleEvent:
         await executor._sync_work_item_ledger(mock_ctx)
 
         lifecycle_events = [
-            e for e in mock_ctx._events
+            e
+            for e in mock_ctx._events
             if isinstance(e, HarnessLifecycleEvent) and e.event_type == "deliverables_updated"
         ]
         assert len(lifecycle_events) == 0
@@ -1946,7 +1977,8 @@ class TestDeliverableLifecycleEvent:
         await executor._sync_work_item_ledger(mock_ctx)
 
         lifecycle_events = [
-            e for e in mock_ctx._events
+            e
+            for e in mock_ctx._events
             if isinstance(e, HarnessLifecycleEvent) and e.event_type == "deliverables_updated"
         ]
         assert len(lifecycle_events) == 1
@@ -1977,7 +2009,8 @@ class TestDeliverableLifecycleEvent:
         await executor._sync_work_item_ledger(mock_ctx)
 
         lifecycle_events = [
-            e for e in mock_ctx._events
+            e
+            for e in mock_ctx._events
             if isinstance(e, HarnessLifecycleEvent) and e.event_type == "deliverables_updated"
         ]
         assert len(lifecycle_events) == 1
@@ -2076,18 +2109,24 @@ class TestHarnessResultDeliverables:
 
         # Set up ledger with a deliverable
         ledger = WorkItemLedger()
-        ledger.add_item(WorkItem(
-            id="abc", title="Final Report",
-            status=WorkItemStatus.DONE,
-            artifact="## Report\nImportant findings",
-            artifact_role=ArtifactRole.DELIVERABLE,
-        ))
-        ledger.add_item(WorkItem(
-            id="def", title="Scratch notes",
-            status=WorkItemStatus.DONE,
-            artifact="internal notes",
-            artifact_role=ArtifactRole.WORKING,
-        ))
+        ledger.add_item(
+            WorkItem(
+                id="abc",
+                title="Final Report",
+                status=WorkItemStatus.DONE,
+                artifact="## Report\nImportant findings",
+                artifact_role=ArtifactRole.DELIVERABLE,
+            ),
+        )
+        ledger.add_item(
+            WorkItem(
+                id="def",
+                title="Scratch notes",
+                status=WorkItemStatus.DONE,
+                artifact="internal notes",
+                artifact_role=ArtifactRole.WORKING,
+            ),
+        )
         mock_ctx._state[HARNESS_WORK_ITEM_LEDGER_KEY] = ledger.to_dict()
 
         turn_result = TurnComplete(agent_done=True)
@@ -2126,11 +2165,10 @@ class TestValidateControlArtifact:
     def test_valid_pass_artifact(self) -> None:
         """Test valid pass artifact is accepted."""
         import json
+
         artifact = json.dumps({
             "verdict": "pass",
-            "checks": [
-                {"name": "completeness", "result": "pass", "detail": "All sections present"}
-            ],
+            "checks": [{"name": "completeness", "result": "pass", "detail": "All sections present"}],
             "summary": "All checks passed successfully",
         })
         valid, error = validate_control_artifact(artifact)
@@ -2140,6 +2178,7 @@ class TestValidateControlArtifact:
     def test_valid_fail_artifact(self) -> None:
         """Test valid fail artifact is accepted."""
         import json
+
         artifact = json.dumps({
             "verdict": "fail",
             "checks": [
@@ -2155,6 +2194,7 @@ class TestValidateControlArtifact:
     def test_missing_verdict(self) -> None:
         """Test missing verdict field is rejected."""
         import json
+
         artifact = json.dumps({
             "checks": [{"name": "x", "result": "pass", "detail": "y"}],
             "summary": "ok",
@@ -2166,6 +2206,7 @@ class TestValidateControlArtifact:
     def test_invalid_verdict(self) -> None:
         """Test invalid verdict value is rejected."""
         import json
+
         artifact = json.dumps({
             "verdict": "maybe",
             "checks": [{"name": "x", "result": "pass", "detail": "y"}],
@@ -2178,6 +2219,7 @@ class TestValidateControlArtifact:
     def test_missing_checks(self) -> None:
         """Test missing checks field is rejected."""
         import json
+
         artifact = json.dumps({
             "verdict": "pass",
             "summary": "ok",
@@ -2189,6 +2231,7 @@ class TestValidateControlArtifact:
     def test_empty_checks(self) -> None:
         """Test empty checks array is rejected."""
         import json
+
         artifact = json.dumps({
             "verdict": "pass",
             "checks": [],
@@ -2201,6 +2244,7 @@ class TestValidateControlArtifact:
     def test_checks_not_array(self) -> None:
         """Test non-array checks is rejected."""
         import json
+
         artifact = json.dumps({
             "verdict": "pass",
             "checks": "not an array",
@@ -2213,6 +2257,7 @@ class TestValidateControlArtifact:
     def test_check_missing_name(self) -> None:
         """Test check missing name field is rejected."""
         import json
+
         artifact = json.dumps({
             "verdict": "pass",
             "checks": [{"result": "pass", "detail": "y"}],
@@ -2226,6 +2271,7 @@ class TestValidateControlArtifact:
     def test_check_missing_result(self) -> None:
         """Test check missing result field is rejected."""
         import json
+
         artifact = json.dumps({
             "verdict": "pass",
             "checks": [{"name": "x", "detail": "y"}],
@@ -2239,6 +2285,7 @@ class TestValidateControlArtifact:
     def test_check_missing_detail(self) -> None:
         """Test check missing detail field is rejected."""
         import json
+
         artifact = json.dumps({
             "verdict": "pass",
             "checks": [{"name": "x", "result": "pass"}],
@@ -2252,6 +2299,7 @@ class TestValidateControlArtifact:
     def test_check_invalid_result(self) -> None:
         """Test check with invalid result value is rejected."""
         import json
+
         artifact = json.dumps({
             "verdict": "pass",
             "checks": [{"name": "x", "result": "unknown", "detail": "y"}],
@@ -2264,6 +2312,7 @@ class TestValidateControlArtifact:
     def test_check_not_object(self) -> None:
         """Test non-object check is rejected."""
         import json
+
         artifact = json.dumps({
             "verdict": "pass",
             "checks": ["not an object"],
@@ -2276,6 +2325,7 @@ class TestValidateControlArtifact:
     def test_missing_summary(self) -> None:
         """Test missing summary field is rejected."""
         import json
+
         artifact = json.dumps({
             "verdict": "pass",
             "checks": [{"name": "x", "result": "pass", "detail": "y"}],
@@ -2287,6 +2337,7 @@ class TestValidateControlArtifact:
     def test_empty_summary(self) -> None:
         """Test empty summary string is rejected."""
         import json
+
         artifact = json.dumps({
             "verdict": "pass",
             "checks": [{"name": "x", "result": "pass", "detail": "y"}],
@@ -2311,6 +2362,7 @@ class TestValidateControlArtifact:
     def test_multiple_checks(self) -> None:
         """Test artifact with multiple checks validates each."""
         import json
+
         artifact = json.dumps({
             "verdict": "fail",
             "checks": [
@@ -2327,6 +2379,7 @@ class TestValidateControlArtifact:
     def test_second_check_invalid(self) -> None:
         """Test that validation catches error in second check."""
         import json
+
         artifact = json.dumps({
             "verdict": "pass",
             "checks": [
@@ -2368,6 +2421,7 @@ class TestSetArtifactControlValidation:
     def test_accepts_valid_pass_control_artifact(self) -> None:
         """Test that tool accepts valid pass control artifact."""
         import json
+
         task_list = WorkItemTaskList()
         tools = task_list.get_tools()
         add_tool = tools[0]
@@ -2388,6 +2442,7 @@ class TestSetArtifactControlValidation:
     def test_accepts_valid_fail_control_artifact(self) -> None:
         """Test that tool accepts valid fail control artifact."""
         import json
+
         task_list = WorkItemTaskList()
         tools = task_list.get_tools()
         add_tool = tools[0]
@@ -2408,6 +2463,7 @@ class TestSetArtifactControlValidation:
     def test_rejects_missing_verdict_control_artifact(self) -> None:
         """Test that tool rejects control artifact missing verdict."""
         import json
+
         task_list = WorkItemTaskList()
         tools = task_list.get_tools()
         add_tool = tools[0]
@@ -2427,6 +2483,7 @@ class TestSetArtifactControlValidation:
     def test_rejects_bad_check_format(self) -> None:
         """Test that tool rejects control artifact with malformed checks."""
         import json
+
         task_list = WorkItemTaskList()
         tools = task_list.get_tools()
         add_tool = tools[0]
@@ -2589,13 +2646,15 @@ class TestControlInvariantCheck:
 
         # Manually construct a ledger with a malformed artifact
         ledger = WorkItemLedger()
-        ledger.add_item(WorkItem(
-            id="abc",
-            title="Broken audit",
-            status=WorkItemStatus.DONE,
-            artifact="not valid json {{{",
-            artifact_role=ArtifactRole.CONTROL,
-        ))
+        ledger.add_item(
+            WorkItem(
+                id="abc",
+                title="Broken audit",
+                status=WorkItemStatus.DONE,
+                artifact="not valid json {{{",
+                artifact_role=ArtifactRole.CONTROL,
+            ),
+        )
 
         executor = AgentTurnExecutor(agent, task_list=WorkItemTaskList())
         result = executor._check_control_invariants(ledger)
@@ -2648,17 +2707,19 @@ class TestControlInvariantCheck:
 
         # Manually create a pending control item with fail verdict
         ledger = WorkItemLedger()
-        ledger.add_item(WorkItem(
-            id="abc",
-            title="Pending audit",
-            status=WorkItemStatus.PENDING,
-            artifact=json.dumps({
-                "verdict": "fail",
-                "checks": [{"name": "x", "result": "fail", "detail": "y"}],
-                "summary": "failed",
-            }),
-            artifact_role=ArtifactRole.CONTROL,
-        ))
+        ledger.add_item(
+            WorkItem(
+                id="abc",
+                title="Pending audit",
+                status=WorkItemStatus.PENDING,
+                artifact=json.dumps({
+                    "verdict": "fail",
+                    "checks": [{"name": "x", "result": "fail", "detail": "y"}],
+                    "summary": "failed",
+                }),
+                artifact_role=ArtifactRole.CONTROL,
+            ),
+        )
 
         executor = AgentTurnExecutor(agent, task_list=WorkItemTaskList())
         result = executor._check_control_invariants(ledger)
@@ -2740,10 +2801,7 @@ class TestControlInvariantInjection:
         await executor._sync_work_item_ledger(mock_ctx)
 
         # Check that a continuation message was injected into the cache
-        user_messages = [
-            m for m in executor._cache
-            if getattr(getattr(m, "role", None), "value", None) == "user"
-        ]
+        user_messages = [m for m in executor._cache if getattr(getattr(m, "role", None), "value", None) == "user"]
         assert len(user_messages) == 1
         assert "timeline accuracy" in user_messages[0].text
         assert "flag_revision" in user_messages[0].text
@@ -2777,10 +2835,7 @@ class TestControlInvariantInjection:
 
         # Check transcript for control_invariant_violation event
         transcript = mock_ctx._state[HARNESS_TRANSCRIPT_KEY]
-        invariant_events = [
-            e for e in transcript
-            if e["event_type"] == "control_invariant_violation"
-        ]
+        invariant_events = [e for e in transcript if e["event_type"] == "control_invariant_violation"]
         assert len(invariant_events) == 1
         assert "prompt" in invariant_events[0]["data"]
         assert "flag_revision" in invariant_events[0]["data"]["prompt"]
@@ -2808,8 +2863,9 @@ class TestControlInvariantInjection:
 
         # Add a control item with fail verdict
         tools[0](title="Audit", role="control")
-        control_id = [k for k in task_list.ledger.items
-                      if k != work_id and not task_list.ledger.items[k].revision_of][0]
+        control_id = [k for k in task_list.ledger.items if k != work_id and not task_list.ledger.items[k].revision_of][
+            0
+        ]
         artifact = json.dumps({
             "verdict": "fail",
             "checks": [{"name": "issue", "result": "fail", "detail": "problem"}],
@@ -2822,10 +2878,7 @@ class TestControlInvariantInjection:
         await executor._sync_work_item_ledger(mock_ctx)
 
         # No continuation message should be injected
-        user_messages = [
-            m for m in executor._cache
-            if getattr(getattr(m, "role", None), "value", None) == "user"
-        ]
+        user_messages = [m for m in executor._cache if getattr(getattr(m, "role", None), "value", None) == "user"]
         assert len(user_messages) == 0
 
     @pytest.mark.asyncio
@@ -2856,16 +2909,10 @@ class TestControlInvariantInjection:
         await executor._sync_work_item_ledger(mock_ctx)
 
         # No continuation message
-        user_messages = [
-            m for m in executor._cache
-            if getattr(getattr(m, "role", None), "value", None) == "user"
-        ]
+        user_messages = [m for m in executor._cache if getattr(getattr(m, "role", None), "value", None) == "user"]
         assert len(user_messages) == 0
 
         # No invariant violation events
         transcript = mock_ctx._state[HARNESS_TRANSCRIPT_KEY]
-        invariant_events = [
-            e for e in transcript
-            if e["event_type"] == "control_invariant_violation"
-        ]
+        invariant_events = [e for e in transcript if e["event_type"] == "control_invariant_violation"]
         assert len(invariant_events) == 0

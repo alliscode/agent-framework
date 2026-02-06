@@ -20,14 +20,14 @@ logger = logging.getLogger(__name__)
 def get_weather(location: str) -> dict[str, Any]:
     """Get current weather for a location."""
 
-    logger.info(f"🔧 [TOOL CALLED] get_weather(location={location})")
+    logger.info("🔧 [TOOL CALLED] get_weather(location=%s)", location)
     result = {
         "location": location,
         "temperature": 72,
         "conditions": "Sunny",
         "humidity": 45,
     }
-    logger.info(f"✓ [TOOL RESULT] {result}")
+    logger.info("✓ [TOOL RESULT] %s", result)
     return result
 
 
@@ -35,7 +35,7 @@ def calculate_tip(bill_amount: float, tip_percentage: float = 15.0) -> dict[str,
     """Calculate tip amount and total bill."""
 
     logger.info(
-        f"🔧 [TOOL CALLED] calculate_tip(bill_amount={bill_amount}, tip_percentage={tip_percentage})"
+        "🔧 [TOOL CALLED] calculate_tip(bill_amount=%s, tip_percentage=%s)", bill_amount, tip_percentage,
     )
     tip = bill_amount * (tip_percentage / 100)
     total = bill_amount + tip
@@ -45,7 +45,7 @@ def calculate_tip(bill_amount: float, tip_percentage: float = 15.0) -> dict[str,
         "tip_amount": round(tip, 2),
         "total": round(total, 2),
     }
-    logger.info(f"✓ [TOOL RESULT] {result}")
+    logger.info("✓ [TOOL RESULT] %s", result)
     return result
 
 
