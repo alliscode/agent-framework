@@ -93,27 +93,10 @@ logging.getLogger("agent_framework_devui._executor").setLevel(logging.DEBUG)
 logging.getLogger("agent_framework_devui._server").setLevel(logging.DEBUG)
 
 
-AGENT_INSTRUCTIONS = """You are a capable AI assistant with access to a local workspace.
-
-AVAILABLE TOOLS:
-- write_file(path, content): Create or modify files
-- read_file(path): Read file contents
-- list_directory(path): List directory contents (use "." for current directory)
-- run_command(command): Execute shell commands (python, pip, git, etc.)
-- create_directory(path): Create directories
-- task_complete(summary): Signal that you have finished the task
-
-GUIDELINES:
-1. Think step-by-step and explain your reasoning briefly before taking actions
-2. When you complete a task, verify your work (e.g., read files you created, run code you wrote)
-3. If something fails, diagnose the issue and try to fix it
-4. Be proactive - if you see a better approach, suggest it
-5. When you have finished all requested work, call task_complete with a brief summary
-
-STYLE:
-- Be concise but informative
-- Explain what you're about to do before doing it
-- Report results clearly after each action
+AGENT_INSTRUCTIONS = """You are a capable AI coding assistant with access to a local workspace.
+You can read and write files, list directories, and run shell commands.
+When asked to investigate code, be thorough — read every relevant source file
+before drawing conclusions or writing deliverables.
 """
 
 SMS_AGENT_INSTRUCTIONS = """You are a helpful messaging assistant. You receive text messages via SMS or WhatsApp and respond via the same channel.
@@ -545,8 +528,8 @@ class SmsHarness:
 
 def create_harness_agent(
     sandbox_dir: Path,
-    enable_compaction: bool = False,
-    enable_work_items: bool = False,
+    enable_compaction: bool = True,
+    enable_work_items: bool = True,
     mcp_tools: list[MCPStdioTool] | None = None,
 ) -> AgentHarness:
     """Create a harness-wrapped agent with coding tools.
@@ -557,8 +540,8 @@ def create_harness_agent(
 
     Args:
         sandbox_dir: Directory for agent workspace.
-        enable_compaction: Whether to enable production context compaction.
-        enable_work_items: Whether to enable work item tracking (self-critique loop).
+        enable_compaction: Whether to enable production context compaction (default: True).
+        enable_work_items: Whether to enable work item tracking (default: True).
         mcp_tools: Optional list of connected MCP tools to add to the agent.
     """
     # Create tools sandboxed to the directory
@@ -595,12 +578,13 @@ def create_harness_agent(
     # Wrap in harness with all features enabled
     harness = AgentHarness(
         agent,
-        max_turns=20,
+        max_turns=50,
         enable_stall_detection=True,
         stall_threshold=3,
         enable_continuation_prompts=True,
         max_continuation_prompts=2,
         enable_work_items=enable_work_items,
+        sandbox_path=str(sandbox_dir),
         **compaction_kwargs,
     )
 

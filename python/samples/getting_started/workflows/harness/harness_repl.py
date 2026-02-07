@@ -30,6 +30,11 @@ from agent_framework._harness import (
     HarnessStatus,
     get_task_complete_tool,
 )
+from agent_framework._harness._compaction import (
+    InMemoryArtifactStore,
+    InMemoryCompactionStore,
+    InMemorySummaryCache,
+)
 from agent_framework._workflows._events import (
     ExecutorCompletedEvent,
     ExecutorInvokedEvent,
@@ -99,27 +104,11 @@ def print_success(message: str) -> None:
     print(f"{Colors.GREEN}[✓] {message}{Colors.RESET}")
 
 
-AGENT_INSTRUCTIONS = """You are a capable AI assistant with access to a local workspace.
-
-AVAILABLE TOOLS:
-- write_file(path, content): Create or modify files
-- read_file(path): Read file contents
-- list_directory(path): List directory contents (use "." for current directory)
-- run_command(command): Execute shell commands (python, pip, git, etc.)
-- create_directory(path): Create directories
-- task_complete(summary): Signal that you have finished the task
-
-GUIDELINES:
-1. Think step-by-step and explain your reasoning briefly before taking actions
-2. When you complete a task, verify your work (e.g., read files you created, run code you wrote)
-3. If something fails, diagnose the issue and try to fix it
-4. Be proactive - if you see a better approach, suggest it
-5. When you have finished all requested work, call task_complete with a brief summary
-
-STYLE:
-- Be concise but informative
-- Explain what you're about to do before doing it
-- Report results clearly after each action
+AGENT_INSTRUCTIONS = """You are a capable AI coding assistant with access to a local workspace.
+You can read and write files, list directories, and run shell commands.
+When asked to investigate code, be thorough — read every relevant source file
+before drawing conclusions or writing deliverables.
+"""
 """
 
 
@@ -170,6 +159,14 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 20, verbose: bool = False
         stall_threshold=3,
         enable_continuation_prompts=True,
         max_continuation_prompts=2,
+        enable_work_items=True,
+        enable_compaction=True,
+        compaction_store=InMemoryCompactionStore(),
+        artifact_store=InMemoryArtifactStore(),
+        summary_cache=InMemorySummaryCache(max_entries=100),
+        max_input_tokens=100_000,
+        soft_threshold_percent=0.85,
+        sandbox_path=str(sandbox_dir),
     )
 
     # Track verbose mode
@@ -212,6 +209,14 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 20, verbose: bool = False
                     stall_threshold=3,
                     enable_continuation_prompts=True,
                     max_continuation_prompts=2,
+                    enable_work_items=True,
+                    enable_compaction=True,
+                    compaction_store=InMemoryCompactionStore(),
+                    artifact_store=InMemoryArtifactStore(),
+                    summary_cache=InMemorySummaryCache(max_entries=100),
+                    max_input_tokens=100_000,
+                    soft_threshold_percent=0.85,
+                    sandbox_path=str(sandbox_dir),
                 )
                 message_count = 0
                 print_system("Conversation history cleared (new harness instance)")
