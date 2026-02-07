@@ -385,8 +385,8 @@ async def main() -> None:
     parser.add_argument(
         "--max-turns",
         type=int,
-        default=20,
-        help="Maximum turns per task (default: 20)",
+        default=50,
+        help="Maximum turns per task (default: 50)",
     )
     parser.add_argument(
         "--verbose",
