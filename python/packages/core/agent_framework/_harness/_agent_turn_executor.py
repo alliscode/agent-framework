@@ -1109,15 +1109,18 @@ class AgentTurnExecutor(Executor):
         logger.info("AgentTurnExecutor: Injected tool strategy guidance")
 
     PLANNING_PROMPT = (
-        "Before taking any actions, create a detailed plan using work_item_add "
-        "for each step you will take. Your plan should be specific and actionable:\n"
-        "- BAD work item: 'Analyze the core modules' (vague, unverifiable)\n"
-        "- GOOD work item: 'Read and analyze each file in the target directory' "
-        "(specific, measurable)\n\n"
-        "Each work item should involve concrete tool usage (file reads, directory "
-        "listings, command execution). A work item that can be completed without "
-        "using any tools is too vague — break it down further.\n\n"
-        "Do not mark a work item as done until you have actually used tools to "
+        "Assess the user's request before taking action:\n"
+        "- If the request is a KNOWLEDGE QUESTION (e.g., 'explain X', 'tell me about Y',\n"
+        "  'what is Z') that you can answer from your training knowledge WITHOUT needing\n"
+        "  to read files, just answer it directly. No planning or tool use needed.\n"
+        "- If the request requires INVESTIGATING the workspace, READING files, or MAKING\n"
+        "  changes, create a detailed plan using work_item_add for each step:\n"
+        "  - BAD work item: 'Analyze the core modules' (vague, unverifiable)\n"
+        "  - GOOD work item: 'Read and analyze each file in the target directory' "
+        "(specific, measurable)\n"
+        "  - Each work item should involve concrete tool usage (file reads, directory "
+        "listings, command execution).\n"
+        "  - Do not mark a work item as done until you have actually used tools to "
         "complete it and stored meaningful artifacts from the work."
     )
 
