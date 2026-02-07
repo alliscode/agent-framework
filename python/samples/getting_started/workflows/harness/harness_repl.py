@@ -109,10 +109,9 @@ You can read and write files, list directories, and run shell commands.
 When asked to investigate code, be thorough — read every relevant source file
 before drawing conclusions or writing deliverables.
 """
-"""
 
 
-async def run_repl(sandbox_dir: Path, max_turns: int = 20, verbose: bool = False) -> None:
+async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False) -> None:
     """Run the interactive REPL."""
     global debug_logger
 

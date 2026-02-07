@@ -7,27 +7,24 @@ interactive testing and debugging, or via SMS/WhatsApp messaging. The harness pr
 - Turn limits and stall detection
 - Continuation prompts to verify task completion
 - Task contract verification (optional)
-- Context compaction (optional) - production-quality context management
-- Work item tracking (optional) - self-critique loop for multi-step tasks
+- Context compaction (enabled by default) - production-quality context management
+- Work item tracking (enabled by default) - self-critique loop for multi-step tasks
 - MCP tool integration (optional) - connect to MCP servers for additional tools
 - SMS/WhatsApp messaging (optional) - communicate via SMS relay service
 
 Usage:
-    python devui_harness.py [--sandbox PATH] [--port PORT] [--compaction] [--work-items] [--mcp NAME COMMAND ARGS...]
+    python devui_harness.py [--sandbox PATH] [--port PORT] [--no-compaction] [--no-work-items] [--mcp NAME COMMAND ARGS...]
     python devui_harness.py --sms --relay-url URL --api-key KEY [--phone NUMBER] [--sms-mode websocket|polling]
 
 Examples:
-    # Basic DevUI usage
+    # Basic DevUI usage (compaction + work items enabled by default)
     python devui_harness.py
 
-    # With context compaction enabled
-    python devui_harness.py --compaction
+    # Disable context compaction
+    python devui_harness.py --no-compaction
 
-    # With work item tracking (self-critique loop)
-    python devui_harness.py --work-items
-
-    # With both compaction and work items
-    python devui_harness.py --compaction --work-items
+    # Disable work item tracking
+    python devui_harness.py --no-work-items
 
     # With an MCP stdio server
     python devui_harness.py --mcp compose compose mcp /path/to/project.json
@@ -41,8 +38,8 @@ Examples:
     # SMS mode - only handle messages from a specific number
     python devui_harness.py --sms --relay-url http://localhost:8080 --api-key my-secret --phone +15551234567
 
-    # SMS mode with context compaction for long conversations
-    python devui_harness.py --sms --relay-url http://localhost:8080 --api-key my-secret --compaction
+    # SMS mode with context compaction for long conversations (enabled by default)
+    python devui_harness.py --sms --relay-url http://localhost:8080 --api-key my-secret
 
 Environment variables for SMS mode:
     SMS_RELAY_URL: URL of the SMS relay service
@@ -647,9 +644,9 @@ def main():
 
     # Common arguments
     parser.add_argument(
-        "--compaction",
+        "--no-compaction",
         action="store_true",
-        help="Enable production context compaction (Phase 9)",
+        help="Disable context compaction (enabled by default)",
     )
 
     # DevUI-specific arguments
@@ -667,9 +664,9 @@ def main():
         help="Port for DevUI server (default: 8080)",
     )
     devui_group.add_argument(
-        "--work-items",
+        "--no-work-items",
         action="store_true",
-        help="Enable work item tracking (self-critique loop)",
+        help="Disable work item tracking (enabled by default)",
     )
     devui_group.add_argument(
         "--mcp",
@@ -732,7 +729,7 @@ async def _run_sms_harness(args):
         relay_url=args.relay_url,
         api_key=args.api_key,
         phone_filter=args.phone,
-        enable_compaction=args.compaction,
+        enable_compaction=not args.no_compaction,
     )
 
     try:
@@ -763,7 +760,7 @@ def _run_sms_mode(args):
         print(f"Phone filter: {args.phone}")
     else:
         print("Phone filter: ALL (no filter)")
-    if args.compaction:
+    if not args.no_compaction:
         print("Context compaction: ENABLED")
     print("Channels: SMS and WhatsApp (auto-detected from incoming messages)")
     print(f"{'=' * 60}\n")
@@ -815,23 +812,23 @@ def _run_devui_mode(args):
     # Create the harness-wrapped agent with MCP tools
     harness = create_harness_agent(
         sandbox_dir,
-        enable_compaction=args.compaction,
-        enable_work_items=args.work_items,
+        enable_compaction=not args.no_compaction,
+        enable_work_items=not args.no_work_items,
         mcp_tools=connected_tools or None,
     )
 
     # Wrap with MarkdownRenderer when work items are enabled
-    if args.work_items:
+    if not args.no_work_items:
         harness = RenderedHarness(harness, use_renderer=True)
 
     print(f"\nStarting DevUI on port {args.port}...")
     print(f"Sandbox directory: {sandbox_dir}")
-    print("Harness config: max_turns=20, stall_threshold=3")
-    if args.compaction:
+    print("Harness config: max_turns=50, stall_threshold=3")
+    if not args.no_compaction:
         print("Context compaction: ENABLED (100K tokens, 85% threshold)")
     else:
         print("Context compaction: disabled")
-    if args.work_items:
+    if not args.no_work_items:
         print("Work item tracking: ENABLED (self-critique loop)")
         print("Markdown renderer: ENABLED (activity verbs, progress bars)")
     else:
