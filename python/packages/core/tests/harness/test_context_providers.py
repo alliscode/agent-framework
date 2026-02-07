@@ -104,6 +104,17 @@ class TestHarnessGuidanceProvider:
         assert "task_complete" in context.instructions
 
     @pytest.mark.asyncio
+    async def test_always_includes_response_style(self) -> None:
+        """Response style guidance is always included."""
+        provider = HarnessGuidanceProvider(enable_tool_guidance=False, enable_work_items=False)
+        context = await provider.invoking([])
+
+        assert context.instructions is not None
+        assert "<response_style>" in context.instructions
+        assert "</response_style>" in context.instructions
+        assert "brief acknowledgment" in context.instructions
+
+    @pytest.mark.asyncio
     async def test_tool_guidance_included_by_default(self) -> None:
         """Tool strategy guidance is included when enable_tool_guidance=True (default)."""
         provider = HarnessGuidanceProvider()
@@ -171,6 +182,7 @@ class TestContextProviderIntegration:
         # Guidance
         assert "TOOL STRATEGY GUIDE" in context.instructions
         assert "<task_completion>" in context.instructions
+        assert "<response_style>" in context.instructions
 
     @pytest.mark.asyncio
     async def test_providers_return_no_messages_or_tools(self) -> None:

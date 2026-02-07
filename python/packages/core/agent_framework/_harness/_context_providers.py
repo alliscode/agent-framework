@@ -82,6 +82,20 @@ class HarnessGuidanceProvider(ContextProvider):
         enable_sub_agents: Whether to include sub-agent delegation guidance.
     """
 
+    RESPONSE_STYLE_GUIDANCE = (
+        "<response_style>\n"
+        "When you receive a request:\n"
+        "1. Start with a brief acknowledgment (1-2 sentences) before your first tool calls.\n"
+        "   Example: 'I'll investigate the workflow engine in this repository and create\n"
+        "   a detailed architectural design. Let me start by exploring the directory structure.'\n"
+        "2. Between batches of tool calls, briefly narrate what you found and what you're\n"
+        "   doing next. Keep it to 1-2 sentences.\n"
+        "3. Do NOT narrate every single tool call — just the transitions between investigation\n"
+        "   phases (e.g., 'Found the core modules, now reading each one in detail.').\n"
+        "4. Your final message before task_complete should summarize what was produced.\n"
+        "</response_style>"
+    )
+
     TASK_COMPLETION_INSTRUCTIONS = (
         "<task_completion>\n"
         "* A task is not complete until the expected outcome is verified and persistent\n"
@@ -151,7 +165,8 @@ class HarnessGuidanceProvider(ContextProvider):
         if self._enable_sub_agents:
             sections.append(self.SUB_AGENT_GUIDANCE)
 
-        # Task completion instructions are always included
+        # Response style and task completion instructions are always included
+        sections.append(self.RESPONSE_STYLE_GUIDANCE)
         sections.append(self.TASK_COMPLETION_INSTRUCTIONS)
 
         return Context(instructions="\n\n".join(sections))

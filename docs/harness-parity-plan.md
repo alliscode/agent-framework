@@ -2138,6 +2138,20 @@ This is more complex and fragile — Option A should be tried first.
 
 **Estimated effort**: XS (Option A) — single constant addition + 1 line in `invoking()`
 
+### Implementation Summary — ✅ COMPLETE
+
+Implemented Option A (system prompt guidance). Changes:
+
+1. **`_harness/_context_providers.py`**: Added `RESPONSE_STYLE_GUIDANCE` constant to
+   `HarnessGuidanceProvider` with `<response_style>` XML-tagged instructions covering
+   immediate acknowledgment, progress narration between tool batches, conciseness, and
+   final summary before `task_complete`. Appended to `sections` in `invoking()` so it
+   is always included (alongside `TASK_COMPLETION_INSTRUCTIONS`).
+
+2. **`tests/harness/test_context_providers.py`**: Added `test_always_includes_response_style`
+   to verify the guidance is always present. Updated integration test to assert
+   `<response_style>` tag is included in aggregated output. All 15 tests pass.
+
 ---
 
 ### Effort Key
