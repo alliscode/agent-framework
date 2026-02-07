@@ -103,7 +103,7 @@ class HarnessGuidanceProvider(ContextProvider):
         "* After making changes, validate they work correctly\n"
         "* If an initial approach fails, try alternative tools or methods before concluding\n"
         "* You MUST call task_complete when finished — do not just stop responding\n"
-        "* Only call task_complete after all work items are done and deliverables are written\n"
+        "* Only call task_complete after all work items are done and deliverables are produced\n"
         "</task_completion>"
     )
 
