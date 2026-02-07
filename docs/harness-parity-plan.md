@@ -2456,11 +2456,30 @@ Replace the DISCOVERY section with:
 
 Replace the THOROUGH READING section with:
 ```
-"THOROUGH READING — depth matters more than speed:\n"
-"- Use read_file with start_line/end_line for large files — read the section you need,\n"
-"  not the entire file. A 500-line file should be read in 2-3 targeted chunks.\n"
-"- After reading, note specific class names, methods, and patterns before moving on.\n"
-"- Use grep_files to find specific classes or functions across multiple files.\n\n"
+"THOROUGH READING — be context-efficient:\n"
+"- Your context window is a limited resource. Every line you read stays in memory\n"
+"  and competes for space. Read what you NEED, not everything that EXISTS.\n"
+"- For large files (200+ lines): first scan the structure with\n"
+"  read_file(path, start_line=1, end_line=50) to see imports and class definitions,\n"
+"  then read specific sections of interest. Do NOT read the entire file.\n"
+"- For small files (<100 lines): reading the whole file is fine.\n"
+"- Use grep_files to find specific classes or functions across multiple files —\n"
+"  this tells you WHERE to look without loading everything into context.\n"
+"- When investigating a module with many files, scan each file's first ~50 lines\n"
+"  to understand its purpose, then deep-read only the files that matter for\n"
+"  your task.\n"
+"- SKIP: test files, boilerplate, generated code, and files unrelated to your task.\n"
+"  Not every file in a directory deserves to be read.\n\n"
+```
+
+Also add a new CONTEXT EFFICIENCY section immediately after THOROUGH READING:
+```
+"CONTEXT EFFICIENCY — keep your working memory lean:\n"
+"- Prefer grep_files over reading entire files to find what you need.\n"
+"- Prefer read_file with line ranges over reading whole files.\n"
+"- After reading a section, decide if you need more of that file or can move on.\n"
+"- If you've already found the information you need, stop reading more files.\n"
+"- A good investigation reads many files partially rather than few files fully.\n\n"
 ```
 
 ### Expected Impact
