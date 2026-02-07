@@ -2516,6 +2516,37 @@ With smart file tools, the agent should:
 **Estimated effort**: S-M (3-6 hours) — straightforward Python but needs testing across
 edge cases (binary files, permissions, large directories, regex errors)
 
+### Implementation Summary — COMPLETE
+
+**Status: ✅ Complete**
+
+All sub-phases (11a–11e) have been implemented and tested:
+
+**11a. Line range support for `read_file`** — Added `start_line` and `end_line` optional parameters
+(1-indexed, inclusive). Output includes line-number prefixes and a header showing `[Lines X-Y of Z in path]`.
+Fully backward compatible — omitting both params reads the entire file as before.
+
+**11b. `grep_files` search tool** — New method for regex/literal content search across the workspace.
+Supports `file_glob` filtering, `include_lines` mode with line numbers, `max_results` cap, and
+automatic fallback from invalid regex to literal match. Skips hidden dirs, `__pycache__`, `node_modules`.
+
+**11c. `find_files` glob tool** — New method for fast file-name pattern matching. Supports `**` for
+recursive matching across directories. Filters noise directories. Configurable `max_results`.
+
+**11d. Depth support for `list_directory`** — Added `depth` parameter (default=2). Recursive tree
+listing with indentation. Skips hidden dirs and noise directories. Default depth of 2 gives a good
+overview without overwhelming the context window.
+
+**11e. Updated `get_tools()` and `TOOL_STRATEGY_GUIDANCE`** — `grep_files` and `find_files` added to
+the tools list. `TOOL_STRATEGY_GUIDANCE` in `_agent_turn_executor.py` rewritten to reference the new
+tools and add CONTEXT EFFICIENCY guidance section. Discovery section now uses native tools instead of
+`run_command` shell commands.
+
+**Files changed:**
+- `python/samples/getting_started/workflows/harness/coding_tools.py` — modified `read_file`, `list_directory`; added `grep_files`, `find_files`; updated `get_tools()`
+- `python/packages/core/agent_framework/_harness/_agent_turn_executor.py` — rewrote `TOOL_STRATEGY_GUIDANCE`
+- `python/packages/core/tests/harness/test_coding_tools.py` — added 30 unit tests covering all new/modified tools
+
 ---
 
 ### Effort Key
@@ -2565,3 +2596,34 @@ After Phase 1 implementation, re-run the test scenario:
 - Prompt: "Investigate this repo and find the python based workflow engine. Research the code and create a detailed architectural design."
 - Target: 10+ turns, 10+ file reads, 15KB+ document with specific class/method references
 - Previous baseline: 3 turns, 3 reads, shallow output
+
+---
+
+## Experiment Results Log
+
+All experiments use the same prompt: *"Investigate this repo and find the python based workflow engine. Research the code and create a detailed architectural design."*
+Sandbox: `C:\Users\bentho\src\alliscode-agent-framework`
+
+| # | Config | Model | Turns | Tool Calls | Reads | Deliverable | Focus Correct? | Notes |
+|---|--------|-------|-------|------------|-------|-------------|----------------|-------|
+| 1 | Ph 1+4 | gpt-4o | 6 | 36 | 6 | 3.8 KB | ✅ | Baseline with compaction + work items |
+| 2 | Ph 1+2+4 (broken) | gpt-4o | 1 | 10 | 3 | 0 KB | ❌ | Removed first-turn injections — massive regression |
+| 3 | Ph 1+2+4 (sandbox fix) | gpt-4o | 2 | 12 | 12 | 0 KB | — | Missing sandbox_path, no write_file |
+| 4 | Ph 1+2+4 (restored inject) | gpt-4o | 6 | 32 | 8 | 3.2 KB | ✅ | Both system prompt + user messages needed |
+| 5 | Ph 1–3+4 | gpt-4o | 8 | 34 | 8 | 3.8 KB | ✅ | Hooks worked, revision_flag fired 1× |
+| 6 | Ph 1–5 (missing sub-agent) | gpt-4o | 10 | — | 10 | 0 KB | ❌ | Context overflow — sub_agent_client not wired |
+| 7 | Ph 1–5 (with sub-agents) | gpt-4o | 4 | 24 | 10 | 3.0 KB | ✅ | `explore` sub-agent used |
+| 8 | Ph 1–5b (doc agent) | gpt-4o | 2 | 28 | 4 | 2.6 KB | ❌ | Wrong packages — doc agent got vague brief |
+| 9 | Ph 1–5b (improved guidance) | gpt-4o | 5 | 49 | 6 | 3.9 KB | ❌ | Still wrong packages — doc agent hurts |
+| 10 | Ph 1–4 | **gpt-4.1** | 2 | 56 | 7 | **8.5 KB** | ✅ | Correct focus, high parallelism, 12 work items |
+| 11 | Ph 1–4+10+11 | gpt-4.1 | 7 | 28 | 10 | 4.6 KB | ❌ | AG-UI instead of _workflows/ — broad grep |
+| 12 | Ph 1–4+10+11 (improved guidance) | gpt-4.1 | — | 39 | 14 | **28.9 KB** | ✅ | **Near-target!** find_files + grep disambiguation |
+
+### Key Findings
+
+1. **Model selection is the biggest lever**: gpt-4.1 produced 2–6× better deliverables than gpt-4o
+2. **First-turn user message injection is critical**: Moving guidance to system prompt only caused massive regression (Exp 2 vs 4)
+3. **Document sub-agent hurts more than helps**: Main agent "phones in" exploration when it can delegate writing (Exp 8–9)
+4. **Smart tools need disambiguation guidance**: Broad grep returns false positives across packages; agent must check file *paths* not just content (Exp 11 vs 12)
+5. **find_files + grep combo is essential**: `find_files('**/*.py')` reveals deeply nested directories that `list_directory(depth=2)` misses
+6. **Reference target**: Claude Sonnet 4.6 produced 29KB — Experiment 12 achieved 28.9KB with gpt-4.1
