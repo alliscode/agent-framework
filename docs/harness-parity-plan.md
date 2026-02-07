@@ -1902,6 +1902,7 @@ writing thin wrappers over existing framework capabilities.
 | **8** | Per-Tool Interception | `FunctionMiddleware` implementations | L | **XS** | ★★☆☆☆ | `FunctionMiddleware` is the exact abstraction |
 | **9** | Model Selection | Configurable model + provider support | — | **XS** | ★★★★★ | `AzureOpenAIChatClient` already parameterized |
 | **10** | Response Demeanor | Acknowledgment + progress narration | — | **XS** | ★★★☆☆ | System prompt guidance in `HarnessGuidanceProvider` |
+| **11** | Smart File Tools | Line-range reads, grep, glob, deep listing | — | **S-M** | ★★★★★ | `coding_tools.py` already has the sandbox/resolve infrastructure |
 
 ---
 
@@ -2151,6 +2152,350 @@ Implemented Option A (system prompt guidance). Changes:
 2. **`tests/harness/test_context_providers.py`**: Added `test_always_includes_response_style`
    to verify the guidance is always present. Updated integration test to assert
    `<response_style>` tag is included in aggregated output. All 15 tests pass.
+
+---
+
+## Phase 11 — Smart File Tools (Progressive Reading, Search, Deep Listing)
+
+**Impact: ★★★★★ (Highest — addresses root cause of shallow output AND slowness)**
+
+**Gap**: Our `CodingTools` provide only whole-file reads, single-level directory listing,
+and no built-in search. By contrast, GitHub Copilot CLI has `view` with line ranges,
+`grep` for content search, and `glob` for file finding. This forces our agent to dump
+entire files into context, rapidly filling the token budget and triggering expensive
+compaction — while Copilot reads just the 40 lines it needs.
+
+**Current CodingTools** (`python/samples/getting_started/workflows/harness/coding_tools.py`):
+
+| Tool | Behavior | Problem |
+|------|----------|---------|
+| `read_file(path)` | Reads **entire file** — no line range support | A 1000-line file = ~30K tokens. 7 reads = 200K+ tokens → compaction storm |
+| `list_directory(path)` | Single level only, no recursion | Agent needs 10+ calls to navigate 4 levels deep |
+| No `grep` | Must use `run_command("grep ...")` | Agent often doesn't think to use shell grep |
+| No `glob` | Must use `run_command("find ...")` | Same problem — agents prefer native tools over shell |
+
+**Copilot CLI equivalents:**
+
+| Tool | Behavior |
+|------|----------|
+| `view(path, view_range=[11, 50])` | Read specific line ranges — keeps only what's needed in context |
+| `grep(pattern, path, glob, output_mode)` | Native content search with glob filtering, line numbers, context lines |
+| `glob(pattern)` | Fast file pattern matching (`**/*.py`, `src/**/*.ts`) |
+| `list_directory` | 2 levels deep by default |
+
+**Impact on our experiments:**
+- Agent reads 7 files → fills 200K+ tokens → compaction fires → slowness
+- After compaction, summaries lose detail → shallow deliverable
+- Agent can't efficiently find target code → wastes turns on broad listing
+- With smart tools: agent could read 20+ file excerpts in the same token budget
+
+### 11a. Add line range support to `read_file`
+
+**File**: `coding_tools.py`, `read_file` method (line 116-136)
+
+```python
+@ai_function(approval_mode="never_require")
+def read_file(
+    self,
+    path: Annotated[str, "The path to the file to read, relative to the working directory"],
+    start_line: Annotated[int | None, "First line to read (1-indexed). Omit to read from start."] = None,
+    end_line: Annotated[int | None, "Last line to read (1-indexed, inclusive). Use -1 for end of file. Omit to read to end."] = None,
+) -> str:
+    """Read the contents of a file, optionally a specific line range.
+
+    Use this to examine code, configuration files, or any text file.
+    For large files, use start_line/end_line to read specific sections
+    rather than loading the entire file.
+    """
+    try:
+        resolved = self._resolve_path(path)
+        if not resolved.exists():
+            return f"Error: File '{path}' does not exist"
+        if not resolved.is_file():
+            return f"Error: '{path}' is not a file"
+
+        content = resolved.read_text(encoding="utf-8")
+
+        if start_line is not None or end_line is not None:
+            lines = content.splitlines(keepends=True)
+            total = len(lines)
+            start = max(1, start_line or 1) - 1  # Convert to 0-indexed
+            end = total if (end_line is None or end_line == -1) else min(end_line, total)
+
+            selected = lines[start:end]
+            # Prefix with line numbers for context
+            numbered = [f"{start + i + 1}. {line}" for i, line in enumerate(selected)]
+            header = f"[Lines {start + 1}-{end} of {total} in {path}]\n"
+            return header + "".join(numbered)
+
+        return content
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        return f"Error reading file: {e}"
+```
+
+**Key design decisions:**
+- Line numbers are 1-indexed (matches what developers expect and what editors show)
+- Output includes line numbers as prefixes (`42. def foo():`) so the agent can
+  reference specific lines in its analysis
+- Header shows `[Lines X-Y of Z in path]` so agent knows what it's looking at
+- `end_line=-1` means "to end of file" (common convention)
+- Fully backward compatible — omitting both params reads the entire file as before
+
+### 11b. Add `grep_files` search tool
+
+**File**: `coding_tools.py`, new method + add to `get_tools()` list
+
+```python
+@ai_function(approval_mode="never_require")
+def grep_files(
+    self,
+    pattern: Annotated[str, "The text or regex pattern to search for in file contents"],
+    path: Annotated[str, "Directory to search in, relative to working directory. Use '.' for current."] = ".",
+    file_glob: Annotated[str | None, "Glob pattern to filter files (e.g., '*.py', '*.{ts,tsx}'). Omit to search all files."] = None,
+    include_lines: Annotated[bool, "If true, show matching lines with line numbers. If false, show only file paths."] = False,
+    max_results: Annotated[int, "Maximum number of matching files to return."] = 20,
+) -> str:
+    """Search for a pattern in file contents across the workspace.
+
+    Use this to find files containing specific classes, functions, imports,
+    or any text pattern. Much faster than reading files one by one.
+    """
+    import re
+    try:
+        resolved = self._resolve_path(path)
+        if not resolved.exists() or not resolved.is_dir():
+            return f"Error: '{path}' is not a valid directory"
+
+        try:
+            regex = re.compile(pattern)
+        except re.error:
+            # Fall back to literal match if not valid regex
+            regex = re.compile(re.escape(pattern))
+
+        # Collect matching files
+        if file_glob:
+            files = sorted(resolved.rglob(file_glob))
+        else:
+            files = sorted(f for f in resolved.rglob("*") if f.is_file())
+
+        matches = []
+        for f in files:
+            if not f.is_file():
+                continue
+            # Skip binary files, hidden dirs, common noise
+            rel = str(f.relative_to(self.working_directory))
+            if any(part.startswith(".") for part in f.parts):
+                continue
+            if "__pycache__" in rel or "node_modules" in rel or ".git" in rel:
+                continue
+            try:
+                text = f.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+
+            if include_lines:
+                matching_lines = []
+                for i, line in enumerate(text.splitlines(), 1):
+                    if regex.search(line):
+                        matching_lines.append(f"  {i}: {line.rstrip()}")
+                if matching_lines:
+                    matches.append(f"{rel}\n" + "\n".join(matching_lines[:10]))
+                    if len(matches) >= max_results:
+                        break
+            else:
+                if regex.search(text):
+                    matches.append(rel)
+                    if len(matches) >= max_results:
+                        break
+
+        if not matches:
+            return f"No files matching pattern '{pattern}' found in '{path}'"
+
+        header = f"Found {len(matches)} file(s) matching '{pattern}':\n"
+        return header + "\n".join(matches)
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        return f"Error searching files: {e}"
+```
+
+### 11c. Add `find_files` glob tool
+
+**File**: `coding_tools.py`, new method + add to `get_tools()` list
+
+```python
+@ai_function(approval_mode="never_require")
+def find_files(
+    self,
+    pattern: Annotated[str, "Glob pattern to match files (e.g., '**/*.py', 'src/**/*.ts', '*.md')"],
+    path: Annotated[str, "Directory to search in, relative to working directory. Use '.' for current."] = ".",
+    max_results: Annotated[int, "Maximum number of results to return."] = 50,
+) -> str:
+    """Find files by name pattern using glob matching.
+
+    Use this to locate files by extension or naming convention across the workspace.
+    Supports ** for recursive matching across directories.
+    """
+    try:
+        resolved = self._resolve_path(path)
+        if not resolved.exists() or not resolved.is_dir():
+            return f"Error: '{path}' is not a valid directory"
+
+        files = []
+        for f in sorted(resolved.rglob(pattern) if "**" in pattern else resolved.glob(pattern)):
+            if not f.is_file():
+                continue
+            rel = str(f.relative_to(self.working_directory))
+            if any(part.startswith(".") for part in f.parts):
+                continue
+            if "__pycache__" in rel or "node_modules" in rel:
+                continue
+            files.append(rel)
+            if len(files) >= max_results:
+                break
+
+        if not files:
+            return f"No files matching '{pattern}' found in '{path}'"
+
+        return f"Found {len(files)} file(s):\n" + "\n".join(files)
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        return f"Error finding files: {e}"
+```
+
+### 11d. Add depth support to `list_directory`
+
+**File**: `coding_tools.py`, modify `list_directory` method (line 162-195)
+
+```python
+@ai_function(approval_mode="never_require")
+def list_directory(
+    self,
+    path: Annotated[str, "The directory path relative to working directory. Use '.' for current."] = ".",
+    depth: Annotated[int, "How many levels deep to list. 1 = immediate children only, 2 = children and grandchildren. Default is 2."] = 2,
+) -> str:
+    """List the contents of a directory up to the specified depth.
+
+    Use this to explore the file structure. Default depth of 2 shows
+    files and one level of subdirectory contents, giving a good overview
+    without being overwhelming.
+    """
+    try:
+        resolved = self._resolve_path(path)
+        if not resolved.exists():
+            return f"Error: Directory '{path}' does not exist"
+        if not resolved.is_dir():
+            return f"Error: '{path}' is not a directory"
+
+        items = []
+
+        def _list(dir_path: Path, current_depth: int, prefix: str = "") -> None:
+            if current_depth > depth:
+                return
+            try:
+                children = sorted(dir_path.iterdir())
+            except PermissionError:
+                return
+            for item in children:
+                # Skip hidden files/dirs
+                if item.name.startswith("."):
+                    continue
+                if item.name in ("__pycache__", "node_modules", ".git"):
+                    continue
+                rel_path = item.relative_to(self.working_directory)
+                if item.is_dir():
+                    items.append(f"{prefix}[DIR]  {rel_path}/")
+                    _list(item, current_depth + 1, prefix + "  ")
+                else:
+                    size = item.stat().st_size
+                    items.append(f"{prefix}[FILE] {rel_path} ({size} bytes)")
+
+        _list(resolved, 1)
+
+        if not items:
+            return f"Directory '{path}' is empty"
+
+        return "\n".join(items)
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        return f"Error listing directory: {e}"
+```
+
+### 11e. Update `get_tools()` and tool strategy guidance
+
+**`coding_tools.py`** — add new tools to the list:
+```python
+def get_tools(self) -> list:
+    return [
+        self.read_file,
+        self.write_file,
+        self.list_directory,
+        self.grep_files,       # NEW
+        self.find_files,       # NEW
+        self.run_command,
+        self.create_directory,
+        self.get_background_output,
+        self.stop_background_process,
+        self.list_background_processes,
+    ]
+```
+
+**`_agent_turn_executor.py`** — update `TOOL_STRATEGY_GUIDANCE` to reference new tools:
+
+Replace the DISCOVERY section with:
+```
+"DISCOVERY — find what's relevant before reading:\n"
+"- grep_files(pattern, path, file_glob) to find files containing a term\n"
+"- find_files(pattern) to locate files by name/extension (e.g., '**/*.py')\n"
+"- list_directory('.', depth=2) to see structure two levels deep\n\n"
+```
+
+Replace the THOROUGH READING section with:
+```
+"THOROUGH READING — depth matters more than speed:\n"
+"- Use read_file with start_line/end_line for large files — read the section you need,\n"
+"  not the entire file. A 500-line file should be read in 2-3 targeted chunks.\n"
+"- After reading, note specific class names, methods, and patterns before moving on.\n"
+"- Use grep_files to find specific classes or functions across multiple files.\n\n"
+```
+
+### Expected Impact
+
+With smart file tools, the agent should:
+- **Read 20+ file excerpts** instead of 7 whole files in the same token budget
+- **Find target code in 1-2 calls** (`grep_files("workflow", file_glob="*.py")`)
+  instead of 10+ `list_directory` calls
+- **Trigger compaction less often** — targeted reads keep context lean
+- **Produce deeper deliverables** — more files read = more detail available
+
+### Testing
+
+1. **Unit tests** for each new tool:
+   - `test_read_file_line_range`: verify start/end lines, line numbering, header
+   - `test_read_file_backward_compat`: verify no params = full file (unchanged)
+   - `test_grep_files_basic`: verify pattern matching, file filtering, max_results
+   - `test_grep_files_with_lines`: verify `include_lines=True` shows line numbers
+   - `test_find_files_glob`: verify glob patterns, recursive matching
+   - `test_list_directory_depth`: verify depth=1 vs depth=2 behavior
+
+2. **Integration test** — run `harness_test_runner.py` and verify:
+   - Agent uses `grep_files` to find the workflow engine (instead of listing 10+ dirs)
+   - Agent uses `read_file` with line ranges for large files
+   - Total tokens consumed per turn decreases
+   - Compaction triggers less frequently
+   - Deliverable references more files with more detail
+
+**Files to change:**
+- `coding_tools.py` — modify `read_file`, `list_directory`; add `grep_files`, `find_files`; update `get_tools()`
+- `_agent_turn_executor.py` — update `TOOL_STRATEGY_GUIDANCE` to reference new tools
+- `_context_providers.py` — if sub-agent guidance mentions tools, update there too
+
+**Estimated effort**: S-M (3-6 hours) — straightforward Python but needs testing across
+edge cases (binary files, permissions, large directories, regex errors)
 
 ---
 
