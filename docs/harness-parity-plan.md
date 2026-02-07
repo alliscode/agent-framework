@@ -1901,6 +1901,7 @@ writing thin wrappers over existing framework capabilities.
 | **7** | JIT Instructions | Condition-based dynamic injection | M | **S** | ★★☆☆☆ | Turn executor injection points exist |
 | **8** | Per-Tool Interception | `FunctionMiddleware` implementations | L | **XS** | ★★☆☆☆ | `FunctionMiddleware` is the exact abstraction |
 | **9** | Model Selection | Configurable model + provider support | — | **XS** | ★★★★★ | `AzureOpenAIChatClient` already parameterized |
+| **10** | Response Demeanor | Acknowledgment + progress narration | — | **XS** | ★★★☆☆ | System prompt guidance in `HarnessGuidanceProvider` |
 
 ---
 
@@ -2043,6 +2044,99 @@ Closing this remaining gap likely requires:
    reliable; the doc agent could expand a solid brief into a richer document
 3. **Model upgrade** — Claude Sonnet 4.6 or equivalent as the primary model would likely
    close the gap entirely based on the reference output quality
+
+---
+
+## Phase 10 — Response Demeanor & Acknowledgment
+
+**Impact: ★★★☆☆**
+
+**Gap**: When the user sends a request like "research this thing for me", the agent
+jumps straight into tool calls (creating work items, listing directories, reading files)
+with **zero text output** until the task is complete. The user sees nothing streaming
+for potentially minutes — no acknowledgment, no indication work has started, no
+progress narrative. This creates a poor interactive experience even though the agent
+is doing good work behind the scenes.
+
+By contrast, GitHub Copilot CLI and other polished agents emit a brief acknowledgment
+immediately ("I'll investigate the repository to find the workflow engine…") and then
+provide brief progress narration between tool call batches ("Found the target directory,
+now reading the core modules…").
+
+**What we want**:
+1. **Immediate acknowledgment** — a 1-2 sentence blurb before any tool calls confirming
+   the request and indicating work is starting
+2. **Progress narration** — brief text between tool call batches describing what was
+   found and what's next (not every turn, but enough to keep the user informed)
+3. **Not verbose** — this should be a few sentences, not paragraphs. The agent's
+   narrative should not dominate over the actual work.
+
+**Root cause**: The LLM is choosing to emit only tool calls with no interleaved text.
+This is a prompting/instruction issue — the model can produce text alongside tool calls
+but isn't being told to.
+
+### Implementation Options
+
+#### Option A: System prompt guidance (XS effort, recommended first)
+
+Add a `<response_style>` section to `HarnessGuidanceProvider` that instructs the model
+on demeanor:
+
+```python
+RESPONSE_STYLE_GUIDANCE = (
+    "<response_style>\n"
+    "When you receive a request:\n"
+    "1. Start with a brief acknowledgment (1-2 sentences) before your first tool calls.\n"
+    "   Example: 'I'll investigate the workflow engine in this repository and create\n"
+    "   a detailed architectural design. Let me start by exploring the directory structure.'\n"
+    "2. Between batches of tool calls, briefly narrate what you found and what you're\n"
+    "   doing next. Keep it to 1-2 sentences.\n"
+    "3. Do NOT narrate every single tool call — just the transitions between investigation\n"
+    "   phases (e.g., 'Found the core modules, now reading each one in detail.').\n"
+    "4. Your final message before task_complete should summarize what was produced.\n"
+    "</response_style>"
+)
+```
+
+Add this to the `invoking()` method in `HarnessGuidanceProvider`, always included
+(like `TASK_COMPLETION_INSTRUCTIONS`).
+
+**File to change**: `_harness/_context_providers.py`
+- Add `RESPONSE_STYLE_GUIDANCE` constant to `HarnessGuidanceProvider`
+- Append to `sections` list in `invoking()` (always included)
+
+#### Option B: ChatMiddleware interception (S effort, if Option A insufficient)
+
+If the model ignores system prompt guidance about text output, a `ChatMiddleware` could
+post-process the LLM response to prepend an acknowledgment on the first turn. This is
+heavier and should only be pursued if Option A doesn't work.
+
+```python
+class AcknowledgmentMiddleware(ChatMiddleware):
+    """Ensures the first LLM response includes text, not just tool calls."""
+
+    def __init__(self):
+        self._first_turn = True
+
+    async def process(self, context: ChatContext, next: NextChatHandler) -> None:
+        await next(context)
+        if self._first_turn and context.result:
+            # Check if response has tool calls but no text
+            # If so, inject a synthetic acknowledgment
+            self._first_turn = False
+```
+
+This is more complex and fragile — Option A should be tried first.
+
+### Testing
+
+1. Run `harness_repl.py` with a request like "research the workflow engine"
+2. Verify the agent emits text BEFORE its first tool call
+3. Verify brief progress text appears between investigation phases
+4. Verify the final message summarizes the deliverable
+5. Verify the agent does NOT become verbose (no multi-paragraph narration per turn)
+
+**Estimated effort**: XS (Option A) — single constant addition + 1 line in `invoking()`
 
 ---
 
