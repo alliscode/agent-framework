@@ -58,11 +58,14 @@ class CompactionComplete(RepairComplete):
         plan_updated: Whether a new compaction plan was created.
         tokens_freed: Estimated tokens freed by compaction.
         proposals_applied: Number of proposals applied.
+        compaction_needed: Whether context pressure was detected and compaction should be applied.
     """
 
     plan_updated: bool = False
     tokens_freed: int = 0
     proposals_applied: int = 0
+    compaction_needed: bool = False
+    blocking: bool = False
 
 
 class CompactionExecutor(Executor):
@@ -99,7 +102,7 @@ class CompactionExecutor(Executor):
         summarizer: Summarizer | None = None,
         # Budget configuration
         max_input_tokens: int = 100000,
-        soft_threshold_percent: float = 0.85,
+        soft_threshold_percent: float = 0.80,
         # Tokenizer
         tokenizer: ProviderAwareTokenizer | None = None,
         model_name: str = "gpt-4o",
@@ -189,7 +192,7 @@ class CompactionExecutor(Executor):
         # 3. Load current compaction plan
         plan, version = await self._load_plan(ctx)
 
-        # 4. Get current token estimate from budget
+        # 4. Read current token estimate from budget (updated by AgentTurnExecutor)
         current_tokens = budget.current_estimate
 
         # 5. Check if under pressure
@@ -256,13 +259,19 @@ class CompactionExecutor(Executor):
             ),
         )
 
-        # 10. Signal completion
+        # 10. Signal completion — tell AgentTurnExecutor that compaction is needed
+        # At 80%: compaction_needed=True (ClearStrategy)
+        # At 95%: compaction_needed=True + blocking=True (must compact before proceeding)
+        is_blocking = budget.is_blocking if hasattr(budget, "is_blocking") else False
+
         await ctx.send_message(
             CompactionComplete(
                 repairs_made=trigger.repairs_made,
                 plan_updated=plan_updated,
                 tokens_freed=tokens_freed,
                 proposals_applied=proposals_applied,
+                compaction_needed=True,
+                blocking=is_blocking,
             ),
         )
 
@@ -353,17 +362,18 @@ class CompactionExecutor(Executor):
     async def _load_plan(self, ctx: WorkflowContext[Any]) -> tuple[CompactionPlan | None, int]:
         """Load the current compaction plan from shared state.
 
-        Note: Full deserialization is not yet implemented. For now, we check
-        if plan data exists and return an empty plan with the version.
+        Args:
+            ctx: The workflow context.
+
+        Returns:
+            Tuple of (plan, version). Plan is None if no plan exists.
         """
         try:
             plan_data = await ctx.get_shared_state(HARNESS_COMPACTION_PLAN_KEY)
             if plan_data and isinstance(plan_data, dict):
                 plan_dict = cast("dict[str, Any]", plan_data)
-                version = int(plan_dict.get("_version", 1))
-                thread_id = str(plan_dict.get("thread_id", "harness"))
-                # Note: Full deserialization will be added when from_dict is added to CompactionPlan
-                plan = CompactionPlan.create_empty(thread_id=thread_id, thread_version=version)
+                version = int(plan_dict.get("_version", plan_dict.get("thread_version", 0)))
+                plan = CompactionPlan.from_dict(plan_dict)
                 return plan, version
         except KeyError:
             pass

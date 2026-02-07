@@ -145,6 +145,16 @@ class ExternalizationRecord:
             "rehydrate_hint": self.rehydrate_hint,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ExternalizationRecord:
+        """Deserialize from dictionary."""
+        return cls(
+            span=SpanReference.from_dict(data["span"]),
+            artifact_id=data["artifact_id"],
+            summary=StructuredSummary.from_dict(data["summary"]),
+            rehydrate_hint=data["rehydrate_hint"],
+        )
+
 
 @dataclass
 class SummarizationRecord:
@@ -172,6 +182,15 @@ class SummarizationRecord:
             "summary_token_count": self.summary_token_count,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SummarizationRecord:
+        """Deserialize from dictionary."""
+        return cls(
+            span=SpanReference.from_dict(data["span"]),
+            summary=StructuredSummary.from_dict(data["summary"]),
+            summary_token_count=data["summary_token_count"],
+        )
+
 
 @dataclass
 class ClearRecord:
@@ -195,6 +214,14 @@ class ClearRecord:
             "preserved_fields": self.preserved_fields,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ClearRecord:
+        """Deserialize from dictionary."""
+        return cls(
+            span=SpanReference.from_dict(data["span"]),
+            preserved_fields=data.get("preserved_fields", {}),
+        )
+
 
 @dataclass
 class DropRecord:
@@ -217,6 +244,14 @@ class DropRecord:
             "span": self.span.to_dict(),
             "reason": self.reason,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DropRecord:
+        """Deserialize from dictionary."""
+        return cls(
+            span=SpanReference.from_dict(data["span"]),
+            reason=data.get("reason", ""),
+        )
 
 
 @dataclass
@@ -371,4 +406,37 @@ class CompactionPlan:
             thread_id=thread_id,
             thread_version=thread_version,
             created_at=datetime.now(timezone.utc),
+        )
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CompactionPlan:
+        """Deserialize from dictionary.
+
+        Args:
+            data: Dictionary produced by to_dict().
+
+        Returns:
+            A CompactionPlan with all records restored.
+        """
+        created_at_str = data.get("created_at")
+        if created_at_str and isinstance(created_at_str, str):
+            created_at = datetime.fromisoformat(created_at_str)
+        else:
+            created_at = datetime.now(timezone.utc)
+
+        externalizations_data: list[dict[str, Any]] = data.get("externalizations", [])
+        summarizations_data: list[dict[str, Any]] = data.get("summarizations", [])
+        clearings_data: list[dict[str, Any]] = data.get("clearings", [])
+        drops_data: list[dict[str, Any]] = data.get("drops", [])
+
+        return cls(
+            thread_id=data.get("thread_id", ""),
+            thread_version=data.get("thread_version", 0),
+            created_at=created_at,
+            externalizations=[ExternalizationRecord.from_dict(r) for r in externalizations_data],
+            summarizations=[SummarizationRecord.from_dict(r) for r in summarizations_data],
+            clearings=[ClearRecord.from_dict(r) for r in clearings_data],
+            drops=[DropRecord.from_dict(r) for r in drops_data],
+            original_token_count=data.get("original_token_count", 0),
+            compacted_token_count=data.get("compacted_token_count", 0),
         )

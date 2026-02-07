@@ -3,7 +3,7 @@
 """StopDecisionExecutor for evaluating stop conditions after each agent turn."""
 
 import logging
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from .._workflows._executor import Executor, handler
 from .._workflows._workflow_context import WorkflowContext
@@ -28,6 +28,9 @@ from ._state import (
     StopReason,
     TurnComplete,
 )
+
+if TYPE_CHECKING:
+    from ._hooks import HarnessHooks
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +65,9 @@ class StopDecisionExecutor(Executor):
         enable_contract_verification: bool = False,
         enable_stall_detection: bool = False,
         enable_work_item_verification: bool = False,
+        require_task_complete: bool = True,
         stall_threshold: int = DEFAULT_STALL_THRESHOLD,
+        hooks: "HarnessHooks | None" = None,
         id: str = "harness_stop_decision",
     ):
         """Initialize the StopDecisionExecutor.
@@ -71,14 +76,18 @@ class StopDecisionExecutor(Executor):
             enable_contract_verification: Whether to verify contracts before stopping.
             enable_stall_detection: Whether to detect stalled progress.
             enable_work_item_verification: Whether to verify work items before stopping.
+            require_task_complete: Whether to require explicit task_complete call before stopping.
             stall_threshold: Number of unchanged turns before stall detection.
+            hooks: Optional harness hooks for agent-stop interception.
             id: Unique identifier for this executor.
         """
         super().__init__(id)
         self._enable_contract_verification = enable_contract_verification
         self._enable_stall_detection = enable_stall_detection
         self._enable_work_item_verification = enable_work_item_verification
+        self._require_task_complete = require_task_complete
         self._stall_threshold = stall_threshold
+        self._hooks = hooks
 
     @handler
     async def evaluate(self, turn_result: TurnComplete, ctx: WorkflowContext[RepairTrigger, HarnessResult]) -> None:
@@ -137,6 +146,23 @@ class StopDecisionExecutor(Executor):
 
         # Layer 3: Agent signals done - with optional contract verification
         if turn_result.agent_done:
+            # 3-pre: Require explicit task_complete call
+            if self._require_task_complete and not turn_result.called_task_complete:
+                logger.info("StopDecisionExecutor: Agent signaled done but did not call task_complete")
+                await self._append_event(
+                    ctx,
+                    HarnessEvent(
+                        event_type="stop_decision",
+                        data={
+                            "decision": "continue",
+                            "reason": "task_complete_not_called",
+                            "turn": turn_count,
+                        },
+                    ),
+                )
+                await ctx.send_message(RepairTrigger())
+                return
+
             if self._enable_contract_verification:
                 # Verify contract before accepting done signal
                 contract_satisfied, gap_info = await self._verify_contract(ctx)
@@ -181,6 +207,12 @@ class StopDecisionExecutor(Executor):
                         ),
                     )
                     await ctx.send_message(RepairTrigger())
+                    return
+
+            # All verification passed — run agent-stop hooks before accepting
+            if self._hooks and self._hooks.agent_stop:
+                blocked = await self._run_agent_stop_hooks(ctx, turn_count, turn_result)
+                if blocked:
                     return
 
             # All verification passed - accept done signal
@@ -383,6 +415,56 @@ class StopDecisionExecutor(Executor):
             pass
 
         return None
+
+    async def _run_agent_stop_hooks(
+        self,
+        ctx: WorkflowContext[Any, Any],
+        turn_count: int,
+        turn_result: TurnComplete,
+    ) -> bool:
+        """Run agent-stop hooks and return True if any hook blocked the stop.
+
+        Args:
+            ctx: Workflow context for state access and messaging.
+            turn_count: Current turn number.
+            turn_result: The turn completion result.
+
+        Returns:
+            True if a hook blocked the stop (RepairTrigger sent), False otherwise.
+        """
+        from ._hooks import AgentStopEvent
+
+        event = AgentStopEvent(
+            turn_count=turn_count,
+            called_task_complete=turn_result.called_task_complete,
+        )
+
+        for hook in self._hooks.agent_stop:  # type: ignore[union-attr]
+            try:
+                result = await hook(event)
+                if result and result.decision == "block":
+                    logger.info(
+                        "StopDecisionExecutor: agent_stop hook blocked stop: %s",
+                        result.reason,
+                    )
+                    await self._append_event(
+                        ctx,
+                        HarnessEvent(
+                            event_type="stop_decision",
+                            data={
+                                "decision": "continue",
+                                "reason": "agent_stop_hook_blocked",
+                                "hook_reason": result.reason,
+                                "turn": turn_count,
+                            },
+                        ),
+                    )
+                    await ctx.send_message(RepairTrigger())
+                    return True
+            except Exception:
+                logger.exception("StopDecisionExecutor: agent_stop hook error")
+
+        return False
 
     async def _stop(
         self,

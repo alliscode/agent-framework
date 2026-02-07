@@ -52,6 +52,9 @@ from ._compaction import (
     ArtifactStore,
     ArtifactStoreEntry,
     CacheEntry,
+    # Adapter types
+    CacheMessageStore,
+    CacheThreadAdapter,
     ClearRecord,
     # Strategy types
     ClearStrategy,
@@ -134,6 +137,7 @@ from ._compaction import (
 )
 from ._compaction_executor import CompactionComplete, CompactionExecutor
 from ._constants import (
+    DEFAULT_BLOCKING_THRESHOLD_PERCENT,
     DEFAULT_MAX_INPUT_TOKENS,
     DEFAULT_MAX_TURNS,
     DEFAULT_SOFT_THRESHOLD_PERCENT,
@@ -173,9 +177,20 @@ from ._context_pressure import (
     get_default_strategies,
 )
 from ._context_pressure_executor import ContextPressureComplete, ContextPressureExecutor
+from ._context_providers import EnvironmentContextProvider, HarnessGuidanceProvider
 from ._contract_verifier import ContractVerificationResult, ContractVerifier, VerificationResult
 from ._done_tool import TASK_COMPLETE_TOOL_NAME, get_task_complete_tool, task_complete
 from ._harness_builder import AgentHarness, HarnessWorkflowBuilder
+from ._hooks import (
+    AgentStopEvent,
+    AgentStopHook,
+    AgentStopResult,
+    HarnessHooks,
+    HarnessToolMiddleware,
+    PostToolHook,
+    PreToolHook,
+    ToolHookResult,
+)
 from ._renderers import (
     ACTIVITY_VERBS,
     HarnessRenderer,
@@ -196,6 +211,7 @@ from ._state import (
     TurnComplete,
 )
 from ._stop_decision_executor import StopDecisionExecutor
+from ._sub_agents import create_document_tool, create_explore_tool, create_task_tool
 from ._task_contract import (
     AcceptabilityCriteria,
     CompletionReport,
@@ -236,6 +252,7 @@ __all__ = [
     "COMPACTION_RENDER_FORMAT_VERSION",
     # Durability types
     "DEFAULT_DURABILITY_POLICIES",
+    "DEFAULT_BLOCKING_THRESHOLD_PERCENT",
     # Constants
     "DEFAULT_MAX_INPUT_TOKENS",
     "DEFAULT_MAX_TURNS",
@@ -265,6 +282,10 @@ __all__ = [
     "AcceptabilityCriteria",
     # Main API
     "AgentHarness",
+    # Hooks system (Phase 3)
+    "AgentStopEvent",
+    "AgentStopHook",
+    "AgentStopResult",
     # Executors
     "AgentTurnExecutor",
     # Artifact types
@@ -276,6 +297,8 @@ __all__ = [
     "ArtifactStoreEntry",
     "ArtifactValidationResult",
     "CacheEntry",
+    "CacheMessageStore",
+    "CacheThreadAdapter",
     # Context pressure types (Phase 2)
     "ClearEdit",
     "ClearRecord",
@@ -328,16 +351,20 @@ __all__ = [
     "DropOldestStrategy",
     "DropRecord",
     "DropStrategy",
+    "EnvironmentContextProvider",
     "Evidence",
     "ExternalizationRecord",
     "ExternalizeEdit",
     "ExternalizeStrategy",
     "GapReport",
     "HarnessEvent",
+    "HarnessGuidanceProvider",
+    "HarnessHooks",
     "HarnessLifecycleEvent",
     "HarnessRenderer",
     "HarnessResult",
     "HarnessStatus",
+    "HarnessToolMiddleware",
     "HarnessWorkflowBuilder",
     "InMemoryArtifactStore",
     "InMemoryCompactionStore",
@@ -350,8 +377,10 @@ __all__ = [
     "OpenItem",
     "PassthroughRenderer",
     "PendingToolCall",
+    "PostToolHook",
     "Predicate",
     "PredicateType",
+    "PreToolHook",
     "ProgressFingerprint",
     "ProgressTracker",
     "PromptRenderer",
@@ -390,6 +419,7 @@ __all__ = [
     "ToolCall",
     "ToolDurability",
     "ToolDurabilityPolicy",
+    "ToolHookResult",
     "ToolOutcome",
     "ToolResultEnvelope",
     "TranscriptRange",
@@ -407,8 +437,11 @@ __all__ = [
     "WorkItemTaskListProtocol",
     # Utilities
     "compute_content_hash",
+    "create_document_tool",
+    "create_explore_tool",
     "create_rehydration_interceptor",
     "create_summary_cache_key",
+    "create_task_tool",
     "estimate_tokens",
     "estimate_transcript_tokens",
     "format_work_item_reminder",

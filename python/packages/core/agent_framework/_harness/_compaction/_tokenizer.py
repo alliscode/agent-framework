@@ -468,9 +468,11 @@ def get_tokenizer(
 class TokenBudget:
     """Token budget that accounts for all overhead.
 
-    The budget tracks not just message tokens but all the overhead that
-    goes into a request: system prompt, tool schemas, formatting, and
-    reserves for response and rehydration.
+    This is the v2 budget for compaction internals. It tracks not just message
+    tokens but all the overhead that goes into a request: system prompt, tool
+    schemas, formatting, and reserves for response and rehydration. For the
+    simpler SharedState pressure signaling budget, see
+    ``_context_pressure.TokenBudget``.
 
     Attributes:
         max_input_tokens: Maximum tokens allowed in input.

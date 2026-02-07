@@ -30,6 +30,12 @@ Strategies are applied in order from least to most aggressive:
 See CONTEXT_COMPACTION_DESIGN.md for full architecture details.
 """
 
+# Adapter types
+from ._adapters import (
+    CacheMessageStore,
+    CacheThreadAdapter,
+)
+
 # Durability types
 from ._durability import (
     DEFAULT_DURABILITY_POLICIES,
@@ -158,6 +164,9 @@ from ._types import (
 )
 
 __all__ = [
+    # Adapter types
+    "CacheMessageStore",
+    "CacheThreadAdapter",
     # Constants
     "COMPACTION_PRECEDENCE",
     "COMPACTION_RENDER_FORMAT_VERSION",

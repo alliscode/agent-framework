@@ -2,10 +2,11 @@
 
 """HarnessWorkflowBuilder for creating agent harness workflows."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from .._agents import AgentProtocol
+from .._memory import ContextProvider
 from .._threads import AgentThread
 from .._workflows._checkpoint import CheckpointStorage
 from .._workflows._workflow import Workflow
@@ -24,6 +25,8 @@ from ._state import RepairTrigger
 from ._stop_decision_executor import StopDecisionExecutor
 
 if TYPE_CHECKING:
+    from .._clients import ChatClientProtocol
+    from .._tools import ToolProtocol
     from ._compaction import (
         ArtifactStore,
         CompactionStore,
@@ -32,6 +35,7 @@ if TYPE_CHECKING:
         Summarizer,
         SummaryCache,
     )
+    from ._hooks import HarnessHooks
     from ._task_contract import TaskContract
     from ._work_items import WorkItemTaskListProtocol
 
@@ -95,11 +99,18 @@ class HarnessWorkflowBuilder:
         stall_threshold: int = DEFAULT_STALL_THRESHOLD,
         # Continuation prompts
         enable_continuation_prompts: bool = True,
-        max_continuation_prompts: int = 2,
+        max_continuation_prompts: int = 5,
         continuation_prompt: str | None = None,
         # Work item tracking
         enable_work_items: bool = False,
         task_list: "WorkItemTaskListProtocol | None" = None,
+        # Phase 2: Rich system prompt construction
+        sandbox_path: str | None = None,
+        # Phase 3: Hooks system
+        hooks: "HarnessHooks | None" = None,
+        # Phase 5: Sub-agent delegation
+        sub_agent_client: "ChatClientProtocol | None" = None,
+        sub_agent_tools: "Sequence[ToolProtocol | Callable[..., Any]] | None" = None,
     ):
         """Initialize the HarnessWorkflowBuilder.
 
@@ -124,12 +135,19 @@ class HarnessWorkflowBuilder:
             enable_stall_detection: Whether to detect stalled progress.
             stall_threshold: Number of unchanged turns before stall detection. Default is 3.
             enable_continuation_prompts: Whether to prompt agent to continue if it stops early.
-            max_continuation_prompts: Maximum continuation prompts before accepting done. Default is 2.
+            max_continuation_prompts: Maximum continuation prompts before accepting done. Default is 5.
             continuation_prompt: Custom continuation prompt text.
             enable_work_items: Whether to enable work item tracking. When True, a default
                 WorkItemTaskList is created and its tools are injected at runtime.
             task_list: Optional custom task list implementation. When provided,
                 work item tracking is automatically enabled.
+            sandbox_path: Optional path to the sandbox/working directory. When provided,
+                environment context is injected into the system prompt.
+            hooks: Optional harness hooks for lifecycle interception (pre/post tool,
+                agent stop).
+            sub_agent_client: Optional chat client for sub-agents (ideally a fast/cheap model).
+                When provided, explore and run_task sub-agent tools are created and injected.
+            sub_agent_tools: Optional tools to give sub-agents. When None, sub-agents get no tools.
         """
         self._agent = agent
         self._agent_thread = agent_thread
@@ -157,6 +175,28 @@ class HarnessWorkflowBuilder:
         # Work item tracking
         self._task_list = self._resolve_task_list(enable_work_items, task_list)
 
+        # Hooks
+        self._hooks = hooks
+
+        # Phase 5: Sub-agent delegation
+        self._sub_agent_tools: list[Any] = []
+        if sub_agent_client is not None:
+            from ._sub_agents import create_document_tool, create_explore_tool, create_task_tool
+
+            agent_tools = list(sub_agent_tools or [])
+            self._sub_agent_tools = [
+                create_explore_tool(sub_agent_client, agent_tools),
+                create_task_tool(sub_agent_client, agent_tools),
+                create_document_tool(sub_agent_client, agent_tools),
+            ]
+
+        # Phase 2: Wire context providers for rich system prompt
+        self._wire_context_providers(
+            sandbox_path,
+            enable_work_items or task_list is not None,
+            enable_sub_agents=len(self._sub_agent_tools) > 0,
+        )
+
     @staticmethod
     def _resolve_task_list(
         enable_work_items: bool,
@@ -174,6 +214,53 @@ class HarnessWorkflowBuilder:
 
             return WorkItemTaskList()
         return None
+
+    def _wire_context_providers(
+        self,
+        sandbox_path: str | None,
+        enable_work_items: bool,
+        *,
+        enable_sub_agents: bool = False,
+    ) -> None:
+        """Wire EnvironmentContextProvider and HarnessGuidanceProvider to the agent.
+
+        Appends harness-level context providers to the agent's existing context_provider,
+        preserving any user-configured providers.
+
+        Args:
+            sandbox_path: Optional sandbox directory path for environment context.
+            enable_work_items: Whether work item guidance should be included.
+            enable_sub_agents: Whether sub-agent guidance should be included.
+        """
+        from .._memory import AggregateContextProvider
+        from ._context_providers import EnvironmentContextProvider, HarnessGuidanceProvider
+
+        providers: list[ContextProvider] = []
+
+        if sandbox_path:
+            providers.append(EnvironmentContextProvider(sandbox_path=sandbox_path))
+
+        providers.append(
+            HarnessGuidanceProvider(
+                enable_work_items=enable_work_items,
+                enable_tool_guidance=True,
+                enable_sub_agents=enable_sub_agents,
+            )
+        )
+
+        if not providers:
+            return
+
+        agent = self._agent
+        if hasattr(agent, "context_provider"):
+            existing = agent.context_provider
+            if isinstance(existing, AggregateContextProvider):
+                for p in providers:
+                    existing.add(p)
+            elif existing is not None:
+                agent.context_provider = AggregateContextProvider([existing, *providers])
+            else:
+                agent.context_provider = AggregateContextProvider(providers)
 
     def get_harness_kwargs(self) -> dict[str, Any]:
         """Get the kwargs to pass to workflow.run() for harness configuration.
@@ -265,6 +352,9 @@ class HarnessWorkflowBuilder:
         max_cont = self._max_continuation_prompts
         cont_prompt = self._continuation_prompt
         task_list = self._task_list
+        enable_compact = self._enable_compaction
+        hooks = self._hooks
+        sub_agent_tools = self._sub_agent_tools
 
         builder.register_executor(
             lambda: AgentTurnExecutor(
@@ -273,7 +363,10 @@ class HarnessWorkflowBuilder:
                 enable_continuation_prompts=enable_cont,
                 max_continuation_prompts=max_cont,
                 continuation_prompt=cont_prompt,
+                enable_compaction=enable_compact,
                 task_list=task_list,
+                hooks=hooks,
+                sub_agent_tools=sub_agent_tools,
                 id="harness_agent_turn",
             ),
             name="agent_turn",
@@ -288,7 +381,9 @@ class HarnessWorkflowBuilder:
                 enable_contract_verification=enable_contract_verification,
                 enable_stall_detection=self._enable_stall_detection,
                 enable_work_item_verification=enable_work_item_verification,
+                require_task_complete=True,
                 stall_threshold=self._stall_threshold,
+                hooks=hooks,
                 id="harness_stop_decision",
             ),
             name="stop_decision",
@@ -399,11 +494,18 @@ class AgentHarness:
         stall_threshold: int = DEFAULT_STALL_THRESHOLD,
         # Continuation prompts
         enable_continuation_prompts: bool = True,
-        max_continuation_prompts: int = 2,
+        max_continuation_prompts: int = 5,
         continuation_prompt: str | None = None,
         # Work item tracking
         enable_work_items: bool = False,
         task_list: "WorkItemTaskListProtocol | None" = None,
+        # Phase 2: Rich system prompt construction
+        sandbox_path: str | None = None,
+        # Phase 3: Hooks system
+        hooks: "HarnessHooks | None" = None,
+        # Phase 5: Sub-agent delegation
+        sub_agent_client: "ChatClientProtocol | None" = None,
+        sub_agent_tools: "Sequence[ToolProtocol | Callable[..., Any]] | None" = None,
     ):
         """Initialize the AgentHarness.
 
@@ -428,12 +530,19 @@ class AgentHarness:
             enable_stall_detection: Whether to detect stalled progress.
             stall_threshold: Number of unchanged turns before stall detection. Default is 3.
             enable_continuation_prompts: Whether to prompt agent to continue if it stops early.
-            max_continuation_prompts: Maximum continuation prompts before accepting done. Default is 2.
+            max_continuation_prompts: Maximum continuation prompts before accepting done. Default is 5.
             continuation_prompt: Custom continuation prompt text.
             enable_work_items: Whether to enable work item tracking. When True, a default
                 WorkItemTaskList is created and its tools are injected at runtime.
             task_list: Optional custom task list implementation. When provided,
                 work item tracking is automatically enabled.
+            sandbox_path: Optional path to the sandbox/working directory. When provided,
+                environment context is injected into the system prompt.
+            hooks: Optional harness hooks for lifecycle interception (pre/post tool,
+                agent stop).
+            sub_agent_client: Optional chat client for sub-agents (ideally a fast/cheap model).
+                When provided, explore and run_task sub-agent tools are created and injected.
+            sub_agent_tools: Optional tools to give sub-agents. When None, sub-agents get no tools.
         """
         self._builder = HarnessWorkflowBuilder(
             agent,
@@ -459,6 +568,10 @@ class AgentHarness:
             continuation_prompt=continuation_prompt,
             enable_work_items=enable_work_items,
             task_list=task_list,
+            sandbox_path=sandbox_path,
+            hooks=hooks,
+            sub_agent_client=sub_agent_client,
+            sub_agent_tools=sub_agent_tools,
         )
         self._workflow: Workflow | None = None
         self._harness_kwargs = self._builder.get_harness_kwargs()

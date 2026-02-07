@@ -811,7 +811,7 @@ class TestStopDecisionWorkItemVerification:
         ledger.add_item(WorkItem(id="a", title="T1", status=WorkItemStatus.DONE))
         mock_ctx._state[HARNESS_WORK_ITEM_LEDGER_KEY] = ledger.to_dict()
 
-        turn_result = TurnComplete(agent_done=True)
+        turn_result = TurnComplete(agent_done=True, called_task_complete=True)
         await executor.evaluate(turn_result, mock_ctx)
 
         # Should have stopped (yielded output)
@@ -832,7 +832,7 @@ class TestStopDecisionWorkItemVerification:
         ledger.add_item(WorkItem(id="a", title="T1", status=WorkItemStatus.PENDING))
         mock_ctx._state[HARNESS_WORK_ITEM_LEDGER_KEY] = ledger.to_dict()
 
-        turn_result = TurnComplete(agent_done=True)
+        turn_result = TurnComplete(agent_done=True, called_task_complete=True)
         await executor.evaluate(turn_result, mock_ctx)
 
         # Should have sent RepairTrigger (continue)
@@ -854,7 +854,7 @@ class TestStopDecisionWorkItemVerification:
         )
 
         # No ledger in state
-        turn_result = TurnComplete(agent_done=True)
+        turn_result = TurnComplete(agent_done=True, called_task_complete=True)
         await executor.evaluate(turn_result, mock_ctx)
 
         # Should have stopped
@@ -872,7 +872,7 @@ class TestStopDecisionWorkItemVerification:
         ledger.add_item(WorkItem(id="a", title="T1", status=WorkItemStatus.PENDING))
         mock_ctx._state[HARNESS_WORK_ITEM_LEDGER_KEY] = ledger.to_dict()
 
-        turn_result = TurnComplete(agent_done=True)
+        turn_result = TurnComplete(agent_done=True, called_task_complete=True)
         await executor.evaluate(turn_result, mock_ctx)
 
         # Should have stopped regardless
@@ -890,7 +890,7 @@ class TestStopDecisionWorkItemVerification:
         ledger.add_item(WorkItem(id="b", title="T2", status=WorkItemStatus.SKIPPED))
         mock_ctx._state[HARNESS_WORK_ITEM_LEDGER_KEY] = ledger.to_dict()
 
-        turn_result = TurnComplete(agent_done=True)
+        turn_result = TurnComplete(agent_done=True, called_task_complete=True)
         await executor.evaluate(turn_result, mock_ctx)
 
         # Should have stopped
@@ -923,7 +923,7 @@ class TestStopDecisionWorkItemVerification:
         )
         mock_ctx._state[HARNESS_WORK_ITEM_LEDGER_KEY] = ledger.to_dict()
 
-        turn_result = TurnComplete(agent_done=True)
+        turn_result = TurnComplete(agent_done=True, called_task_complete=True)
         await executor.evaluate(turn_result, mock_ctx)
 
         # Should have rejected (sent RepairTrigger)
@@ -957,7 +957,7 @@ class TestStopDecisionWorkItemVerification:
         )
         mock_ctx._state[HARNESS_WORK_ITEM_LEDGER_KEY] = ledger.to_dict()
 
-        turn_result = TurnComplete(agent_done=True)
+        turn_result = TurnComplete(agent_done=True, called_task_complete=True)
         await executor.evaluate(turn_result, mock_ctx)
 
         # Should have stopped (resolved)
@@ -2129,7 +2129,7 @@ class TestHarnessResultDeliverables:
         )
         mock_ctx._state[HARNESS_WORK_ITEM_LEDGER_KEY] = ledger.to_dict()
 
-        turn_result = TurnComplete(agent_done=True)
+        turn_result = TurnComplete(agent_done=True, called_task_complete=True)
         await executor.evaluate(turn_result, mock_ctx)
 
         assert len(mock_ctx._outputs) == 1
@@ -2145,7 +2145,7 @@ class TestHarnessResultDeliverables:
         """Test that missing ledger results in empty deliverables."""
         executor = StopDecisionExecutor()
 
-        turn_result = TurnComplete(agent_done=True)
+        turn_result = TurnComplete(agent_done=True, called_task_complete=True)
         await executor.evaluate(turn_result, mock_ctx)
 
         assert len(mock_ctx._outputs) == 1

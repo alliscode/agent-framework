@@ -190,6 +190,11 @@ class ContextEditPlan:
 class TokenBudget:
     """Token budget configuration for context pressure.
 
+    This is the v1 budget used for SharedState pressure signaling between executors.
+    It stores a simple current_estimate and checks it against a soft threshold.
+    For compaction-internal overhead tracking (system prompt, tool schemas, formatting),
+    see ``_compaction._tokenizer.TokenBudget``.
+
     Attributes:
         max_input_tokens: Maximum tokens allowed in input context.
         soft_threshold_percent: Percentage at which to trigger pressure strategies.
@@ -197,7 +202,8 @@ class TokenBudget:
     """
 
     max_input_tokens: int = 100000
-    soft_threshold_percent: float = 0.85
+    soft_threshold_percent: float = 0.80
+    blocking_threshold_percent: float = 0.95
     current_estimate: int = 0
 
     @property
@@ -206,9 +212,19 @@ class TokenBudget:
         return int(self.max_input_tokens * self.soft_threshold_percent)
 
     @property
+    def blocking_threshold(self) -> int:
+        """Calculate the blocking threshold in tokens (must compact before LLM call)."""
+        return int(self.max_input_tokens * self.blocking_threshold_percent)
+
+    @property
     def is_under_pressure(self) -> bool:
         """Check if context is under pressure (above soft threshold)."""
         return self.current_estimate >= self.soft_threshold
+
+    @property
+    def is_blocking(self) -> bool:
+        """Check if context requires blocking compaction before proceeding."""
+        return self.current_estimate >= self.blocking_threshold
 
     @property
     def tokens_over_threshold(self) -> int:
@@ -220,6 +236,7 @@ class TokenBudget:
         return {
             "max_input_tokens": self.max_input_tokens,
             "soft_threshold_percent": self.soft_threshold_percent,
+            "blocking_threshold_percent": self.blocking_threshold_percent,
             "current_estimate": self.current_estimate,
         }
 
@@ -228,7 +245,8 @@ class TokenBudget:
         """Deserialize from dictionary."""
         return cls(
             max_input_tokens=data.get("max_input_tokens", 100000),
-            soft_threshold_percent=data.get("soft_threshold_percent", 0.85),
+            soft_threshold_percent=data.get("soft_threshold_percent", 0.80),
+            blocking_threshold_percent=data.get("blocking_threshold_percent", 0.95),
             current_estimate=data.get("current_estimate", 0),
         )
 

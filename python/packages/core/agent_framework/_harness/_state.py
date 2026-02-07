@@ -262,8 +262,10 @@ class TurnComplete:
 
     Attributes:
         agent_done: Whether the agent signaled it has completed its task.
+        called_task_complete: Whether the agent explicitly called the task_complete tool.
         error: Optional error message if the turn failed.
     """
 
     agent_done: bool = False
+    called_task_complete: bool = False
     error: str | None = None

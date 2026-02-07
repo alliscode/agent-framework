@@ -4,7 +4,7 @@
 
 import contextlib
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .._agents import AgentProtocol, ChatAgent
 from .._threads import AgentThread
@@ -18,15 +18,17 @@ from ._constants import (
     HARNESS_CONTINUATION_COUNT_KEY,
     HARNESS_INITIAL_MESSAGE_KEY,
     HARNESS_MAX_TURNS_KEY,
+    HARNESS_TOKEN_BUDGET_KEY,
     HARNESS_TRANSCRIPT_KEY,
     HARNESS_TURN_COUNT_KEY,
     HARNESS_WORK_ITEM_LEDGER_KEY,
 )
-from ._done_tool import TASK_COMPLETE_TOOL_NAME
+from ._done_tool import TASK_COMPLETE_TOOL_NAME, task_complete
 from ._state import HarnessEvent, HarnessLifecycleEvent, RepairComplete, TurnComplete
 
 if TYPE_CHECKING:
     from ._compaction import CompactionPlan
+    from ._hooks import HarnessHooks
     from ._work_items import WorkItemEventMiddleware, WorkItemLedger, WorkItemTaskListProtocol
 
 logger = logging.getLogger(__name__)
@@ -49,8 +51,18 @@ class AgentTurnExecutor(Executor):
     - Storage protocols are injectable for different environments
     """
 
-    # Default continuation prompt - gentle nudge, not accusatory
-    DEFAULT_CONTINUATION_PROMPT = "Continue if there's more to do, or just say 'done' if finished."
+    # Default continuation prompt - assertive nudge requiring task_complete
+    DEFAULT_CONTINUATION_PROMPT = (
+        "You have not yet marked the task as complete using the task_complete tool.\n"
+        "If you were planning, stop planning and start executing.\n"
+        "You are not done until you have fully completed the task.\n\n"
+        "IMPORTANT: Do NOT call task_complete if:\n"
+        "- You have open questions — use your best judgment and continue\n"
+        "- You encountered an error — try to resolve it or find an alternative\n"
+        "- There are remaining steps — complete them first\n\n"
+        "Keep working autonomously until the task is truly finished,\n"
+        "then call task_complete with a summary."
+    )
 
     def __init__(
         self,
@@ -58,10 +70,12 @@ class AgentTurnExecutor(Executor):
         *,
         agent_thread: AgentThread | None = None,
         enable_continuation_prompts: bool = True,
-        max_continuation_prompts: int = 2,
+        max_continuation_prompts: int = 5,
         continuation_prompt: str | None = None,
         enable_compaction: bool = False,
         task_list: "WorkItemTaskListProtocol | None" = None,
+        hooks: "HarnessHooks | None" = None,
+        sub_agent_tools: list[Any] | None = None,
         id: str = "harness_agent_turn",
     ):
         """Initialize the AgentTurnExecutor.
@@ -74,6 +88,8 @@ class AgentTurnExecutor(Executor):
             continuation_prompt: Custom continuation prompt text.
             enable_compaction: Whether to apply CompactionPlan from SharedState.
             task_list: Optional work item task list for self-critique tracking.
+            hooks: Optional harness hooks for pre/post tool interception.
+            sub_agent_tools: Optional list of sub-agent tools (explore, run_task) to inject.
             id: Unique identifier for this executor.
         """
         super().__init__(id)
@@ -86,12 +102,29 @@ class AgentTurnExecutor(Executor):
         self._enable_compaction = enable_compaction
         self._task_list = task_list
 
+        # Initialize tokenizer for cache token counting when compaction is enabled
+        self._tokenizer: "ProviderAwareTokenizer | None" = None
+        if enable_compaction:
+            from ._compaction._tokenizer import ProviderAwareTokenizer, get_tokenizer
+
+            self._tokenizer = get_tokenizer()
+
         # Create work item event middleware if task_list is provided
         self._work_item_middleware: "WorkItemEventMiddleware | None" = None
         if task_list is not None:
             from ._work_items import WorkItemEventMiddleware
 
             self._work_item_middleware = WorkItemEventMiddleware(task_list.ledger)
+
+        # Create harness tool middleware if hooks have pre/post tool callbacks
+        from ._hooks import HarnessToolMiddleware
+
+        self._harness_tool_middleware: HarnessToolMiddleware | None = None
+        if hooks and (hooks.pre_tool or hooks.post_tool):
+            self._harness_tool_middleware = HarnessToolMiddleware(hooks)
+
+        # Phase 5: Sub-agent tools
+        self._sub_agent_tools = sub_agent_tools or []
 
     @handler
     async def run_turn(self, trigger: RepairComplete, ctx: WorkflowContext[TurnComplete]) -> None:
@@ -136,15 +169,37 @@ class AgentTurnExecutor(Executor):
                 logger.info(f"AgentTurnExecutor: Injecting initial message: {preview}...")
                 self._cache.append(initial_message)
 
-            # Inject work item guidance on first turn
+            # Note: Tool strategy, work item, and planning guidance are also injected
+            # via HarnessGuidanceProvider as system prompt content (Phase 2).
+            # First-turn user messages provide the immediate planning kick.
             if self._task_list is not None:
                 self._inject_work_item_guidance()
+                self._inject_tool_strategy_guidance()
+                self._inject_planning_prompt()
+
+        # 1.6. On turns after the first, inject current work item state
+        if turn_count > 1 and self._task_list is not None:
+            await self._inject_work_item_state(ctx)
 
         # 2. Inject work item reminder if last stop was work_items_incomplete
         if self._task_list is not None:
             await self._maybe_inject_work_item_reminder(ctx)
 
-        # 3. Record turn start event
+        # 3. Apply compaction if needed — prefer full pipeline, fall back to direct clear
+        if self._enable_compaction and self._is_compaction_needed(trigger):
+            compacted = await self._run_full_compaction(ctx, turn_count)
+            if compacted:
+                logger.info("AgentTurnExecutor: Full compaction pipeline applied successfully")
+            else:
+                # Fall back to direct clearing
+                cleared_count = self._apply_direct_clear(turn_count)
+                if cleared_count > 0:
+                    logger.info(
+                        "AgentTurnExecutor: Cleared %d old tool results to reduce context pressure",
+                        cleared_count,
+                    )
+
+        # 4. Record turn start event
         await self._append_event(
             ctx,
             HarnessEvent(
@@ -153,7 +208,7 @@ class AgentTurnExecutor(Executor):
             ),
         )
 
-        # 4. Run the agent
+        # 5. Run the agent
         try:
             if ctx.is_streaming():
                 response = await self._run_agent_streaming(ctx)
@@ -213,7 +268,10 @@ class AgentTurnExecutor(Executor):
                     agent_done = True
                     logger.info(f"AgentTurnExecutor: Turn {turn_count} complete, agent_done=True")
 
-            # 6. Emit lifecycle event and signal completion
+            # 6. Update token budget in SharedState so CompactionExecutor has accurate counts
+            await self._update_token_budget(ctx, response)
+
+            # 7. Emit lifecycle event and signal completion
             await ctx.add_event(
                 HarnessLifecycleEvent(
                     event_type="turn_completed",
@@ -226,7 +284,7 @@ class AgentTurnExecutor(Executor):
                     },
                 )
             )
-            await ctx.send_message(TurnComplete(agent_done=agent_done))
+            await ctx.send_message(TurnComplete(agent_done=agent_done, called_task_complete=called_task_complete))
 
         except Exception as e:
             logger.error(f"AgentTurnExecutor: Turn {turn_count} failed with error: {e}")
@@ -262,8 +320,25 @@ class AgentTurnExecutor(Executor):
         # Inject work item tools and middleware if task_list is set
         if self._task_list is not None:
             run_kwargs["tools"] = self._task_list.get_tools()
-            if self._work_item_middleware is not None:
-                run_kwargs["middleware"] = self._work_item_middleware
+            run_kwargs["tools"].append(task_complete)
+        else:
+            # Even without work items, inject task_complete for stop control
+            run_kwargs.setdefault("tools", [])
+            if isinstance(run_kwargs["tools"], list):
+                run_kwargs["tools"].append(task_complete)
+
+        # Inject sub-agent tools
+        if self._sub_agent_tools:
+            existing_tools = run_kwargs.get("tools", [])
+            if not isinstance(existing_tools, list):
+                existing_tools = list(existing_tools)
+            existing_tools.extend(self._sub_agent_tools)
+            run_kwargs["tools"] = existing_tools
+
+        # Compose function middlewares (work item + harness tool hooks)
+        middlewares = self._collect_middlewares()
+        if middlewares:
+            run_kwargs["middleware"] = middlewares if len(middlewares) > 1 else middlewares[0]
 
         # Apply compaction if enabled and plan exists
         messages_to_send = await self._get_messages_for_agent(ctx)
@@ -303,8 +378,25 @@ class AgentTurnExecutor(Executor):
         # Inject work item tools and middleware if task_list is set
         if self._task_list is not None:
             run_kwargs["tools"] = self._task_list.get_tools()
-            if self._work_item_middleware is not None:
-                run_kwargs["middleware"] = self._work_item_middleware
+            run_kwargs["tools"].append(task_complete)
+        else:
+            # Even without work items, inject task_complete for stop control
+            run_kwargs.setdefault("tools", [])
+            if isinstance(run_kwargs["tools"], list):
+                run_kwargs["tools"].append(task_complete)
+
+        # Inject sub-agent tools
+        if self._sub_agent_tools:
+            existing_tools = run_kwargs.get("tools", [])
+            if not isinstance(existing_tools, list):
+                existing_tools = list(existing_tools)
+            existing_tools.extend(self._sub_agent_tools)
+            run_kwargs["tools"] = existing_tools
+
+        # Compose function middlewares (work item + harness tool hooks)
+        middlewares = self._collect_middlewares()
+        if middlewares:
+            run_kwargs["middleware"] = middlewares if len(middlewares) > 1 else middlewares[0]
 
         # Apply compaction if enabled and plan exists
         messages_to_send = await self._get_messages_for_agent(ctx)
@@ -346,6 +438,19 @@ class AgentTurnExecutor(Executor):
 
         return response
 
+    def _collect_middlewares(self) -> list[Any]:
+        """Collect all function middlewares to inject into agent.run().
+
+        Returns:
+            List of FunctionMiddleware instances (may be empty).
+        """
+        middlewares: list[Any] = []
+        if self._work_item_middleware is not None:
+            middlewares.append(self._work_item_middleware)
+        if self._harness_tool_middleware is not None:
+            middlewares.append(self._harness_tool_middleware)
+        return middlewares
+
     async def _get_messages_for_agent(self, ctx: WorkflowContext[Any]) -> list[Any]:
         """Get messages to send to agent, applying compaction if enabled.
 
@@ -369,9 +474,6 @@ class AgentTurnExecutor(Executor):
     async def _load_compaction_plan(self, ctx: WorkflowContext[Any]) -> "CompactionPlan | None":
         """Load the compaction plan from SharedState.
 
-        Note: Full deserialization is not yet implemented. For now, we check
-        if plan data exists and return an empty plan with preserved metadata.
-
         Args:
             ctx: The workflow context.
 
@@ -381,15 +483,9 @@ class AgentTurnExecutor(Executor):
         try:
             plan_data = await ctx.get_shared_state(HARNESS_COMPACTION_PLAN_KEY)
             if plan_data and isinstance(plan_data, dict):
-                from typing import cast
-
                 from ._compaction import CompactionPlan
 
-                plan_dict = cast(dict[str, Any], plan_data)
-                thread_id = str(plan_dict.get("thread_id", "harness"))
-                version = int(plan_dict.get("thread_version", 0))
-                # Note: Full deserialization will be added when from_dict is added to CompactionPlan
-                return CompactionPlan.create_empty(thread_id=thread_id, thread_version=version)
+                return CompactionPlan.from_dict(plan_data)
         except KeyError:
             pass
         return None
@@ -526,6 +622,156 @@ class AgentTurnExecutor(Executor):
             message_id=f"external-{span.start_message_id}",
         )
 
+    @staticmethod
+    def _is_compaction_needed(trigger: RepairComplete) -> bool:
+        """Check if the trigger signals that compaction is needed.
+
+        Args:
+            trigger: The trigger message (may be CompactionComplete with compaction_needed flag).
+
+        Returns:
+            True if compaction should be applied to the cache.
+        """
+        from ._compaction_executor import CompactionComplete
+
+        return isinstance(trigger, CompactionComplete) and trigger.compaction_needed
+
+    def _apply_direct_clear(self, current_turn: int, preserve_recent_turns: int = 2) -> int:
+        """Clear old tool results in the cache to reduce context pressure.
+
+        Replaces FunctionResultContent in older messages with short placeholders.
+        This is a lightweight version of ClearStrategy that operates directly on
+        the in-memory cache without needing an AgentThread.
+
+        Args:
+            current_turn: The current turn number.
+            preserve_recent_turns: Number of recent cache entries to keep intact.
+
+        Returns:
+            Number of tool results that were cleared.
+        """
+        from .._types import ChatMessage, FunctionResultContent
+
+        if len(self._cache) <= preserve_recent_turns:
+            return 0
+
+        cleared_count = 0
+        cutoff = len(self._cache) - preserve_recent_turns
+
+        for i in range(cutoff):
+            msg = self._cache[i]
+            contents = getattr(msg, "contents", None)
+            if not contents:
+                continue
+
+            new_contents: list[Any] = []
+            modified = False
+            for content in contents:
+                if isinstance(content, FunctionResultContent):
+                    result_str = str(content.result or "")
+                    # Only clear results that are large enough to matter (>100 chars)
+                    if len(result_str) > 100:
+                        content = FunctionResultContent(
+                            call_id=content.call_id,
+                            result="[Tool result cleared to save context]",
+                        )
+                        modified = True
+                        cleared_count += 1
+                new_contents.append(content)
+
+            if modified:
+                # Replace the message in cache with updated contents
+                role = getattr(msg, "role", "tool")
+                role_value: str = str(getattr(role, "value", role))
+                self._cache[i] = ChatMessage(
+                    role=role_value,  # type: ignore[arg-type]
+                    contents=new_contents,
+                    message_id=getattr(msg, "message_id", None),
+                )
+
+        return cleared_count
+
+    async def _run_full_compaction(self, ctx: WorkflowContext[Any], turn_count: int) -> bool:
+        """Run the full compaction pipeline via CompactionCoordinator.
+
+        Bridges the cache to the compaction strategies using CacheThreadAdapter,
+        then runs ClearStrategy + DropStrategy to produce a CompactionPlan that
+        is stored in SharedState for _get_messages_for_agent to apply.
+
+        Args:
+            ctx: Workflow context for state access.
+            turn_count: Current turn number.
+
+        Returns:
+            True if compaction was applied, False if no compaction was needed or possible.
+        """
+        from ._compaction import (
+            CacheThreadAdapter,
+            ClearStrategy,
+            CompactionCoordinator,
+            DropStrategy,
+            TurnContext,
+        )
+        from ._compaction import TokenBudget as TokenBudgetV2
+
+        if self._tokenizer is None:
+            return False
+
+        # Build a thread adapter from cache
+        thread_adapter = CacheThreadAdapter(self._cache)
+
+        # Load current plan from SharedState
+        plan = await self._load_compaction_plan(ctx)
+
+        # Create v2 budget for compaction internals
+        budget_v2 = TokenBudgetV2()
+
+        # Estimate current tokens from cache
+        current_tokens = 0
+        for msg in self._cache:
+            text = getattr(msg, "text", None) or ""
+            current_tokens += self._tokenizer.count_tokens(str(text))
+
+        tokens_over = budget_v2.tokens_over_threshold(current_tokens)
+        if tokens_over <= 0:
+            logger.debug(
+                "AgentTurnExecutor: Full compaction skipped — under threshold (%d tokens)",
+                current_tokens,
+            )
+            return False
+
+        tokens_to_free = tokens_over + int(budget_v2.max_input_tokens * 0.1)
+
+        # Run coordinator with ClearStrategy + DropStrategy
+        turn_context = TurnContext(turn_number=turn_count)
+        coordinator = CompactionCoordinator(strategies=[ClearStrategy(), DropStrategy()])
+
+        try:
+            result = await coordinator.compact(
+                thread_adapter,  # type: ignore[arg-type]
+                plan,
+                budget_v2,
+                self._tokenizer,
+                tokens_to_free=tokens_to_free,
+                turn_context=turn_context,
+            )
+        except Exception:
+            logger.warning("AgentTurnExecutor: Full compaction failed", exc_info=True)
+            return False
+
+        # Store updated plan if it has content
+        if result.plan and not result.plan.is_empty:
+            await ctx.set_shared_state(HARNESS_COMPACTION_PLAN_KEY, result.plan.to_dict())
+            logger.info(
+                "AgentTurnExecutor: Compaction complete — freed ~%d tokens, applied %d/%d proposals",
+                result.tokens_freed,
+                result.proposals_applied,
+                result.proposals_generated,
+            )
+            return True
+
+        return False
+
     def _has_tool_calls(self, response: AgentRunResponse) -> bool:
         """Check if the response contains tool calls (excluding task_complete).
 
@@ -649,6 +895,74 @@ class AgentTurnExecutor(Executor):
         except KeyError:
             return None
 
+    async def _update_token_budget(self, ctx: WorkflowContext[Any], response: "AgentRunResponse | None" = None) -> None:
+        """Update the token budget in SharedState so CompactionExecutor has accurate counts.
+
+        Uses the API-reported input token count (from response.usage_details) as the
+        primary source — this is the authoritative count including system prompt, tool
+        schemas, and all formatting overhead. Falls back to content-level counting with
+        the tokenizer when usage_details is not available.
+
+        Args:
+            ctx: Workflow context for state access.
+            response: The agent response (may contain usage_details with input_token_count).
+        """
+        from .._types import FunctionCallContent, FunctionResultContent, TextContent
+        from ._context_pressure import TokenBudget
+
+        current_tokens = 0
+        counting_method = "none"
+
+        # Primary: use API-reported input token count (includes system prompt, tool schemas, formatting)
+        if response and response.usage_details and response.usage_details.input_token_count:
+            current_tokens = response.usage_details.input_token_count
+            counting_method = "api_usage"
+        elif self._tokenizer is not None:
+            # Fallback: count tokens from cache contents
+            for msg in self._cache:
+                contents = getattr(msg, "contents", None)
+                if not contents:
+                    continue
+                for content in contents:
+                    if isinstance(content, TextContent):
+                        current_tokens += self._tokenizer.count_tokens(content.text or "")
+                    elif isinstance(content, FunctionCallContent):
+                        current_tokens += self._tokenizer.count_tokens(content.name or "")
+                        args = content.arguments
+                        if isinstance(args, dict):
+                            import json
+
+                            args = json.dumps(args)
+                        current_tokens += self._tokenizer.count_tokens(str(args or ""))
+                    elif isinstance(content, FunctionResultContent):
+                        current_tokens += self._tokenizer.count_tokens(str(content.result or ""))
+                    else:
+                        current_tokens += self._tokenizer.count_tokens(str(content))
+                # Per-message overhead (role, formatting)
+                current_tokens += 4
+            counting_method = "tokenizer"
+        else:
+            return  # No way to count tokens
+
+        # Load or create the budget and update its estimate
+        try:
+            budget_data = await ctx.get_shared_state(HARNESS_TOKEN_BUDGET_KEY)
+            if budget_data and isinstance(budget_data, dict):
+                budget = TokenBudget.from_dict(cast("dict[str, Any]", budget_data))
+            else:
+                budget = TokenBudget()
+        except KeyError:
+            budget = TokenBudget()
+
+        budget.current_estimate = current_tokens
+        await ctx.set_shared_state(HARNESS_TOKEN_BUDGET_KEY, budget.to_dict())
+        logger.info(
+            "AgentTurnExecutor: Updated token budget — %d tokens (method: %s, threshold: %d)",
+            current_tokens,
+            counting_method,
+            budget.soft_threshold,
+        )
+
     async def _append_event(self, ctx: WorkflowContext[Any], event: HarnessEvent) -> None:
         """Append an event to the transcript.
 
@@ -702,6 +1016,8 @@ class AgentTurnExecutor(Executor):
         "When adding work items, you MUST classify their role correctly:\n"
         "- deliverable: Any output the user asked for or will receive. Reports, documents,\n"
         "  analyses, plans, summaries, code — if it answers the user's request, it is a deliverable.\n"
+        "  IMPORTANT: Deliverable artifacts must ALSO be written as real files using write_file.\n"
+        "  The artifact stores a tracking copy; the file is the actual user-facing output.\n"
         "- working: Your own scratch notes, intermediate reasoning, or data you won't show the user.\n"
         "- control: Validation checks and audit results (must use structured JSON format below).\n"
         "IMPORTANT: Most work items in a typical task should be 'deliverable'. Only use 'working'\n"
@@ -735,6 +1051,135 @@ class AgentTurnExecutor(Executor):
         guidance_msg = ChatMessage(role="user", text=self.WORK_ITEM_GUIDANCE)
         self._cache.append(guidance_msg)
         logger.info("AgentTurnExecutor: Injected work item guidance message")
+
+    TOOL_STRATEGY_GUIDANCE = (
+        "TOOL STRATEGY GUIDE:\n"
+        "Use these patterns for effective investigation and task execution.\n\n"
+        "DISCOVERY — find what's relevant before reading:\n"
+        '- run_command(\'find . -name "*.py" -path "*/target_dir/*"\') to locate files\n'
+        '- run_command(\'grep -r "pattern" path/ --include="*.py" -l\') to find files containing a term\n'
+        "- run_command('grep -rn \"class\\|def \" file.py | head -40') to get an overview of a file's structure\n\n"
+        "PROGRESSIVE EXPLORATION — go broad then deep:\n"
+        "1. list_directory('.') to understand top-level layout\n"
+        "2. list_directory on promising subdirectories to find target areas\n"
+        "3. Keep drilling into subdirectories until you reach the actual source files.\n"
+        "   A directory containing more subdirectories means you're not deep enough yet.\n"
+        "4. Use grep/find to narrow down which files matter most\n"
+        "5. read_file on each relevant file — one at a time, in full\n\n"
+        "THOROUGH READING — depth matters more than speed:\n"
+        "- Read EVERY relevant source file individually. Do not skip files or summarize from directory listings.\n"
+        "- If a directory has 5-15 source files, plan to read each one.\n"
+        "- After reading, note specific class names, methods, and patterns before moving on.\n\n"
+        "DELIVERABLE CREATION — only after thorough investigation:\n"
+        "- Do NOT write deliverables until you have read all relevant source files.\n"
+        "- Use write_file to produce deliverable documents as real files in the workspace.\n"
+        "  work_item_set_artifact is for tracking — the user-facing output must be a file.\n"
+        "- Reference specific class names, method signatures, and module paths you found by reading.\n"
+        "- If you haven't read_file'd a file, do not write about its contents."
+    )
+
+    def _inject_tool_strategy_guidance(self) -> None:
+        """Inject guidance about effective tool usage patterns on the first turn."""
+        from .._types import ChatMessage
+
+        guidance_msg = ChatMessage(role="user", text=self.TOOL_STRATEGY_GUIDANCE)
+        self._cache.append(guidance_msg)
+        logger.info("AgentTurnExecutor: Injected tool strategy guidance")
+
+    PLANNING_PROMPT = (
+        "Before taking any actions, create a detailed plan using work_item_add "
+        "for each step you will take. Your plan should be specific and actionable:\n"
+        "- BAD work item: 'Analyze the core modules' (vague, unverifiable)\n"
+        "- GOOD work item: 'Read and analyze each file in the target directory' "
+        "(specific, measurable)\n\n"
+        "Each work item should involve concrete tool usage (file reads, directory "
+        "listings, command execution). A work item that can be completed without "
+        "using any tools is too vague — break it down further.\n\n"
+        "Do not mark a work item as done until you have actually used tools to "
+        "complete it and stored meaningful artifacts from the work."
+    )
+
+    def _inject_planning_prompt(self) -> None:
+        """Inject a prompt asking the agent to plan before executing."""
+        from .._types import ChatMessage
+
+        planning_msg = ChatMessage(role="user", text=self.PLANNING_PROMPT)
+        self._cache.append(planning_msg)
+        logger.info("AgentTurnExecutor: Injected planning prompt")
+
+    async def _inject_work_item_state(self, ctx: WorkflowContext[Any]) -> None:
+        """Inject current work item state so the agent sees its progress.
+
+        Called on turns after the first to give the agent visibility into
+        which items are done and which remain. Only injects if there are
+        incomplete items to avoid redundant messages.
+
+        Args:
+            ctx: Workflow context for state access.
+        """
+        from .._types import ChatMessage
+        from ._work_items import WorkItemLedger, WorkItemStatus
+
+        try:
+            ledger_data = await ctx.get_shared_state(HARNESS_WORK_ITEM_LEDGER_KEY)
+            if not ledger_data or not isinstance(ledger_data, dict):
+                return
+            ledger = WorkItemLedger.from_dict(ledger_data)
+        except KeyError:
+            return
+
+        if not ledger.items:
+            return
+
+        incomplete = ledger.get_incomplete_items()
+        if not incomplete:
+            return  # all done, no need to inject state
+
+        # Count tool usage from the message cache for agent self-awareness
+        tool_usage: dict[str, int] = {}
+        for msg in self._cache:
+            contents = getattr(msg, "contents", None)
+            if not contents:
+                continue
+            for content in contents:
+                content_type = getattr(content, "type", None)
+                if content_type == "function_call":
+                    tool_name = getattr(content, "name", None)
+                    if tool_name and not tool_name.startswith("work_item_"):
+                        tool_usage[tool_name] = tool_usage.get(tool_name, 0) + 1
+
+        status_icons = {
+            WorkItemStatus.PENDING: "[ ]",
+            WorkItemStatus.IN_PROGRESS: "[~]",
+            WorkItemStatus.DONE: "[x]",
+            WorkItemStatus.SKIPPED: "[-]",
+        }
+
+        lines = [f"Work items ({len(incomplete)} remaining):"]
+        for item in incomplete:
+            icon = status_icons.get(item.status, "[ ]")
+            revision_tag = " [NEEDS REVISION]" if item.requires_revision else ""
+            lines.append(f"  {icon} [{item.id}] {item.title}{revision_tag}")
+
+        # Include tool usage summary for self-awareness
+        if tool_usage:
+            lines.append("")
+            lines.append(
+                "Your tool usage so far: " + ", ".join(f"{name}: {count}" for name, count in sorted(tool_usage.items()))
+            )
+            read_count = tool_usage.get("read_file", 0)
+            if read_count < 10:
+                lines.append(
+                    f"NOTE: You have only read {read_count} file(s). For thorough "
+                    "code investigation, aim to read 10-20+ relevant source files."
+                )
+
+        lines.append("")
+        lines.append("Continue working on the next incomplete item.")
+
+        state_msg = ChatMessage(role="user", text="\n".join(lines))
+        self._cache.append(state_msg)
+        logger.info(f"AgentTurnExecutor: Injected work item state ({len(incomplete)} remaining)")
 
     async def _maybe_inject_work_item_reminder(self, ctx: WorkflowContext[Any]) -> None:
         """Inject a work item reminder if the last stop decision was work_items_incomplete.
