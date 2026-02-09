@@ -29,6 +29,7 @@ from ._state import HarnessEvent, HarnessLifecycleEvent, RepairComplete, TurnCom
 if TYPE_CHECKING:
     from ._compaction import CompactionPlan
     from ._hooks import HarnessHooks
+    from ._jit_instructions import JitInstruction
     from ._work_items import WorkItemEventMiddleware, WorkItemLedger, WorkItemTaskListProtocol
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,7 @@ class AgentTurnExecutor(Executor):
         task_list: "WorkItemTaskListProtocol | None" = None,
         hooks: "HarnessHooks | None" = None,
         sub_agent_tools: list[Any] | None = None,
+        jit_instructions: "list[JitInstruction] | None" = None,
         id: str = "harness_agent_turn",
     ):
         """Initialize the AgentTurnExecutor.
@@ -90,6 +92,7 @@ class AgentTurnExecutor(Executor):
             task_list: Optional work item task list for self-critique tracking.
             hooks: Optional harness hooks for pre/post tool interception.
             sub_agent_tools: Optional list of sub-agent tools (explore, run_task) to inject.
+            jit_instructions: Optional custom JIT instructions. Defaults to built-in set.
             id: Unique identifier for this executor.
         """
         super().__init__(id)
@@ -125,6 +128,13 @@ class AgentTurnExecutor(Executor):
 
         # Phase 5: Sub-agent tools
         self._sub_agent_tools = sub_agent_tools or []
+
+        # Phase 7: JIT instruction processor
+        from ._jit_instructions import JitInstructionProcessor
+
+        self._jit_processor = JitInstructionProcessor(
+            instructions=list(jit_instructions) if jit_instructions is not None else None  # type: ignore[arg-type]
+        ) if jit_instructions is not None else JitInstructionProcessor()
 
     @handler
     async def run_turn(self, trigger: RepairComplete, ctx: WorkflowContext[TurnComplete]) -> None:
@@ -184,6 +194,9 @@ class AgentTurnExecutor(Executor):
         # 2. Inject work item reminder if last stop was work_items_incomplete
         if self._task_list is not None:
             await self._maybe_inject_work_item_reminder(ctx)
+
+        # 2.5. Evaluate and inject JIT instructions (Phase 7)
+        await self._inject_jit_instructions(ctx, turn_count)
 
         # 3. Apply compaction if needed — prefer full pipeline, fall back to direct clear
         if self._enable_compaction and self._is_compaction_needed(trigger):
@@ -1138,6 +1151,65 @@ class AgentTurnExecutor(Executor):
         self._cache.append(planning_msg)
         logger.info("AgentTurnExecutor: Injected planning prompt")
 
+    def _get_tool_usage(self) -> dict[str, int]:
+        """Count tool usage from the message cache.
+
+        Returns:
+            Dictionary mapping tool name to call count.
+        """
+        tool_usage: dict[str, int] = {}
+        for msg in self._cache:
+            contents = getattr(msg, "contents", None)
+            if not contents:
+                continue
+            for content in contents:
+                content_type = getattr(content, "type", None)
+                if content_type == "function_call":
+                    tool_name = getattr(content, "name", None)
+                    if tool_name and not tool_name.startswith("work_item_"):
+                        tool_usage[tool_name] = tool_usage.get(tool_name, 0) + 1
+        return tool_usage
+
+    async def _inject_jit_instructions(self, ctx: WorkflowContext[Any], turn_count: int) -> None:
+        """Evaluate and inject JIT instructions based on current execution state.
+
+        Args:
+            ctx: Workflow context for state access.
+            turn_count: Current turn number.
+        """
+        from .._types import ChatMessage
+        from ._jit_instructions import JitContext
+        from ._work_items import WorkItemLedger
+
+        tool_usage = self._get_tool_usage()
+        work_complete, work_total = 0, 0
+        try:
+            ledger_data = await ctx.get_shared_state(HARNESS_WORK_ITEM_LEDGER_KEY)
+            if ledger_data and isinstance(ledger_data, dict):
+                ledger = WorkItemLedger.from_dict(ledger_data)
+                work_total = len(ledger.items)
+                work_complete = work_total - len(ledger.get_incomplete_items())
+        except KeyError:
+            pass
+
+        try:
+            max_turns = await ctx.get_shared_state(HARNESS_MAX_TURNS_KEY)
+        except KeyError:
+            max_turns = 50
+
+        jit_ctx = JitContext(
+            turn=turn_count,
+            max_turns=max_turns,
+            tool_usage=tool_usage,
+            work_items_complete=work_complete,
+            work_items_total=work_total,
+        )
+
+        instructions = self._jit_processor.evaluate(jit_ctx)
+        for text in instructions:
+            self._cache.append(ChatMessage(role="user", text=text))
+            logger.info("AgentTurnExecutor: Injected JIT instruction: %s", text[:80])
+
     async def _inject_work_item_state(self, ctx: WorkflowContext[Any]) -> None:
         """Inject current work item state so the agent sees its progress.
 
@@ -1166,18 +1238,7 @@ class AgentTurnExecutor(Executor):
         if not incomplete:
             return  # all done, no need to inject state
 
-        # Count tool usage from the message cache for agent self-awareness
-        tool_usage: dict[str, int] = {}
-        for msg in self._cache:
-            contents = getattr(msg, "contents", None)
-            if not contents:
-                continue
-            for content in contents:
-                content_type = getattr(content, "type", None)
-                if content_type == "function_call":
-                    tool_name = getattr(content, "name", None)
-                    if tool_name and not tool_name.startswith("work_item_"):
-                        tool_usage[tool_name] = tool_usage.get(tool_name, 0) + 1
+        tool_usage = self._get_tool_usage()
 
         status_icons = {
             WorkItemStatus.PENDING: "[ ]",

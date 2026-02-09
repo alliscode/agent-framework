@@ -1708,6 +1708,18 @@ Pass to `AgentTurnExecutor` constructor.
 3. Verify `"approaching_turn_limit"` fires at turn 16 (80% of 20).
 4. Verify `once=True` instructions don't fire twice.
 
+### Phase 7 — Implementation Summary ✅ COMPLETE
+
+**Implemented by**: Copilot Agent  
+**Files created/modified**:
+- `_harness/_jit_instructions.py` — New module with `JitContext`, `JitInstruction`, `JitInstructionProcessor`, and `DEFAULT_JIT_INSTRUCTIONS` (4 built-in rules: `no_reads_after_5_turns`, `no_writes_after_reads`, `approaching_turn_limit`, `all_planning_no_execution`).
+- `_harness/_agent_turn_executor.py` — Added `jit_instructions` parameter, `_get_tool_usage()` helper (refactored from inline code in `_inject_work_item_state`), `_inject_jit_instructions()` method, wired into `run_turn()` after work item state injection.
+- `_harness/_harness_builder.py` — Added `jit_instructions` parameter to both `HarnessWorkflowBuilder` and `AgentHarness`, passed through to `AgentTurnExecutor`.
+- `_harness/__init__.py` — Exported `JitContext`, `JitInstruction`, `JitInstructionProcessor`, `DEFAULT_JIT_INSTRUCTIONS`.
+- `tests/harness/test_jit_instructions.py` — 27 unit tests covering: context construction, condition true/false, once semantics, callable instructions, multiple simultaneous fires, error resilience, all 4 default instruction conditions, integration with full processor, and custom instruction override.
+
+**All 27 new tests pass. All existing harness tests continue to pass.**
+
 ---
 
 ## Phase 8 — Per-Tool-Call Interception
@@ -2546,6 +2558,174 @@ tools and add CONTEXT EFFICIENCY guidance section. Discovery section now uses na
 - `python/samples/getting_started/workflows/harness/coding_tools.py` — modified `read_file`, `list_directory`; added `grep_files`, `find_files`; updated `get_tools()`
 - `python/packages/core/agent_framework/_harness/_agent_turn_executor.py` — rewrote `TOOL_STRATEGY_GUIDANCE`
 - `python/packages/core/tests/harness/test_coding_tools.py` — added 30 unit tests covering all new/modified tools
+
+---
+
+## Phase 12 — Compaction Visibility (UI Feedback During Long Pauses)
+
+**Impact: ★★★★☆ (High — directly addresses user confusion during silent pauses)**
+
+**Gap**: When compaction runs, there is a long pause (sometimes 10-30 seconds) with zero UI
+feedback. The user cannot tell if the agent is thinking, compacting, or hung. GitHub Copilot CLI
+shows spinners and status messages during background processing. Our harness needs to surface
+compaction events through renderers so the user sees what's happening.
+
+**Current state**: The compaction system already emits rich events internally:
+- `CompactionCheckStartedEvent` (in `_compaction/_events.py` line 99) — has `current_tokens`,
+  `budget_limit`, `tokens_over_budget`
+- `CompactionCompletedEvent` (line 123) — has `tokens_freed`, `final_tokens`, `duration_ms`,
+  `proposals_applied`, `proposals_rejected`
+- `HarnessLifecycleEvent` with `event_type="context_pressure"` (in `_compaction_executor.py`
+  line 250) — emitted via `ctx.add_event()`
+
+However, **none of these events reach the UI renderers**. The `MarkdownRenderer`
+(`_renderers.py` line 141) only handles `on_turn_started`, `on_deliverables_updated`,
+`on_result`, and `on_text`. There is no `on_compaction_started` or `on_compaction_completed`.
+
+**Desired behavior**: When compaction starts, the user sees something like:
+```
+⟳ Compacting context... (85,000 → budget: 100,000 tokens)
+```
+When compaction finishes:
+```
+✓ Context compacted: 85,000 → 52,000 tokens (freed 33,000 in 2.3s)
+```
+
+### 12a. Surface compaction events through the workflow event stream
+
+**File**: `_compaction_executor.py` (line 179, `check_compaction` method)
+
+The executor already emits a `HarnessLifecycleEvent` at line 250, but only after compaction
+completes. We need two events:
+
+1. **Before compaction** — emit immediately when pressure is detected (after line 214):
+
+```python
+await ctx.add_event(
+    HarnessLifecycleEvent(
+        event_type="compaction_started",
+        turn_number=turn_number,
+        data={
+            "current_tokens": current_tokens,
+            "soft_threshold": budget.soft_threshold,
+            "tokens_over_threshold": budget.tokens_over_threshold,
+        },
+    ),
+)
+```
+
+2. **After compaction** — the existing event at line 250 should be renamed from
+`"context_pressure"` to `"compaction_completed"` and include before/after token counts:
+
+```python
+await ctx.add_event(
+    HarnessLifecycleEvent(
+        event_type="compaction_completed",
+        turn_number=turn_number,
+        data={
+            "tokens_before": current_tokens,
+            "tokens_after": current_tokens - tokens_freed,
+            "tokens_freed": tokens_freed,
+            "proposals_applied": proposals_applied,
+            "duration_ms": duration_ms,  # need to time the compaction
+        },
+    ),
+)
+```
+
+Note: The actual compaction work happens in `AgentTurnExecutor.compact_thread()` (called when
+`CompactionComplete.compaction_needed=True`). The `compaction_started` event should fire in
+`CompactionExecutor` when pressure is detected, and `compaction_completed` should fire in
+`AgentTurnExecutor` after `compact_thread()` returns — that's where the before/after token
+counts are known.
+
+Check `AgentTurnExecutor` around line 643-670 where it handles `CompactionComplete` triggers
+and calls `compact_thread()`. The timing and token counts should be captured there.
+
+### 12b. Add compaction event handlers to `MarkdownRenderer`
+
+**File**: `_renderers.py` (line 141, `MarkdownRenderer` class)
+
+Add two new methods:
+
+```python
+def on_compaction_started(self, data: dict[str, Any]) -> str | None:
+    """Render compaction start notification."""
+    current = data.get("current_tokens", 0)
+    threshold = data.get("soft_threshold", 0)
+    return f"\n⟳ *Compacting context...* ({current:,} tokens, threshold: {threshold:,})\n"
+
+def on_compaction_completed(self, data: dict[str, Any]) -> str | None:
+    """Render compaction completion with before/after sizes."""
+    before = data.get("tokens_before", 0)
+    after = data.get("tokens_after", 0)
+    freed = data.get("tokens_freed", 0)
+    duration = data.get("duration_ms", 0)
+    return (
+        f"\n✓ *Context compacted:* {before:,} → {after:,} tokens "
+        f"(freed {freed:,} in {duration / 1000:.1f}s)\n"
+    )
+```
+
+### 12c. Add compaction event handlers to `HarnessRenderer` protocol
+
+**File**: `_renderers.py` (line 59, `HarnessRenderer` protocol)
+
+Add optional protocol methods so custom renderers can also handle compaction:
+
+```python
+def on_compaction_started(self, data: dict[str, Any]) -> str | None:
+    """Render compaction start notification. Optional."""
+    return None
+
+def on_compaction_completed(self, data: dict[str, Any]) -> str | None:
+    """Render compaction completion. Optional."""
+    return None
+```
+
+### 12d. Wire compaction events to renderers in the stream pipeline
+
+**File**: `_renderers.py` (line 230, `render_stream` function) or wherever events are routed
+to renderers.
+
+The `render_stream` async generator needs to check for `HarnessLifecycleEvent` with
+`event_type="compaction_started"` and `"compaction_completed"`, and call the appropriate
+renderer method:
+
+```python
+if isinstance(event, HarnessLifecycleEvent):
+    if event.event_type == "compaction_started" and hasattr(renderer, "on_compaction_started"):
+        text = renderer.on_compaction_started(event.data)
+        if text:
+            yield _make_text_event(text)
+    elif event.event_type == "compaction_completed" and hasattr(renderer, "on_compaction_completed"):
+        text = renderer.on_compaction_completed(event.data)
+        if text:
+            yield _make_text_event(text)
+```
+
+### 12e. Add compaction display to `harness_repl.py`
+
+**File**: `harness_repl.py` — the REPL already prints turn indicators. Add compaction messages
+to the event handling loop so the console shows:
+
+```
+⟳ Compacting context... (85,000 tokens, threshold: 85,000)
+✓ Context compacted: 85,000 → 52,000 tokens (freed 33,000 in 2.3s)
+```
+
+This could use the `MarkdownRenderer` methods directly, or format plain text for console output.
+
+### Implementation Notes
+
+- The `CompactionCheckStartedEvent` and `CompactionCompletedEvent` in `_compaction/_events.py`
+  already have all the fields needed. The question is whether to use those directly or continue
+  using `HarnessLifecycleEvent` as the transport. Using `HarnessLifecycleEvent` is simpler
+  since it's already in the workflow event stream.
+- Token counts should use comma formatting for readability (e.g., `85,000` not `85000`).
+- The "started" message should appear **immediately** when pressure is detected, before any
+  LLM calls for summarization. This gives the user instant feedback.
+- Duration timing: wrap the `compact_thread()` call in `AgentTurnExecutor` with a timer.
 
 ---
 
