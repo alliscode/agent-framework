@@ -1098,9 +1098,10 @@ class AgentTurnExecutor(Executor):
         "- A good investigation reads many files partially rather than few files fully.\n\n"
         "DELIVERABLE CREATION — only after thorough investigation:\n"
         "- Do NOT write deliverables until you have read all relevant source files.\n"
-        "- ALWAYS store deliverable content via work_item_set_artifact for persistence.\n"
-        "- Write to a file (write_file) ONLY when the user asked for a file, or the content\n"
-        "  is large (5KB+). Otherwise, present it inline in your response.\n"
+        "- Store deliverable content via work_item_set_artifact for state persistence.\n"
+        "- The USER sees your response text, NOT your artifacts. So you MUST present\n"
+        "  the deliverable in your response. For content under 5KB, show it inline.\n"
+        "  For larger content, write_file and provide a summary in your response.\n"
         "- Reference specific class names, method signatures, and module paths you found by reading.\n"
         "- If you haven't read_file'd a file, do not write about its contents."
     )
