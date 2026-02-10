@@ -2,7 +2,6 @@
 
 """Tests for the JIT instructions system (Phase 7)."""
 
-
 from agent_framework._harness._jit_instructions import (
     DEFAULT_JIT_INSTRUCTIONS,
     JitContext,
