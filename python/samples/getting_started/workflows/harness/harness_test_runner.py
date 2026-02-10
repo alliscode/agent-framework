@@ -32,6 +32,7 @@ from agent_framework._harness import (
     get_task_complete_tool,
 )
 from agent_framework._harness._compaction import (
+    ChatClientSummarizer,
     InMemoryArtifactStore,
     InMemoryCompactionStore,
     InMemorySummaryCache,
@@ -87,7 +88,8 @@ async def run_test() -> dict:
         compaction_store=InMemoryCompactionStore(),
         artifact_store=InMemoryArtifactStore(),
         summary_cache=InMemorySummaryCache(max_entries=100),
-        max_input_tokens=100_000,
+        summarizer=ChatClientSummarizer(chat_client),
+        max_input_tokens=128_000,
         soft_threshold_percent=0.85,
         sandbox_path=str(sandbox_dir),
     )

@@ -106,6 +106,8 @@ class CodingTools:
             self.read_file,
             self.write_file,
             self.list_directory,
+            self.grep_files,
+            self.find_files,
             self.run_command,
             self.create_directory,
             self.get_background_output,
@@ -117,10 +119,14 @@ class CodingTools:
     def read_file(
         self,
         path: Annotated[str, "The path to the file to read, relative to the working directory"],
+        start_line: Annotated[int | None, "First line to read (1-indexed). Omit to read from start."] = None,
+        end_line: Annotated[int | None, "Last line to read (1-indexed, inclusive). Use -1 for end of file. Omit to read to end."] = None,
     ) -> str:
-        """Read the contents of a file.
+        """Read the contents of a file, optionally a specific line range.
 
-        Use this to examine existing code, configuration files, or any text file.
+        Use this to examine code, configuration files, or any text file.
+        For large files, use start_line/end_line to read specific sections
+        rather than loading the entire file.
         """
         try:
             resolved = self._resolve_path(path)
@@ -129,7 +135,21 @@ class CodingTools:
             if not resolved.is_file():
                 return f"Error: '{path}' is not a file"
 
-            return resolved.read_text(encoding="utf-8")
+            content = resolved.read_text(encoding="utf-8")
+
+            if start_line is not None or end_line is not None:
+                lines = content.splitlines(keepends=True)
+                total = len(lines)
+                start = max(1, start_line or 1) - 1  # Convert to 0-indexed
+                end = total if (end_line is None or end_line == -1) else min(end_line, total)
+
+                selected = lines[start:end]
+                # Prefix with line numbers for context
+                numbered = [f"{start + i + 1}. {line}" for i, line in enumerate(selected)]
+                header = f"[Lines {start + 1}-{end} of {total} in {path}]\n"
+                return header + "".join(numbered)
+
+            return content
         except ValueError as e:
             return f"Error: {e}"
         except Exception as e:
@@ -163,11 +183,13 @@ class CodingTools:
     def list_directory(
         self,
         path: Annotated[str, "The directory path relative to working directory. Use '.' for current."] = ".",
+        depth: Annotated[int, "How many levels deep to list. 1 = immediate children only, 2 = children and grandchildren. Default is 2."] = 2,
     ) -> str:
-        """List the contents of a directory.
+        """List the contents of a directory up to the specified depth.
 
-        Use this to explore the file structure and find files.
-        Returns a tree-like view of files and directories.
+        Use this to explore the file structure. Default depth of 2 shows
+        files and one level of subdirectory contents, giving a good overview
+        without being overwhelming.
         """
         try:
             resolved = self._resolve_path(path)
@@ -176,14 +198,30 @@ class CodingTools:
             if not resolved.is_dir():
                 return f"Error: '{path}' is not a directory"
 
-            items = []
-            for item in sorted(resolved.iterdir()):
-                rel_path = item.relative_to(self.working_directory)
-                if item.is_dir():
-                    items.append(f"[DIR]  {rel_path}/")
-                else:
-                    size = item.stat().st_size
-                    items.append(f"[FILE] {rel_path} ({size} bytes)")
+            items: list[str] = []
+
+            def _list(dir_path: Path, current_depth: int, prefix: str = "") -> None:
+                if current_depth > depth:
+                    return
+                try:
+                    children = sorted(dir_path.iterdir())
+                except PermissionError:
+                    return
+                for item in children:
+                    # Skip hidden files/dirs
+                    if item.name.startswith("."):
+                        continue
+                    if item.name in ("__pycache__", "node_modules", ".git"):
+                        continue
+                    rel_path = item.relative_to(self.working_directory)
+                    if item.is_dir():
+                        items.append(f"{prefix}[DIR]  {rel_path}/")
+                        _list(item, current_depth + 1, prefix + "  ")
+                    else:
+                        size = item.stat().st_size
+                        items.append(f"{prefix}[FILE] {rel_path} ({size} bytes)")
+
+            _list(resolved, 1)
 
             if not items:
                 return f"Directory '{path}' is empty"
@@ -193,6 +231,118 @@ class CodingTools:
             return f"Error: {e}"
         except Exception as e:
             return f"Error listing directory: {e}"
+
+    @ai_function(approval_mode="never_require")
+    def grep_files(
+        self,
+        pattern: Annotated[str, "The text or regex pattern to search for in file contents"],
+        path: Annotated[str, "Directory to search in, relative to working directory. Use '.' for current."] = ".",
+        file_glob: Annotated[str | None, "Glob pattern to filter files (e.g., '*.py', '*.{ts,tsx}'). Omit to search all files."] = None,
+        include_lines: Annotated[bool, "If true, show matching lines with line numbers. If false, show only file paths."] = False,
+        max_results: Annotated[int, "Maximum number of matching files to return."] = 20,
+    ) -> str:
+        """Search for a pattern in file contents across the workspace.
+
+        Use this to find files containing specific classes, functions, imports,
+        or any text pattern. Much faster than reading files one by one.
+        """
+        import re
+
+        try:
+            resolved = self._resolve_path(path)
+            if not resolved.exists() or not resolved.is_dir():
+                return f"Error: '{path}' is not a valid directory"
+
+            try:
+                regex = re.compile(pattern)
+            except re.error:
+                # Fall back to literal match if not valid regex
+                regex = re.compile(re.escape(pattern))
+
+            # Collect matching files
+            if file_glob:
+                files = sorted(resolved.rglob(file_glob))
+            else:
+                files = sorted(f for f in resolved.rglob("*") if f.is_file())
+
+            matches: list[str] = []
+            for f in files:
+                if not f.is_file():
+                    continue
+                # Skip binary files, hidden dirs, common noise
+                rel = str(f.relative_to(self.working_directory))
+                if any(part.startswith(".") for part in f.parts):
+                    continue
+                if "__pycache__" in rel or "node_modules" in rel or ".git" in rel:
+                    continue
+                try:
+                    text = f.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    continue
+
+                if include_lines:
+                    matching_lines = []
+                    for i, line in enumerate(text.splitlines(), 1):
+                        if regex.search(line):
+                            matching_lines.append(f"  {i}: {line.rstrip()}")
+                    if matching_lines:
+                        matches.append(f"{rel}\n" + "\n".join(matching_lines[:10]))
+                        if len(matches) >= max_results:
+                            break
+                else:
+                    if regex.search(text):
+                        matches.append(rel)
+                        if len(matches) >= max_results:
+                            break
+
+            if not matches:
+                return f"No files matching pattern '{pattern}' found in '{path}'"
+
+            header = f"Found {len(matches)} file(s) matching '{pattern}':\n"
+            return header + "\n".join(matches)
+        except ValueError as e:
+            return f"Error: {e}"
+        except Exception as e:
+            return f"Error searching files: {e}"
+
+    @ai_function(approval_mode="never_require")
+    def find_files(
+        self,
+        pattern: Annotated[str, "Glob pattern to match files (e.g., '**/*.py', 'src/**/*.ts', '*.md')"],
+        path: Annotated[str, "Directory to search in, relative to working directory. Use '.' for current."] = ".",
+        max_results: Annotated[int, "Maximum number of results to return."] = 50,
+    ) -> str:
+        """Find files by name pattern using glob matching.
+
+        Use this to locate files by extension or naming convention across the workspace.
+        Supports ** for recursive matching across directories.
+        """
+        try:
+            resolved = self._resolve_path(path)
+            if not resolved.exists() or not resolved.is_dir():
+                return f"Error: '{path}' is not a valid directory"
+
+            found_files: list[str] = []
+            for f in sorted(resolved.rglob(pattern) if "**" in pattern else resolved.glob(pattern)):
+                if not f.is_file():
+                    continue
+                rel = str(f.relative_to(self.working_directory))
+                if any(part.startswith(".") for part in f.parts):
+                    continue
+                if "__pycache__" in rel or "node_modules" in rel:
+                    continue
+                found_files.append(rel)
+                if len(found_files) >= max_results:
+                    break
+
+            if not found_files:
+                return f"No files matching '{pattern}' found in '{path}'"
+
+            return f"Found {len(found_files)} file(s):\n" + "\n".join(found_files)
+        except ValueError as e:
+            return f"Error: {e}"
+        except Exception as e:
+            return f"Error finding files: {e}"
 
     @ai_function(approval_mode="never_require")
     def create_directory(

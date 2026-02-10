@@ -60,6 +60,7 @@ import aiohttp
 from agent_framework import MCPStdioTool
 from agent_framework._harness import (
     AgentHarness,
+    ChatClientSummarizer,
     InMemoryArtifactStore,
     InMemoryCompactionStore,
     InMemorySummaryCache,
@@ -384,11 +385,13 @@ class SmsHarness:
 
         compaction_kwargs: dict[str, Any] = {}
         if self._enable_compaction:
+            summarizer = ChatClientSummarizer(self._chat_client)
             compaction_kwargs = {
                 "enable_compaction": True,
                 "compaction_store": InMemoryCompactionStore(),
                 "artifact_store": InMemoryArtifactStore(),
                 "summary_cache": InMemorySummaryCache(max_entries=50),
+                "summarizer": summarizer,
                 "max_input_tokens": 50_000,
                 "soft_threshold_percent": 0.80,
             }
@@ -563,12 +566,14 @@ def create_harness_agent(
     # Configure compaction stores if enabled
     compaction_kwargs: dict[str, Any] = {}
     if enable_compaction:
+        summarizer = ChatClientSummarizer(chat_client)
         compaction_kwargs = {
             "enable_compaction": True,
             "compaction_store": InMemoryCompactionStore(),
             "artifact_store": InMemoryArtifactStore(),
             "summary_cache": InMemorySummaryCache(max_entries=100),
-            "max_input_tokens": 100_000,
+            "summarizer": summarizer,
+            "max_input_tokens": 128_000,
             "soft_threshold_percent": 0.85,
         }
 
