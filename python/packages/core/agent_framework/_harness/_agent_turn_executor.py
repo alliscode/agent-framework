@@ -168,9 +168,13 @@ class AgentTurnExecutor(Executor):
         # Phase 7: JIT instruction processor
         from ._jit_instructions import JitInstructionProcessor
 
-        self._jit_processor = JitInstructionProcessor(
-            instructions=list(jit_instructions) if jit_instructions is not None else None  # type: ignore[arg-type]
-        ) if jit_instructions is not None else JitInstructionProcessor()
+        self._jit_processor = (
+            JitInstructionProcessor(
+                instructions=list(jit_instructions) if jit_instructions is not None else None  # type: ignore[arg-type]
+            )
+            if jit_instructions is not None
+            else JitInstructionProcessor()
+        )
 
     @handler
     async def run_turn(self, trigger: RepairComplete, ctx: WorkflowContext[TurnComplete]) -> None:
@@ -247,7 +251,10 @@ class AgentTurnExecutor(Executor):
             strategies_applied = await self._run_full_compaction(ctx, turn_count)
             if strategies_applied:
                 self._compaction_count += 1
-                logger.info("AgentTurnExecutor: Full compaction pipeline applied successfully (count: %d)", self._compaction_count)
+                logger.info(
+                    "AgentTurnExecutor: Full compaction pipeline applied successfully (count: %d)",
+                    self._compaction_count,
+                )
             else:
                 # Fall back to direct clearing
                 cleared_count = self._apply_direct_clear(turn_count)
@@ -265,9 +272,7 @@ class AgentTurnExecutor(Executor):
             tokens_freed = max(0, tokens_before - tokens_after)
 
             # Classify compaction level for UI display
-            compaction_level = _classify_compaction_level(
-                strategies_applied, tokens_before, tokens_after
-            )
+            compaction_level = _classify_compaction_level(strategies_applied, tokens_before, tokens_after)
 
             await ctx.add_event(
                 HarnessLifecycleEvent(
@@ -673,10 +678,7 @@ class AgentTurnExecutor(Executor):
             # Check if this is a tool message with an orphaned call_id
             if role_value == "tool":
                 contents = getattr(msg, "contents", None) or []
-                tool_call_ids = [
-                    c.call_id for c in contents
-                    if isinstance(c, FunctionResultContent) and c.call_id
-                ]
+                tool_call_ids = [c.call_id for c in contents if isinstance(c, FunctionResultContent) and c.call_id]
                 # If ALL call_ids in this message are orphaned, skip the message
                 if tool_call_ids and all(cid not in assistant_call_ids for cid in tool_call_ids):
                     orphan_results_removed += 1
@@ -687,9 +689,9 @@ class AgentTurnExecutor(Executor):
             # Check if this is an assistant message with unanswered tool_calls
             contents = getattr(msg, "contents", None) or []
             orphaned_ids = [
-                c.call_id for c in contents
-                if isinstance(c, FunctionCallContent) and c.call_id
-                and c.call_id not in answered_call_ids
+                c.call_id
+                for c in contents
+                if isinstance(c, FunctionCallContent) and c.call_id and c.call_id not in answered_call_ids
             ]
 
             # Insert placeholders immediately after this assistant message
@@ -697,10 +699,12 @@ class AgentTurnExecutor(Executor):
                 result.append(
                     ChatMessage(
                         role="tool",
-                        contents=[FunctionResultContent(
-                            call_id=call_id,
-                            result="[Tool result cleared during context compaction]",
-                        )],
+                        contents=[
+                            FunctionResultContent(
+                                call_id=call_id,
+                                result="[Tool result cleared during context compaction]",
+                            )
+                        ],
                         message_id=f"placeholder-{call_id[:12]}",
                     )
                 )
@@ -708,8 +712,7 @@ class AgentTurnExecutor(Executor):
 
         if placeholders_inserted or orphan_results_removed:
             logger.info(
-                "AgentTurnExecutor: Fixed tool pairing — inserted %d placeholders, "
-                "removed %d orphan tool results",
+                "AgentTurnExecutor: Fixed tool pairing — inserted %d placeholders, removed %d orphan tool results",
                 placeholders_inserted,
                 orphan_results_removed,
             )
@@ -749,10 +752,12 @@ class AgentTurnExecutor(Executor):
                 if isinstance(content, FunctionResultContent):
                     return ChatMessage(
                         role="tool",
-                        contents=[FunctionResultContent(
-                            call_id=content.call_id,
-                            result=placeholder_text,
-                        )],
+                        contents=[
+                            FunctionResultContent(
+                                call_id=content.call_id,
+                                result=placeholder_text,
+                            )
+                        ],
                         message_id=getattr(original_msg, "message_id", None),
                     )
 
@@ -1339,28 +1344,31 @@ class AgentTurnExecutor(Executor):
         "5. read_file on each relevant file — use line ranges for large files\n"
         "6. If you have sub-agents and identified multiple modules to research, use\n"
         "   parallel explore calls instead of serial read_file — faster and context-lighter\n\n"
-        "THOROUGH READING — be context-efficient:\n"
-        "- Your context window is a limited resource. Every line you read stays in memory\n"
-        "  and competes for space. Read what you NEED, not everything that EXISTS.\n"
-        "- For large files (200+ lines): first scan the structure with\n"
-        "  read_file(path, start_line=1, end_line=50) to see imports and class definitions,\n"
-        "  then read specific sections of interest. Do NOT read the entire file.\n"
-        "- For small files (<100 lines): reading the whole file is fine.\n"
-        "- Use grep_files to find specific classes or functions across multiple files —\n"
-        "  this tells you WHERE to look without loading everything into context.\n"
-        "- When investigating a module with many files, scan each file's first ~50 lines\n"
-        "  to understand its purpose, then deep-read only the files that matter for\n"
-        "  your task.\n"
-        "- SKIP: test files, boilerplate, generated code, and files unrelated to your task.\n"
-        "  Not every file in a directory deserves to be read.\n\n"
-        "CONTEXT EFFICIENCY — keep your working memory lean:\n"
-        "- Prefer grep_files over reading entire files to find what you need.\n"
-        "- Prefer read_file with line ranges over reading whole files.\n"
-        "- After reading a section, decide if you need more of that file or can move on.\n"
-        "- If you've already found the information you need, stop reading more files.\n"
-        "- A good investigation reads many files partially rather than few files fully.\n\n"
-        "DELIVERABLE CREATION — only after thorough investigation:\n"
-        "- Do NOT write deliverables until you have read all relevant source files.\n"
+        "PROGRESSIVE READING — match depth to task needs:\n"
+        "- Your context window is a limited resource, but ACCURACY matters more than brevity.\n"
+        "  Read enough to answer correctly — guessing or fabricating details is worse than\n"
+        "  using context on thorough reading.\n"
+        "- For UNDERSTANDING STRUCTURE (what does this module do?): scan imports, class\n"
+        "  definitions, and docstrings first, then read deeper as needed.\n"
+        "- For DETAILED ANALYSIS (document every method, review code logic): read the full\n"
+        "  file. Partial reads produce incomplete or inaccurate results.\n"
+        "- For FINDING SPECIFIC THINGS (where is X defined?): use grep_files first to\n"
+        "  locate it, then read the surrounding context.\n"
+        "- For LARGE MODULES with many files: scan structure first, then read each relevant\n"
+        "  file thoroughly. Process and store results (via work_item_set_artifact) for each\n"
+        "  file BEFORE moving to the next — this lets compaction reclaim the raw file\n"
+        "  content while your artifacts persist.\n"
+        "- SKIP: test files, boilerplate, generated code, and files unrelated to your task.\n\n"
+        "CONTEXT EFFICIENCY — work iteratively, not all-at-once:\n"
+        "- For large tasks, process one section at a time: read → analyze → store artifact → move on.\n"
+        "  This keeps working memory focused instead of loading all files before producing any output.\n"
+        "- Prefer grep_files to locate specific items across many files without reading them all.\n"
+        "- After completing a work item and storing its artifact, the file contents you read\n"
+        "  for it can be safely compacted — your findings are preserved in the artifact.\n"
+        "- If you need to reference information you already analyzed and stored, check your\n"
+        "  artifact rather than re-reading the file.\n\n"
+        "DELIVERABLE CREATION — accuracy through thorough investigation:\n"
+        "- For each work item, read all the files it covers before writing that section.\n"
         "- Store deliverable content via work_item_set_artifact for state persistence.\n"
         "- The USER sees your response text, NOT your artifacts. So you MUST present\n"
         "  the deliverable in your response. For content under 5KB, show it inline.\n"
@@ -1385,12 +1393,24 @@ class AgentTurnExecutor(Executor):
         "- If the request requires INVESTIGATING the workspace, READING files, or MAKING\n"
         "  changes, create a detailed plan using work_item_add for each step:\n"
         "  - BAD work item: 'Analyze the core modules' (vague, unverifiable)\n"
-        "  - GOOD work item: 'Read and analyze each file in the target directory' "
+        "  - GOOD work item: 'Document classes and methods in _state.py' "
         "(specific, measurable)\n"
         "  - Each work item should involve concrete tool usage (file reads, directory "
         "listings, command execution).\n"
         "  - Do not mark a work item as done until you have actually used tools to "
-        "complete it and stored meaningful artifacts from the work."
+        "complete it and stored meaningful artifacts from the work.\n\n"
+        "ITERATIVE DECOMPOSITION for large deliverables:\n"
+        "When the request calls for a large document, report, or analysis covering many files:\n"
+        "1. OUTLINE FIRST: Create a work item for each section or file group. This structures\n"
+        "   the work so you don't need all information in memory at once.\n"
+        "2. ONE SECTION AT A TIME: For each work item, read the relevant files, produce\n"
+        "   that section's content, and store it as an artifact. Mark it done.\n"
+        "3. COMPACTION-FRIENDLY: By storing each section as an artifact before moving on,\n"
+        "   the raw file contents can be compacted away while your finished work persists.\n"
+        "   You never lose completed sections.\n"
+        "4. FINAL ASSEMBLY: After all sections are done, combine the artifacts into the\n"
+        "   final deliverable. You can reference your stored artifacts without re-reading\n"
+        "   the original files."
     )
 
     def _inject_planning_prompt(self) -> None:

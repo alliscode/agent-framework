@@ -20,6 +20,7 @@ class JitContext:
     tool_usage: dict[str, int]
     work_items_complete: int
     work_items_total: int
+    compaction_count: int = 0
 
 
 @dataclass
@@ -51,9 +52,7 @@ DEFAULT_JIT_INSTRUCTIONS: list[JitInstruction] = [
             "and keeps your context leaner."
         ),
         condition=lambda ctx: (
-            ctx.turn >= 4
-            and ctx.tool_usage.get("read_file", 0) >= 6
-            and ctx.tool_usage.get("explore", 0) == 0
+            ctx.turn >= 4 and ctx.tool_usage.get("read_file", 0) >= 6 and ctx.tool_usage.get("explore", 0) == 0
         ),
     ),
     JitInstruction(
@@ -91,6 +90,31 @@ DEFAULT_JIT_INSTRUCTIONS: list[JitInstruction] = [
             and ctx.tool_usage.get("work_item_add", 0) > 0
             and ctx.tool_usage.get("read_file", 0) == 0
         ),
+    ),
+    JitInstruction(
+        id="post_compaction_guidance",
+        instruction=lambda ctx: (
+            f"Context compaction has occurred {ctx.compaction_count} time(s) — earlier file "
+            "contents and tool results have been summarized to free space. Your completed "
+            "work item artifacts are fully preserved. Continue working through your remaining "
+            "work items. If you need specific details from a file you already read, you may "
+            "re-read the targeted section — but prefer referencing your stored artifacts "
+            "when they contain the information you need."
+        ),
+        condition=lambda ctx: ctx.compaction_count >= 1,
+        once=True,
+    ),
+    JitInstruction(
+        id="repeated_compaction_warning",
+        instruction=(
+            "Context has been compacted multiple times. To work efficiently within "
+            "your context budget: complete one work item at a time (read → produce "
+            "artifact → mark done) before starting the next. Already-completed "
+            "artifacts survive compaction. Avoid holding many files in context "
+            "simultaneously — process them sequentially."
+        ),
+        condition=lambda ctx: ctx.compaction_count >= 2,
+        once=True,
     ),
 ]
 
