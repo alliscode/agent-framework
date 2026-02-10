@@ -25,7 +25,7 @@ from ._constants import (
     HARNESS_TURN_COUNT_KEY,
     HARNESS_WORK_ITEM_LEDGER_KEY,
 )
-from ._done_tool import TASK_COMPLETE_TOOL_NAME, task_complete
+from ._done_tool import WORK_COMPLETE_TOOL_NAME, work_complete
 from ._state import HarnessEvent, HarnessLifecycleEvent, RepairComplete, TurnComplete
 
 if TYPE_CHECKING:
@@ -79,17 +79,16 @@ class AgentTurnExecutor(Executor):
     - Storage protocols are injectable for different environments
     """
 
-    # Default continuation prompt - assertive nudge requiring task_complete
+    # Continuation nudge — injected when the agent ends a turn without calling work_complete
     DEFAULT_CONTINUATION_PROMPT = (
-        "You have not yet marked the task as complete using the task_complete tool.\n"
-        "If you were planning, stop planning and start executing.\n"
-        "You are not done until you have fully completed the task.\n\n"
-        "IMPORTANT: Do NOT call task_complete if:\n"
-        "- You have open questions — use your best judgment and continue\n"
-        "- You encountered an error — try to resolve it or find an alternative\n"
-        "- There are remaining steps — complete them first\n\n"
-        "Keep working autonomously until the task is truly finished,\n"
-        "then call task_complete with a summary."
+        "Your work is still in progress — you have not yet called work_complete.\n\n"
+        "Next steps:\n"
+        "1. If you have been analyzing or planning, shift to executing now.\n"
+        "2. If something failed, work around it or try a different approach.\n"
+        "3. If open items remain, finish them before wrapping up.\n"
+        "4. Once every item is done and results are verified, call work_complete "
+        "with a summary of what you delivered.\n\n"
+        "Do not stop early — resolve uncertainties with your own judgment and press on."
     )
 
     def __init__(
@@ -252,8 +251,9 @@ class AgentTurnExecutor(Executor):
             if strategies_applied:
                 self._compaction_count += 1
                 logger.info(
-                    "AgentTurnExecutor: Full compaction pipeline applied successfully (count: %d)",
+                    "AgentTurnExecutor: Full compaction pipeline applied successfully (count: %d, strategies: %s)",
                     self._compaction_count,
+                    strategies_applied,
                 )
             else:
                 # Fall back to direct clearing
@@ -329,14 +329,14 @@ class AgentTurnExecutor(Executor):
                 await self._sync_work_item_ledger(ctx)
 
             # 6. Determine if agent is done
-            # Priority: task_complete tool > no tool calls > continuation prompts
+            # Priority: work_complete tool > no tool calls > continuation prompts
             has_tool_calls = self._has_tool_calls(response)
-            called_task_complete = self._has_task_complete_call(response)
+            called_work_complete = self._has_work_complete_call(response)
 
-            if called_task_complete:
-                # Agent explicitly signaled completion via task_complete tool
+            if called_work_complete:
+                # Agent explicitly signaled completion via work_complete tool
                 agent_done = True
-                logger.info(f"AgentTurnExecutor: Turn {turn_count} complete, agent called task_complete")
+                logger.info(f"AgentTurnExecutor: Turn {turn_count} complete, agent called work_complete")
             elif has_tool_calls:
                 # Agent is still working
                 agent_done = False
@@ -370,11 +370,11 @@ class AgentTurnExecutor(Executor):
                     data={
                         "agent_done": agent_done,
                         "has_tool_calls": has_tool_calls,
-                        "called_task_complete": called_task_complete,
+                        "called_work_complete": called_work_complete,
                     },
                 )
             )
-            await ctx.send_message(TurnComplete(agent_done=agent_done, called_task_complete=called_task_complete))
+            await ctx.send_message(TurnComplete(agent_done=agent_done, called_work_complete=called_work_complete))
 
         except Exception as e:
             logger.error(f"AgentTurnExecutor: Turn {turn_count} failed with error: {e}")
@@ -410,12 +410,12 @@ class AgentTurnExecutor(Executor):
         # Inject work item tools and middleware if task_list is set
         if self._task_list is not None:
             run_kwargs["tools"] = self._task_list.get_tools()
-            run_kwargs["tools"].append(task_complete)
+            run_kwargs["tools"].append(work_complete)
         else:
-            # Even without work items, inject task_complete for stop control
+            # Even without work items, inject work_complete for stop control
             run_kwargs.setdefault("tools", [])
             if isinstance(run_kwargs["tools"], list):
-                run_kwargs["tools"].append(task_complete)
+                run_kwargs["tools"].append(work_complete)
 
         # Inject sub-agent tools
         if self._sub_agent_tools:
@@ -468,12 +468,12 @@ class AgentTurnExecutor(Executor):
         # Inject work item tools and middleware if task_list is set
         if self._task_list is not None:
             run_kwargs["tools"] = self._task_list.get_tools()
-            run_kwargs["tools"].append(task_complete)
+            run_kwargs["tools"].append(work_complete)
         else:
-            # Even without work items, inject task_complete for stop control
+            # Even without work items, inject work_complete for stop control
             run_kwargs.setdefault("tools", [])
             if isinstance(run_kwargs["tools"], list):
-                run_kwargs["tools"].append(task_complete)
+                run_kwargs["tools"].append(work_complete)
 
         # Inject sub-agent tools
         if self._sub_agent_tools:
@@ -1041,45 +1041,45 @@ class AgentTurnExecutor(Executor):
         return []
 
     def _has_tool_calls(self, response: AgentRunResponse) -> bool:
-        """Check if the response contains tool calls (excluding task_complete).
+        """Check if the response contains tool calls (excluding work_complete).
 
         Args:
             response: The agent response to check.
 
         Returns:
-            True if the response contains pending tool calls (other than task_complete).
+            True if the response contains pending tool calls (other than work_complete).
         """
         # Check for function approval requests (tool calls awaiting approval)
         if response.user_input_requests:
             return True
 
-        # Check message contents for function calls (excluding task_complete)
+        # Check message contents for function calls (excluding work_complete)
         for message in response.messages:
             if hasattr(message, "contents") and message.contents:
                 for content in message.contents:
                     if hasattr(content, "__class__") and "FunctionCall" in content.__class__.__name__:
                         tool_name = getattr(content, "name", None)
-                        # Don't count task_complete as a tool call that keeps the agent running
-                        if tool_name and tool_name != TASK_COMPLETE_TOOL_NAME:
+                        # Don't count work_complete as a tool call that keeps the agent running
+                        if tool_name and tool_name != WORK_COMPLETE_TOOL_NAME:
                             return True
 
         return False
 
-    def _has_task_complete_call(self, response: AgentRunResponse) -> bool:
-        """Check if the response contains a task_complete tool call.
+    def _has_work_complete_call(self, response: AgentRunResponse) -> bool:
+        """Check if the response contains a work_complete tool call.
 
         Args:
             response: The agent response to check.
 
         Returns:
-            True if the agent called the task_complete tool.
+            True if the agent called the work_complete tool.
         """
         for message in response.messages:
             if hasattr(message, "contents") and message.contents:
                 for content in message.contents:
                     if hasattr(content, "__class__") and "FunctionCall" in content.__class__.__name__:
                         tool_name = getattr(content, "name", None)
-                        if tool_name == TASK_COMPLETE_TOOL_NAME:
+                        if tool_name == WORK_COMPLETE_TOOL_NAME:
                             return True
         return False
 
