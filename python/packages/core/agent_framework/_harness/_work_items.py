@@ -78,21 +78,8 @@ _POSTAMBLE_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"^\s*The above has been\b", re.IGNORECASE),
 ]
 
-# Meta-reference patterns - compound matches required (anywhere in content)
-_META_REFERENCE_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"^\s*.*\bwork.?item\b", re.IGNORECASE),
-    re.compile(r"^\s*.*\bartifact\b.*\b(stored|saved)\b", re.IGNORECASE),
-    re.compile(r"^\s*.*\b(stored|saved)\b.*\bartifact\b", re.IGNORECASE),
-    re.compile(r"^\s*.*\btask_complete\b", re.IGNORECASE),
-    re.compile(r"^\s*.*\bwork_item_set_artifact\b", re.IGNORECASE),
-    re.compile(r"^\s*.*\bwork_item_flag_revision\b", re.IGNORECASE),
-]
-
 # Boundary zone size (number of lines at start/end to check for preamble/postamble)
 _BOUNDARY_ZONE_SIZE = 5
-
-# Maximum narration lines for LIGHT classification
-_MAX_LIGHT_NARRATION_LINES = 3
 
 
 def _is_narration_line(line: str, patterns: list[re.Pattern[str]]) -> bool:
@@ -100,85 +87,59 @@ def _is_narration_line(line: str, patterns: list[re.Pattern[str]]) -> bool:
     return any(p.search(line) for p in patterns)
 
 
-def _has_content_before(line_idx: int, lines: list[str], narration_indices: set[int]) -> bool:
-    """Check if there are non-empty, non-narration content lines before the given index."""
-    return any(lines[i].strip() and i not in narration_indices for i in range(line_idx))
-
-
-def _has_content_after(line_idx: int, lines: list[str], narration_indices: set[int]) -> bool:
-    """Check if there are non-empty, non-narration content lines after the given index."""
-    return any(lines[i].strip() and i not in narration_indices for i in range(line_idx + 1, len(lines)))
-
 
 def _find_narration_lines(
     lines: list[str],
 ) -> tuple[list[int], list[int], list[int]]:
-    """Find indices of narration lines in preamble, postamble, and interior.
+    """Find indices of narration lines in preamble and postamble boundary zones.
 
-    A narration line is only considered "boundary" if it is truly at the
-    start or end of content (no non-narration content lines before/after it).
-    Narration interleaved with content is always classified as interior.
+    Only checks the first/last N lines (boundary zones) for known narration
+    patterns. Interior lines are never flagged — the agent's content is
+    accepted as-is. This avoids false positives when artifact content
+    legitimately discusses tools, work items, or other harness concepts.
 
     Returns:
-        Tuple of (preamble_indices, postamble_indices, interior_meta_indices).
+        Tuple of (preamble_indices, postamble_indices, interior_indices).
+        interior_indices is always empty (kept for API compatibility).
     """
     preamble_indices: list[int] = []
     postamble_indices: list[int] = []
-    interior_meta_indices: list[int] = []
 
     total = len(lines)
     preamble_end = min(_BOUNDARY_ZONE_SIZE, total)
     postamble_start = max(0, total - _BOUNDARY_ZONE_SIZE)
 
-    # First pass: find all narration matches with their pattern type
-    narration_matches: list[tuple[int, str]] = []  # (index, type: "preamble"|"postamble"|"meta")
-
-    for i, line in enumerate(lines):
-        if not line.strip():
+    # Scan preamble zone
+    for i in range(preamble_end):
+        if not lines[i].strip():
             continue
+        if _is_narration_line(lines[i], _PREAMBLE_PATTERNS):
+            preamble_indices.append(i)
 
-        in_preamble_zone = i < preamble_end
-        in_postamble_zone = i >= postamble_start
-
-        if in_preamble_zone and _is_narration_line(line, _PREAMBLE_PATTERNS):
-            narration_matches.append((i, "preamble"))
+    # Scan postamble zone
+    for i in range(postamble_start, total):
+        if not lines[i].strip():
             continue
-
-        if in_postamble_zone and _is_narration_line(line, _POSTAMBLE_PATTERNS):
-            narration_matches.append((i, "postamble"))
+        # Skip if already counted as preamble (overlapping zones in short content)
+        if i in preamble_indices:
             continue
+        if _is_narration_line(lines[i], _POSTAMBLE_PATTERNS):
+            postamble_indices.append(i)
 
-        if _is_narration_line(line, _META_REFERENCE_PATTERNS):
-            narration_matches.append((i, "meta"))
-
-    # Second pass: classify each match as boundary or interior based on
-    # whether it has non-narration content lines both before and after it.
-    narration_indices = {idx for idx, _ in narration_matches}
-
-    for idx, match_type in narration_matches:
-        has_before = _has_content_before(idx, lines, narration_indices)
-        has_after = _has_content_after(idx, lines, narration_indices)
-
-        if has_before and has_after:
-            # Interleaved with content - always interior
-            interior_meta_indices.append(idx)
-        elif match_type == "preamble" or (match_type == "meta" and not has_before):
-            preamble_indices.append(idx)
-        else:
-            postamble_indices.append(idx)
-
-    return preamble_indices, postamble_indices, interior_meta_indices
+    return preamble_indices, postamble_indices, []
 
 
 def validate_artifact_content(artifact: str) -> ArtifactValidationResult:
-    """Validate artifact content for narrative contamination.
+    """Validate artifact content for boundary narration and auto-strip it.
 
     Classification:
-    - CLEAN: No narration lines detected.
-    - LIGHT: Narration only in boundary zones (first/last 5 lines), ≤3 total.
-             Auto-strips boundary narration.
-    - HEAVY: Narration in body interior, OR >3 total narration lines.
-             Rejects entirely.
+    - CLEAN: No narration lines detected in boundary zones.
+    - LIGHT: Narration detected in boundary zones (first/last 5 lines).
+             Auto-strips boundary narration and stores cleaned content.
+
+    Interior content is never rejected. This avoids false positives when
+    the artifact legitimately discusses tools, work items, or harness
+    concepts, and prevents rejection loops that degrade agent performance.
 
     Args:
         artifact: The artifact content to validate.
@@ -188,9 +149,9 @@ def validate_artifact_content(artifact: str) -> ArtifactValidationResult:
     """
     lines = artifact.split("\n")
 
-    preamble_idx, postamble_idx, interior_idx = _find_narration_lines(lines)
+    preamble_idx, postamble_idx, _interior_idx = _find_narration_lines(lines)
 
-    total_narration = len(preamble_idx) + len(postamble_idx) + len(interior_idx)
+    total_narration = len(preamble_idx) + len(postamble_idx)
 
     # CLEAN: no narration detected
     if total_narration == 0:
@@ -201,31 +162,13 @@ def validate_artifact_content(artifact: str) -> ArtifactValidationResult:
             message="",
         )
 
-    # HEAVY: interior narration or too many total narration lines
-    if interior_idx or total_narration > _MAX_LIGHT_NARRATION_LINES:
-        all_indices = sorted(set(preamble_idx + postamble_idx + interior_idx))
-        flagged_lines = [lines[i] for i in all_indices]
-        return ArtifactValidationResult(
-            level=ArtifactContaminationLevel.HEAVY,
-            cleaned_content=artifact,  # Not cleaned - rejected
-            removed_lines=flagged_lines,
-            message=(
-                f"Artifact rejected: narrative contamination detected "
-                f"({total_narration} narration lines, "
-                f"{len(interior_idx)} in body interior). "
-                f"Artifact content must be pure deliverable data. "
-                f"Process commentary belongs in your response text, "
-                f"not inside the artifact parameter. "
-                f"Please resubmit with only the structured content."
-            ),
-        )
-
-    # LIGHT: boundary-only narration, ≤3 lines
+    # LIGHT: boundary narration detected - auto-strip and store
     boundary_indices = sorted(set(preamble_idx + postamble_idx))
     removed = [lines[i] for i in boundary_indices]
 
     # Strip narration lines and clean up leading/trailing blank lines
-    cleaned_lines = [line for i, line in enumerate(lines) if i not in set(boundary_indices)]
+    boundary_set = set(boundary_indices)
+    cleaned_lines = [line for i, line in enumerate(lines) if i not in boundary_set]
 
     # Strip leading blank lines
     while cleaned_lines and not cleaned_lines[0].strip():
@@ -746,11 +689,8 @@ class WorkItemTaskList:
                         f'"summary": "..."}}'
                     )
 
-            # Validate artifact content for narrative contamination
+            # Validate artifact content for boundary narration
             validation = validate_artifact_content(artifact)
-
-            if validation.level == ArtifactContaminationLevel.HEAVY:
-                return f"Error: {validation.message}"
 
             if validation.level == ArtifactContaminationLevel.LIGHT:
                 item.artifact = validation.cleaned_content

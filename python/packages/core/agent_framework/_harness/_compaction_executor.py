@@ -101,7 +101,7 @@ class CompactionExecutor(Executor):
         strategies: "list[CompactionStrategy] | None" = None,
         summarizer: Summarizer | None = None,
         # Budget configuration
-        max_input_tokens: int = 100000,
+        max_input_tokens: int = 128000,
         soft_threshold_percent: float = 0.80,
         # Tokenizer
         tokenizer: ProviderAwareTokenizer | None = None,
@@ -211,6 +211,21 @@ class CompactionExecutor(Executor):
             current_tokens,
             budget.soft_threshold,
             budget.tokens_over_threshold,
+        )
+
+        # 5b. Emit compaction_started event for UI feedback
+        strategies_available = [s.name for s in self._strategies]
+        await ctx.add_event(
+            HarnessLifecycleEvent(
+                event_type="compaction_started",
+                turn_number=turn_number,
+                data={
+                    "current_tokens": current_tokens,
+                    "soft_threshold": budget.soft_threshold,
+                    "tokens_over_threshold": budget.tokens_over_threshold,
+                    "strategies_available": strategies_available,
+                },
+            ),
         )
 
         # 6. Create/update plan

@@ -4,6 +4,8 @@
 
 import contextlib
 import logging
+import time
+import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 from .._agents import AgentProtocol, ChatAgent
@@ -28,11 +30,36 @@ from ._state import HarnessEvent, HarnessLifecycleEvent, RepairComplete, TurnCom
 
 if TYPE_CHECKING:
     from ._compaction import CompactionPlan
+    from ._compaction._strategies import Summarizer
     from ._hooks import HarnessHooks
     from ._jit_instructions import JitInstruction
     from ._work_items import WorkItemEventMiddleware, WorkItemLedger, WorkItemTaskListProtocol
 
 logger = logging.getLogger(__name__)
+
+
+def _classify_compaction_level(
+    strategies_applied: list[str],
+    tokens_before: int = 0,
+    tokens_after: int = 0,
+) -> str:
+    """Classify the compaction level based on strategies and actual impact.
+
+    Returns:
+        - "compressed": LLM summarization was used (context preserved at reduced fidelity)
+        - "destructive": 90%+ of context was destroyed (regardless of strategy)
+        - "optimized": minor reduction, context mostly intact
+    """
+    if "summarize" in strategies_applied:
+        return "compressed"
+    # Classify by actual impact when no LLM summarization was used
+    if tokens_before > 0:
+        reduction = (tokens_before - tokens_after) / tokens_before
+        if reduction >= 0.9:
+            return "destructive"
+    elif "drop" in strategies_applied:
+        return "destructive"
+    return "optimized"
 
 
 class AgentTurnExecutor(Executor):
@@ -74,6 +101,8 @@ class AgentTurnExecutor(Executor):
         max_continuation_prompts: int = 5,
         continuation_prompt: str | None = None,
         enable_compaction: bool = False,
+        summarizer: "Summarizer | None" = None,
+        artifact_store: Any | None = None,
         task_list: "WorkItemTaskListProtocol | None" = None,
         hooks: "HarnessHooks | None" = None,
         sub_agent_tools: list[Any] | None = None,
@@ -89,6 +118,10 @@ class AgentTurnExecutor(Executor):
             max_continuation_prompts: Maximum continuation prompts before accepting done signal.
             continuation_prompt: Custom continuation prompt text.
             enable_compaction: Whether to apply CompactionPlan from SharedState.
+            summarizer: Optional Summarizer for LLM-based context summarization during compaction.
+                When provided, SummarizeStrategy is added between ClearStrategy and DropStrategy.
+            artifact_store: Optional artifact store for ExternalizeStrategy. When provided along
+                with a summarizer, ExternalizeStrategy is added to the compaction ladder.
             task_list: Optional work item task list for self-critique tracking.
             hooks: Optional harness hooks for pre/post tool interception.
             sub_agent_tools: Optional list of sub-agent tools (explore, run_task) to inject.
@@ -103,6 +136,9 @@ class AgentTurnExecutor(Executor):
         self._max_continuation_prompts = max_continuation_prompts
         self._continuation_prompt = continuation_prompt or self.DEFAULT_CONTINUATION_PROMPT
         self._enable_compaction = enable_compaction
+        self._compaction_count = 0
+        self._summarizer = summarizer
+        self._artifact_store = artifact_store
         self._task_list = task_list
 
         # Initialize tokenizer for cache token counting when compaction is enabled
@@ -200,17 +236,53 @@ class AgentTurnExecutor(Executor):
 
         # 3. Apply compaction if needed — prefer full pipeline, fall back to direct clear
         if self._enable_compaction and self._is_compaction_needed(trigger):
-            compacted = await self._run_full_compaction(ctx, turn_count)
-            if compacted:
-                logger.info("AgentTurnExecutor: Full compaction pipeline applied successfully")
+            # Ensure all cache messages have IDs so compaction strategies can track them
+            self._ensure_message_ids(self._cache)
+
+            # Get pre-compaction token count from the shared budget (set by _update_token_budget
+            # using authoritative API usage data after the previous agent turn)
+            tokens_before = await self._get_budget_estimate(ctx)
+            start_time = time.monotonic()
+
+            strategies_applied = await self._run_full_compaction(ctx, turn_count)
+            if strategies_applied:
+                self._compaction_count += 1
+                logger.info("AgentTurnExecutor: Full compaction pipeline applied successfully (count: %d)", self._compaction_count)
             else:
                 # Fall back to direct clearing
                 cleared_count = self._apply_direct_clear(turn_count)
                 if cleared_count > 0:
+                    strategies_applied = ["clear"]
                     logger.info(
                         "AgentTurnExecutor: Cleared %d old tool results to reduce context pressure",
                         cleared_count,
                     )
+
+            duration_ms = (time.monotonic() - start_time) * 1000
+            # Re-estimate tokens from cache contents post-compaction and update the budget
+            await self._update_token_budget(ctx)
+            tokens_after = await self._get_budget_estimate(ctx)
+            tokens_freed = max(0, tokens_before - tokens_after)
+
+            # Classify compaction level for UI display
+            compaction_level = _classify_compaction_level(
+                strategies_applied, tokens_before, tokens_after
+            )
+
+            await ctx.add_event(
+                HarnessLifecycleEvent(
+                    event_type="compaction_completed",
+                    turn_number=turn_count,
+                    data={
+                        "tokens_before": tokens_before,
+                        "tokens_after": tokens_after,
+                        "tokens_freed": tokens_freed,
+                        "duration_ms": round(duration_ms, 1),
+                        "strategies_applied": strategies_applied,
+                        "compaction_level": compaction_level,
+                    },
+                ),
+            )
 
         # 4. Record turn start event
         await self._append_event(
@@ -557,10 +629,98 @@ class AgentTurnExecutor(Executor):
             elif action == CompactionAction.EXTERNALIZE:
                 compacted.append(self._render_externalization_message(record))
 
-        return compacted
+        return self._fix_dangling_tool_calls(compacted)
+
+    def _fix_dangling_tool_calls(self, messages: list[Any]) -> list[Any]:
+        """Ensure tool_call / tool response pairing is consistent.
+
+        The OpenAI API requires:
+        1. Each tool_call_id in an assistant message must be followed by a tool
+           message responding to that call_id before the next non-tool message.
+        2. Each tool message must refer to a tool_call_id from a preceding
+           assistant message.
+
+        Compaction can break either direction:
+        - Tool responses cleared/dropped but assistant kept → insert placeholders
+        - Assistant message cleared/dropped but tool responses kept → remove orphans
+
+        This method fixes both directions after compaction.
+        """
+        from .._types import ChatMessage, FunctionCallContent, FunctionResultContent
+
+        # First pass: collect all call_ids from assistant FunctionCallContent
+        # and all call_ids from tool FunctionResultContent
+        assistant_call_ids: set[str] = set()
+        answered_call_ids: set[str] = set()
+        for msg in messages:
+            contents = getattr(msg, "contents", None) or []
+            for content in contents:
+                if isinstance(content, FunctionCallContent) and content.call_id:
+                    assistant_call_ids.add(content.call_id)
+                elif isinstance(content, FunctionResultContent) and content.call_id:
+                    answered_call_ids.add(content.call_id)
+
+        # Second pass: build result
+        # - Remove tool messages whose call_ids have no matching assistant call
+        # - Insert placeholder tool responses for assistant calls with no response
+        result: list[Any] = []
+        placeholders_inserted = 0
+        orphan_results_removed = 0
+
+        for msg in messages:
+            role_value = str(getattr(getattr(msg, "role", ""), "value", getattr(msg, "role", "")))
+
+            # Check if this is a tool message with an orphaned call_id
+            if role_value == "tool":
+                contents = getattr(msg, "contents", None) or []
+                tool_call_ids = [
+                    c.call_id for c in contents
+                    if isinstance(c, FunctionResultContent) and c.call_id
+                ]
+                # If ALL call_ids in this message are orphaned, skip the message
+                if tool_call_ids and all(cid not in assistant_call_ids for cid in tool_call_ids):
+                    orphan_results_removed += 1
+                    continue
+
+            result.append(msg)
+
+            # Check if this is an assistant message with unanswered tool_calls
+            contents = getattr(msg, "contents", None) or []
+            orphaned_ids = [
+                c.call_id for c in contents
+                if isinstance(c, FunctionCallContent) and c.call_id
+                and c.call_id not in answered_call_ids
+            ]
+
+            # Insert placeholders immediately after this assistant message
+            for call_id in orphaned_ids:
+                result.append(
+                    ChatMessage(
+                        role="tool",
+                        contents=[FunctionResultContent(
+                            call_id=call_id,
+                            result="[Tool result cleared during context compaction]",
+                        )],
+                        message_id=f"placeholder-{call_id[:12]}",
+                    )
+                )
+                placeholders_inserted += 1
+
+        if placeholders_inserted or orphan_results_removed:
+            logger.info(
+                "AgentTurnExecutor: Fixed tool pairing — inserted %d placeholders, "
+                "removed %d orphan tool results",
+                placeholders_inserted,
+                orphan_results_removed,
+            )
+
+        return result
 
     def _render_cleared_message(self, original_msg: Any, record: Any) -> Any:
         """Render a cleared message as a placeholder.
+
+        Preserves FunctionResultContent structure for tool messages so the
+        tool_call_id linkage required by the API is maintained.
 
         Args:
             original_msg: The original message.
@@ -569,21 +729,36 @@ class AgentTurnExecutor(Executor):
         Returns:
             A placeholder message.
         """
-        from .._types import ChatMessage
+        from .._types import ChatMessage, FunctionResultContent
 
         role_attr = getattr(original_msg, "role", "assistant")
-        # Handle both enum-style roles and string roles
         role_value: str = str(getattr(role_attr, "value", role_attr))
 
-        # Build placeholder
+        # Build placeholder text
         parts = [f"[Cleared: {role_value} message]"]
         if record is not None and hasattr(record, "preserved_fields") and record.preserved_fields:
             fields = ", ".join(f"{k}={v}" for k, v in sorted(record.preserved_fields.items()))
             parts.append(f"Key data: {fields}")
+        placeholder_text = "\n".join(parts)
+
+        # For tool messages, preserve FunctionResultContent with its call_id
+        # so the API can match it to the assistant's tool_call
+        if role_value == "tool":
+            contents = getattr(original_msg, "contents", None) or []
+            for content in contents:
+                if isinstance(content, FunctionResultContent):
+                    return ChatMessage(
+                        role="tool",
+                        contents=[FunctionResultContent(
+                            call_id=content.call_id,
+                            result=placeholder_text,
+                        )],
+                        message_id=getattr(original_msg, "message_id", None),
+                    )
 
         return ChatMessage(  # type: ignore[call-overload]
             role=role_value,  # type: ignore[arg-type]
-            text="\n".join(parts),
+            text=placeholder_text,
             message_id=getattr(original_msg, "message_id", None),
         )
 
@@ -649,6 +824,17 @@ class AgentTurnExecutor(Executor):
 
         return isinstance(trigger, CompactionComplete) and trigger.compaction_needed
 
+    @staticmethod
+    def _ensure_message_ids(messages: list[Any]) -> None:
+        """Assign unique IDs to any messages that don't have one.
+
+        Compaction strategies use message_id to track which messages have been
+        compacted. Messages from the API or created locally may lack IDs.
+        """
+        for msg in messages:
+            if getattr(msg, "message_id", None) is None:
+                msg.message_id = f"msg-{uuid.uuid4().hex[:12]}"
+
     def _apply_direct_clear(self, current_turn: int, preserve_recent_turns: int = 2) -> int:
         """Clear old tool results in the cache to reduce context pressure.
 
@@ -704,31 +890,50 @@ class AgentTurnExecutor(Executor):
 
         return cleared_count
 
-    async def _run_full_compaction(self, ctx: WorkflowContext[Any], turn_count: int) -> bool:
+    async def _get_budget_estimate(self, ctx: WorkflowContext[Any]) -> int:
+        """Read the current token estimate from the shared token budget.
+
+        Returns:
+            The current token estimate from the budget, or 0 if not available.
+        """
+        from ._context_pressure import TokenBudget
+
+        try:
+            budget_data = await ctx.get_shared_state(HARNESS_TOKEN_BUDGET_KEY)
+            if budget_data and isinstance(budget_data, dict):
+                budget = TokenBudget.from_dict(cast("dict[str, Any]", budget_data))
+                return budget.current_estimate
+        except KeyError:
+            pass
+        return 0
+
+    async def _run_full_compaction(self, ctx: WorkflowContext[Any], turn_count: int) -> list[str]:
         """Run the full compaction pipeline via CompactionCoordinator.
 
         Bridges the cache to the compaction strategies using CacheThreadAdapter,
-        then runs ClearStrategy + DropStrategy to produce a CompactionPlan that
-        is stored in SharedState for _get_messages_for_agent to apply.
+        then runs ClearStrategy + SummarizeStrategy (if available) + DropStrategy
+        to produce a CompactionPlan stored in SharedState for _get_messages_for_agent to apply.
 
         Args:
             ctx: Workflow context for state access.
             turn_count: Current turn number.
 
         Returns:
-            True if compaction was applied, False if no compaction was needed or possible.
+            List of strategy names that were applied (empty if no compaction occurred).
         """
         from ._compaction import (
             CacheThreadAdapter,
             ClearStrategy,
             CompactionCoordinator,
             DropStrategy,
+            ExternalizeStrategy,
+            SummarizeStrategy,
             TurnContext,
         )
         from ._compaction import TokenBudget as TokenBudgetV2
 
         if self._tokenizer is None:
-            return False
+            return []
 
         # Build a thread adapter from cache
         thread_adapter = CacheThreadAdapter(self._cache)
@@ -739,25 +944,51 @@ class AgentTurnExecutor(Executor):
         # Create v2 budget for compaction internals
         budget_v2 = TokenBudgetV2()
 
-        # Estimate current tokens from cache
-        current_tokens = 0
-        for msg in self._cache:
-            text = getattr(msg, "text", None) or ""
-            current_tokens += self._tokenizer.count_tokens(str(text))
+        # Use the authoritative token estimate from the shared budget (set by
+        # _update_token_budget using API usage data), not a naive cache scan.
+        # Cache messages store content in .contents (function calls/results)
+        # that a simple .text scan misses, leading to massive underestimates.
+        current_tokens = await self._get_budget_estimate(ctx)
+        if current_tokens <= 0:
+            # Fallback: estimate from cache if no budget data available yet
+            for msg in self._cache:
+                text = getattr(msg, "text", None) or ""
+                current_tokens += self._tokenizer.count_tokens(str(text))
 
         tokens_over = budget_v2.tokens_over_threshold(current_tokens)
+        logger.info(
+            "AgentTurnExecutor: Full compaction check — current_tokens=%d, "
+            "budget_max=%d, soft_threshold=%d, available_for_messages=%d, "
+            "tokens_over=%d, cache_size=%d",
+            current_tokens,
+            budget_v2.max_input_tokens,
+            budget_v2.soft_threshold,
+            budget_v2.available_for_messages,
+            tokens_over,
+            len(self._cache),
+        )
         if tokens_over <= 0:
             logger.debug(
                 "AgentTurnExecutor: Full compaction skipped — under threshold (%d tokens)",
                 current_tokens,
             )
-            return False
+            return []
 
         tokens_to_free = tokens_over + int(budget_v2.max_input_tokens * 0.1)
 
-        # Run coordinator with ClearStrategy + DropStrategy
+        # Build strategy ladder: Clear → Externalize → Summarize → Drop
+        # Externalize preserves full content in artifact store (least destructive after clear).
+        # Summarize replaces content with LLM summary (more destructive — original is lost).
+        # CompactionCoordinator sorts by aggressiveness value automatically.
+        strategies: list[ClearStrategy | SummarizeStrategy | DropStrategy] = [ClearStrategy()]
+        if self._summarizer is not None:
+            if self._artifact_store is not None:
+                strategies.append(ExternalizeStrategy(self._artifact_store, self._summarizer))
+            strategies.append(SummarizeStrategy(self._summarizer))
+        strategies.append(DropStrategy())
+
         turn_context = TurnContext(turn_number=turn_count)
-        coordinator = CompactionCoordinator(strategies=[ClearStrategy(), DropStrategy()])
+        coordinator = CompactionCoordinator(strategies=strategies)  # type: ignore[arg-type]
 
         try:
             result = await coordinator.compact(
@@ -770,9 +1001,18 @@ class AgentTurnExecutor(Executor):
             )
         except Exception:
             logger.warning("AgentTurnExecutor: Full compaction failed", exc_info=True)
-            return False
+            return []
 
         # Store updated plan if it has content
+        logger.info(
+            "AgentTurnExecutor: Compaction result — plan=%s, is_empty=%s, "
+            "proposals_generated=%d, proposals_applied=%d, tokens_freed=%d",
+            "present" if result.plan else "None",
+            result.plan.is_empty if result.plan else "N/A",
+            result.proposals_generated,
+            result.proposals_applied,
+            result.tokens_freed,
+        )
         if result.plan and not result.plan.is_empty:
             await ctx.set_shared_state(HARNESS_COMPACTION_PLAN_KEY, result.plan.to_dict())
             logger.info(
@@ -781,9 +1021,19 @@ class AgentTurnExecutor(Executor):
                 result.proposals_applied,
                 result.proposals_generated,
             )
-            return True
+            # Determine which strategies actually produced records
+            strategies_applied: list[str] = []
+            if result.plan.clearings:
+                strategies_applied.append("clear")
+            if result.plan.summarizations:
+                strategies_applied.append("summarize")
+            if result.plan.externalizations:
+                strategies_applied.append("externalize")
+            if result.plan.drops:
+                strategies_applied.append("drop")
+            return strategies_applied
 
-        return False
+        return []
 
     def _has_tool_calls(self, response: AgentRunResponse) -> bool:
         """Check if the response contains tool calls (excluding task_complete).
@@ -1203,6 +1453,7 @@ class AgentTurnExecutor(Executor):
             tool_usage=tool_usage,
             work_items_complete=work_complete,
             work_items_total=work_total,
+            compaction_count=self._compaction_count,
         )
 
         instructions = self._jit_processor.evaluate(jit_ctx)

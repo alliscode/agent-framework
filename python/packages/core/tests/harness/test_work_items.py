@@ -1177,8 +1177,8 @@ class TestArtifactValidation:
         assert result.cleaned_content.startswith("## Content")
         assert result.cleaned_content.endswith("Data here.")
 
-    def test_heavy_interior_meta_reference(self) -> None:
-        """Test meta-reference in body interior triggers HEAVY."""
+    def test_interior_narration_accepted(self) -> None:
+        """Test that interior narration is accepted (boundary narration stripped)."""
         content = (
             "## Timeline\n"
             "09:00 - Deployment started\n"
@@ -1188,11 +1188,13 @@ class TestArtifactValidation:
             "10:00 - Recovery complete"
         )
         result = validate_artifact_content(content)
-        assert result.level == ArtifactContaminationLevel.HEAVY
-        assert "rejected" in result.message
+        # "I've stored" matches postamble pattern in last 5 lines — auto-stripped
+        assert result.level == ArtifactContaminationLevel.LIGHT
+        assert "09:00" in result.cleaned_content
+        assert "10:00 - Recovery complete" in result.cleaned_content
 
-    def test_heavy_interleaved_narration(self) -> None:
-        """Test narration in the middle of content triggers HEAVY."""
+    def test_interleaved_narration_boundary_stripped(self) -> None:
+        """Test narration in boundary zones is auto-stripped even if interleaved."""
         lines = [
             "## Report",
             "Finding 1: issue detected.",
@@ -1208,10 +1210,13 @@ class TestArtifactValidation:
         ]
         content = "\n".join(lines)
         result = validate_artifact_content(content)
-        assert result.level == ArtifactContaminationLevel.HEAVY
+        # "Now I'll" at line 3 is in preamble zone and matches preamble pattern
+        assert result.level == ArtifactContaminationLevel.LIGHT
+        assert "Finding 1" in result.cleaned_content
+        assert "All clear." in result.cleaned_content
 
-    def test_heavy_too_many_boundary_lines(self) -> None:
-        """Test >3 boundary narration lines triggers HEAVY."""
+    def test_many_boundary_lines_auto_cleaned(self) -> None:
+        """Test that many preamble narration lines are auto-stripped."""
         content = (
             "I will now write the report.\n"
             "Let me document everything.\n"
@@ -1220,10 +1225,13 @@ class TestArtifactValidation:
             "## Report\nData.\n"
         )
         result = validate_artifact_content(content)
-        assert result.level == ArtifactContaminationLevel.HEAVY
+        # All boundary narration is auto-stripped, never rejected
+        assert result.level == ArtifactContaminationLevel.LIGHT
+        assert "## Report" in result.cleaned_content
+        assert "I will now" not in result.cleaned_content
 
-    def test_heavy_work_item_reference_interior(self) -> None:
-        """Test work item references in body interior trigger HEAVY."""
+    def test_work_item_reference_interior_accepted(self) -> None:
+        """Test work item references in body interior are accepted."""
         content = (
             "## Analysis\n"
             "The system had issues.\n"
@@ -1231,32 +1239,35 @@ class TestArtifactValidation:
             "Root cause identified."
         )
         result = validate_artifact_content(content)
-        assert result.level == ArtifactContaminationLevel.HEAVY
+        # Interior content is never rejected
+        assert result.level == ArtifactContaminationLevel.CLEAN
 
-    def test_heavy_artifact_stored_interior(self) -> None:
-        """Test 'artifact stored' meta-reference in interior triggers HEAVY."""
+    def test_artifact_stored_interior_accepted(self) -> None:
+        """Test 'artifact stored' in interior is accepted."""
         content = "## Timeline\n09:00 - Start\nThe artifact stored above is incomplete.\n09:15 - End"
         result = validate_artifact_content(content)
-        assert result.level == ArtifactContaminationLevel.HEAVY
+        assert result.level == ArtifactContaminationLevel.CLEAN
 
-    def test_heavy_task_complete_reference(self) -> None:
-        """Test task_complete reference triggers HEAVY."""
+    def test_task_complete_reference_accepted(self) -> None:
+        """Test task_complete reference in interior is accepted."""
         content = "## Report\nData here.\nAfter this I will call task_complete.\nMore data."
         result = validate_artifact_content(content)
-        assert result.level == ArtifactContaminationLevel.HEAVY
+        assert result.level == ArtifactContaminationLevel.CLEAN
 
-    def test_heavy_work_item_set_artifact_reference(self) -> None:
-        """Test work_item_set_artifact reference triggers HEAVY."""
+    def test_work_item_set_artifact_reference_accepted(self) -> None:
+        """Test work_item_set_artifact reference in interior is accepted."""
         content = "## Output\nUsing work_item_set_artifact to store this.\nContent follows."
         result = validate_artifact_content(content)
-        assert result.level == ArtifactContaminationLevel.HEAVY
+        assert result.level == ArtifactContaminationLevel.CLEAN
 
-    def test_heavy_message_includes_resubmit_instruction(self) -> None:
-        """Test that HEAVY message instructs resubmission."""
+    def test_mixed_boundary_and_interior_narration(self) -> None:
+        """Test that boundary narration is stripped even when interior narration exists."""
         content = "I will now write.\n## Data\nContent.\nI've stored the artifact saved above.\nDone."
         result = validate_artifact_content(content)
-        assert result.level == ArtifactContaminationLevel.HEAVY
-        assert "resubmit" in result.message.lower()
+        # Preamble "I will now write." is stripped; interior line stays
+        assert result.level == ArtifactContaminationLevel.LIGHT
+        assert "I will now" not in result.cleaned_content
+        assert "Content." in result.cleaned_content
 
     def test_light_message_includes_reminder(self) -> None:
         """Test that LIGHT message includes a reminder."""
@@ -1318,13 +1329,13 @@ class TestArtifactValidation:
         result = validate_artifact_content(content)
         assert result.level == ArtifactContaminationLevel.LIGHT
 
-    def test_meta_reference_in_boundary_counts_as_boundary(self) -> None:
-        """Test that meta-references in boundary zones count as boundary narration."""
+    def test_meta_reference_in_boundary_accepted(self) -> None:
+        """Test that work item references in boundary are accepted as content."""
         content = "I'll update the work item with this.\n\n## Data\nContent here."
         result = validate_artifact_content(content)
-        # "work item" in first 5 lines = boundary meta-reference
-        # Also matches preamble pattern "I'll ..."
-        assert result.level == ArtifactContaminationLevel.LIGHT
+        # No meta-reference patterns — interior content is never checked
+        # "I'll update" doesn't match any preamble pattern
+        assert result.level == ArtifactContaminationLevel.CLEAN
 
     def test_false_positive_data_will_be_processed(self) -> None:
         """Test that 'The data will now be processed' is not a false positive."""
@@ -1354,8 +1365,8 @@ class TestArtifactValidation:
         assert result.level == ArtifactContaminationLevel.LIGHT
         assert len(result.removed_lines) == 3
 
-    def test_four_boundary_lines_is_heavy(self) -> None:
-        """Test that 4 boundary narration lines triggers HEAVY."""
+    def test_four_boundary_lines_auto_cleaned(self) -> None:
+        """Test that 4 boundary narration lines are auto-stripped (never rejected)."""
         content = (
             "I will now write this.\n"
             "Let me be thorough.\n"
@@ -1365,7 +1376,9 @@ class TestArtifactValidation:
             "I've stored this result."
         )
         result = validate_artifact_content(content)
-        assert result.level == ArtifactContaminationLevel.HEAVY
+        assert result.level == ArtifactContaminationLevel.LIGHT
+        assert "## Report" in result.cleaned_content
+        assert "I will now" not in result.cleaned_content
 
 
 # ============================================================
@@ -1409,8 +1422,8 @@ class TestSetArtifactToolValidation:
         assert "## Timeline" in stored
         assert "09:00" in stored
 
-    def test_heavy_contamination_rejected(self) -> None:
-        """Test that heavy contamination is rejected and artifact not stored."""
+    def test_interior_narration_stored(self) -> None:
+        """Test that interior narration is accepted and stored."""
         task_list = WorkItemTaskList()
         tools = task_list.get_tools()
         add_tool = tools[0]
@@ -1421,13 +1434,12 @@ class TestSetArtifactToolValidation:
 
         artifact = "## Analysis\nFinding 1.\nI'll update the work item with this.\nFinding 2."
         result = set_artifact_tool(item_id=item_id, artifact=artifact)
-        assert "Error" in result
-        assert "rejected" in result
-        # Artifact should NOT be stored
-        assert task_list.ledger.items[item_id].artifact == ""
+        # Interior narration is accepted — artifact stored as-is
+        assert "Artifact stored" in result
+        assert task_list.ledger.items[item_id].artifact == artifact
 
-    def test_heavy_preserves_existing_artifact(self) -> None:
-        """Test that rejection preserves any previously stored artifact."""
+    def test_new_artifact_overwrites_existing(self) -> None:
+        """Test that a new artifact overwrites any existing artifact."""
         task_list = WorkItemTaskList()
         tools = task_list.get_tools()
         add_tool = tools[0]
@@ -1440,12 +1452,11 @@ class TestSetArtifactToolValidation:
         set_artifact_tool(item_id=item_id, artifact="## Original\nClean content.")
         assert task_list.ledger.items[item_id].artifact == "## Original\nClean content."
 
-        # Second: attempt contaminated artifact
-        bad_artifact = "## Updated\nNew content.\nI stored the artifact saved above.\nMore content."
-        result = set_artifact_tool(item_id=item_id, artifact=bad_artifact)
-        assert "Error" in result
-        # Original artifact preserved
-        assert task_list.ledger.items[item_id].artifact == "## Original\nClean content."
+        # Second: store a new artifact (interior narration is now accepted)
+        new_artifact = "## Updated\nNew content.\nI stored the artifact saved above.\nMore content."
+        result = set_artifact_tool(item_id=item_id, artifact=new_artifact)
+        assert "Artifact stored" in result
+        assert task_list.ledger.items[item_id].artifact == new_artifact
 
     def test_light_contamination_with_postamble(self) -> None:
         """Test light contamination with postamble only."""

@@ -30,7 +30,10 @@ from agent_framework._harness import (
     HarnessStatus,
     get_task_complete_tool,
 )
+from agent_framework._harness._state import HarnessLifecycleEvent
+from agent_framework._harness._work_items import WorkItemTaskList
 from agent_framework._harness._compaction import (
+    ChatClientSummarizer,
     InMemoryArtifactStore,
     InMemoryCompactionStore,
     InMemorySummaryCache,
@@ -151,6 +154,8 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False
     )
 
     # Create harness with all features enabled
+    summarizer = ChatClientSummarizer(chat_client)
+    task_list = WorkItemTaskList()
     harness = AgentHarness(
         agent,
         max_turns=max_turns,
@@ -158,12 +163,13 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False
         stall_threshold=3,
         enable_continuation_prompts=True,
         max_continuation_prompts=2,
-        enable_work_items=True,
+        task_list=task_list,
         enable_compaction=True,
         compaction_store=InMemoryCompactionStore(),
         artifact_store=InMemoryArtifactStore(),
         summary_cache=InMemorySummaryCache(max_entries=100),
-        max_input_tokens=100_000,
+        summarizer=summarizer,
+        max_input_tokens=128_000,
         soft_threshold_percent=0.85,
         sandbox_path=str(sandbox_dir),
     )
@@ -201,6 +207,7 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False
 
             if user_input.lower() == "reset":
                 # Create a fresh harness to clear conversation history
+                task_list = WorkItemTaskList()
                 harness = AgentHarness(
                     agent,
                     max_turns=max_turns,
@@ -208,12 +215,13 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False
                     stall_threshold=3,
                     enable_continuation_prompts=True,
                     max_continuation_prompts=2,
-                    enable_work_items=True,
+                    task_list=task_list,
                     enable_compaction=True,
                     compaction_store=InMemoryCompactionStore(),
                     artifact_store=InMemoryArtifactStore(),
                     summary_cache=InMemorySummaryCache(max_entries=100),
-                    max_input_tokens=100_000,
+                    summarizer=summarizer,
+                    max_input_tokens=128_000,
                     soft_threshold_percent=0.85,
                     sandbox_path=str(sandbox_dir),
                 )
@@ -283,6 +291,28 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False
                     debug("  SuperStepStarted")
                     # Could track supersteps if needed
 
+                # Show compaction lifecycle events
+                if isinstance(event, HarnessLifecycleEvent):
+                    if event.event_type == "compaction_started" and event.data:
+                        current = event.data.get("current_tokens", 0)
+                        threshold = event.data.get("soft_threshold", 0)
+                        strategies = event.data.get("strategies_available", [])
+                        via = f" via {'+'.join(strategies)}" if strategies else ""
+                        print()
+                        print_lifecycle(f"Compacting context{via}... ({current:,} tokens, threshold: {threshold:,})")
+                    elif event.event_type == "compaction_completed" and event.data:
+                        before = event.data.get("tokens_before", 0)
+                        after = event.data.get("tokens_after", 0)
+                        freed = event.data.get("tokens_freed", 0)
+                        duration = event.data.get("duration_ms", 0)
+                        level = event.data.get("compaction_level", "")
+                        level_tag = f" [{level}]" if level else ""
+                        print()
+                        print_success(
+                            f"Context compacted{level_tag}: {before:,} → {after:,} tokens "
+                            f"(freed {freed:,} in {duration / 1000:.1f}s)"
+                        )
+
                 # Show agent streaming updates
                 if isinstance(event, AgentRunUpdateEvent):
                     update = event.data
@@ -351,6 +381,23 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False
                         # Show if continuation prompts were used
                         if continuation_count > 0:
                             print_system(f"Used {continuation_count} continuation prompt(s)")
+
+                        # Display work item artifacts
+                        if task_list and task_list.ledger and task_list.ledger.items:
+                            items_with_artifacts = [
+                                (item_id, item)
+                                for item_id, item in task_list.ledger.items.items()
+                                if item.artifact
+                            ]
+                            if items_with_artifacts:
+                                print()
+                                print(f"{Colors.BOLD}📋 Work Item Artifacts ({len(items_with_artifacts)}):{Colors.RESET}")
+                                for item_id, item in items_with_artifacts:
+                                    role_tag = f" [{item.artifact_role.value}]"
+                                    print(f"\n{Colors.CYAN}── [{item_id}] {item.title}{role_tag} ──{Colors.RESET}")
+                                    print(item.artifact)
+                                    print(f"{Colors.DIM}── end [{item_id}] ──{Colors.RESET}")
+                                    debug(f"  Artifact [{item_id}] ({len(item.artifact)} chars):\n{item.artifact}")
 
             debug(f"--- Message #{message_count} completed, total events: {event_count}")
 
