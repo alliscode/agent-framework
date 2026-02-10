@@ -602,3 +602,372 @@ class TestActivityVerbs:
     def test_no_duplicates(self) -> None:
         """Test that there are no duplicate verbs."""
         assert len(ACTIVITY_VERBS) == len(set(ACTIVITY_VERBS))
+
+
+# ============================================================
+# Compaction Visibility Tests (Phase 12)
+# ============================================================
+
+
+class TestMarkdownRendererCompaction:
+    """Tests for compaction event rendering in MarkdownRenderer."""
+
+    def test_compaction_started_format(self) -> None:
+        """Test that compaction_started renders with token counts."""
+        renderer = MarkdownRenderer()
+        data = {"current_tokens": 85000, "soft_threshold": 100000, "tokens_over_threshold": 5000}
+        result = renderer.on_compaction_started(data)
+        assert result is not None
+        assert "⟳" in result
+        assert "Compacting context" in result
+        assert "85,000" in result
+        assert "100,000" in result
+
+    def test_compaction_started_with_strategies(self) -> None:
+        """Test that compaction_started shows available strategies."""
+        renderer = MarkdownRenderer()
+        data = {
+            "current_tokens": 157684,
+            "soft_threshold": 85000,
+            "strategies_available": ["clear", "drop"],
+        }
+        result = renderer.on_compaction_started(data)
+        assert result is not None
+        assert "via clear+drop" in result
+        assert "157,684" in result
+
+    def test_compaction_started_with_summarize_strategy(self) -> None:
+        """Test that compaction_started shows summarize in strategy list."""
+        renderer = MarkdownRenderer()
+        data = {
+            "current_tokens": 100000,
+            "soft_threshold": 85000,
+            "strategies_available": ["clear", "summarize", "drop"],
+        }
+        result = renderer.on_compaction_started(data)
+        assert result is not None
+        assert "via clear+summarize+drop" in result
+
+    def test_compaction_started_no_strategies(self) -> None:
+        """Test that compaction_started works without strategies_available."""
+        renderer = MarkdownRenderer()
+        data = {"current_tokens": 85000, "soft_threshold": 100000}
+        result = renderer.on_compaction_started(data)
+        assert result is not None
+        assert "via" not in result
+        assert "Compacting context..." in result
+
+    def test_compaction_started_zero_values(self) -> None:
+        """Test compaction_started with zero values."""
+        renderer = MarkdownRenderer()
+        data = {"current_tokens": 0, "soft_threshold": 0}
+        result = renderer.on_compaction_started(data)
+        assert result is not None
+        assert "0" in result
+
+    def test_compaction_completed_format(self) -> None:
+        """Test that compaction_completed renders with before/after sizes."""
+        renderer = MarkdownRenderer()
+        data = {
+            "tokens_before": 85000,
+            "tokens_after": 52000,
+            "tokens_freed": 33000,
+            "duration_ms": 2300,
+        }
+        result = renderer.on_compaction_completed(data)
+        assert result is not None
+        assert "✓" in result
+        assert "85,000" in result
+        assert "52,000" in result
+        assert "33,000" in result
+        assert "2.3s" in result
+
+    def test_compaction_completed_with_level(self) -> None:
+        """Test that compaction_completed shows compaction level."""
+        renderer = MarkdownRenderer()
+        data = {
+            "tokens_before": 157684,
+            "tokens_after": 5609,
+            "tokens_freed": 152075,
+            "duration_ms": 0,
+            "strategies_applied": ["clear", "drop"],
+            "compaction_level": "destructive",
+        }
+        result = renderer.on_compaction_completed(data)
+        assert result is not None
+        assert "[destructive]" in result
+        assert "157,684" in result
+        assert "5,609" in result
+
+    def test_compaction_completed_compressed_level(self) -> None:
+        """Test that compaction_completed shows compressed level."""
+        renderer = MarkdownRenderer()
+        data = {
+            "tokens_before": 157684,
+            "tokens_after": 40000,
+            "tokens_freed": 117684,
+            "duration_ms": 3200,
+            "strategies_applied": ["clear", "summarize", "drop"],
+            "compaction_level": "compressed",
+        }
+        result = renderer.on_compaction_completed(data)
+        assert result is not None
+        assert "[compressed]" in result
+        assert "3.2s" in result
+
+    def test_compaction_completed_optimized_level(self) -> None:
+        """Test that compaction_completed shows optimized level."""
+        renderer = MarkdownRenderer()
+        data = {
+            "tokens_before": 85000,
+            "tokens_after": 70000,
+            "tokens_freed": 15000,
+            "duration_ms": 50,
+            "strategies_applied": ["clear"],
+            "compaction_level": "optimized",
+        }
+        result = renderer.on_compaction_completed(data)
+        assert result is not None
+        assert "[optimized]" in result
+
+    def test_compaction_completed_no_level(self) -> None:
+        """Test that compaction_completed works without compaction_level."""
+        renderer = MarkdownRenderer()
+        data = {"tokens_before": 1000, "tokens_after": 800, "tokens_freed": 200, "duration_ms": 0}
+        result = renderer.on_compaction_completed(data)
+        assert result is not None
+        assert "0.0s" in result
+        # No level tag when not provided
+        assert "[" not in result
+
+
+class TestPassthroughRendererCompaction:
+    """Tests for compaction event suppression in PassthroughRenderer."""
+
+    def test_compaction_started_suppressed(self) -> None:
+        """Test that compaction_started returns None."""
+        renderer = PassthroughRenderer()
+        data = {"current_tokens": 85000, "soft_threshold": 100000}
+        assert renderer.on_compaction_started(data) is None
+
+    def test_compaction_completed_suppressed(self) -> None:
+        """Test that compaction_completed returns None."""
+        renderer = PassthroughRenderer()
+        data = {"tokens_before": 85000, "tokens_after": 52000, "tokens_freed": 33000, "duration_ms": 2300}
+        assert renderer.on_compaction_completed(data) is None
+
+
+class TestRenderStreamCompaction:
+    """Tests for compaction event routing in render_stream."""
+
+    @pytest.fixture
+    def mock_harness(self):
+        """Create a mock harness that yields controlled events."""
+
+        class MockHarness:
+            def __init__(self, events: list):
+                self._events = events
+
+            async def run_stream(self, message, **kwargs):
+                for event in self._events:
+                    yield event
+
+        return MockHarness
+
+    @pytest.mark.asyncio
+    async def test_compaction_started_injected_for_markdown(self, mock_harness) -> None:
+        """Test that compaction_started injects text with MarkdownRenderer."""
+        from agent_framework._workflows._events import AgentRunUpdateEvent
+
+        events = [
+            HarnessLifecycleEvent(
+                event_type="compaction_started",
+                data={
+                    "current_tokens": 85000,
+                    "soft_threshold": 100000,
+                    "tokens_over_threshold": 5000,
+                    "strategies_available": ["clear", "drop"],
+                },
+            ),
+        ]
+        harness = mock_harness(events)
+        renderer = MarkdownRenderer()
+
+        collected = []
+        async for event in render_stream(harness, "test", renderer):
+            collected.append(event)
+
+        text_events = [
+            e
+            for e in collected
+            if isinstance(e, AgentRunUpdateEvent) and e.data and hasattr(e.data, "text") and e.data.text
+        ]
+        assert len(text_events) == 1
+        assert "85,000" in text_events[0].data.text
+        assert "Compacting" in text_events[0].data.text
+        assert "via clear+drop" in text_events[0].data.text
+
+    @pytest.mark.asyncio
+    async def test_compaction_completed_injected_for_markdown(self, mock_harness) -> None:
+        """Test that compaction_completed injects text with MarkdownRenderer."""
+        from agent_framework._workflows._events import AgentRunUpdateEvent
+
+        events = [
+            HarnessLifecycleEvent(
+                event_type="compaction_completed",
+                data={
+                    "tokens_before": 85000,
+                    "tokens_after": 52000,
+                    "tokens_freed": 33000,
+                    "duration_ms": 2300,
+                    "strategies_applied": ["clear", "drop"],
+                    "compaction_level": "destructive",
+                },
+            ),
+        ]
+        harness = mock_harness(events)
+        renderer = MarkdownRenderer()
+
+        collected = []
+        async for event in render_stream(harness, "test", renderer):
+            collected.append(event)
+
+        text_events = [
+            e
+            for e in collected
+            if isinstance(e, AgentRunUpdateEvent) and e.data and hasattr(e.data, "text") and e.data.text
+        ]
+        assert len(text_events) == 1
+        assert "52,000" in text_events[0].data.text
+        assert "33,000" in text_events[0].data.text
+        assert "[destructive]" in text_events[0].data.text
+
+    @pytest.mark.asyncio
+    async def test_compaction_events_suppressed_for_passthrough(self, mock_harness) -> None:
+        """Test that compaction events don't inject text for PassthroughRenderer."""
+        from agent_framework._workflows._events import AgentRunUpdateEvent
+
+        events = [
+            HarnessLifecycleEvent(
+                event_type="compaction_started",
+                data={"current_tokens": 85000, "soft_threshold": 100000},
+            ),
+            HarnessLifecycleEvent(
+                event_type="compaction_completed",
+                data={"tokens_before": 85000, "tokens_after": 52000, "tokens_freed": 33000, "duration_ms": 2300},
+            ),
+        ]
+        harness = mock_harness(events)
+        renderer = PassthroughRenderer()
+
+        collected = []
+        async for event in render_stream(harness, "test", renderer):
+            collected.append(event)
+
+        text_events = [
+            e
+            for e in collected
+            if isinstance(e, AgentRunUpdateEvent) and e.data and hasattr(e.data, "text") and e.data.text
+        ]
+        assert len(text_events) == 0
+
+        # But lifecycle events should still pass through
+        lifecycle = [e for e in collected if isinstance(e, HarnessLifecycleEvent)]
+        assert len(lifecycle) == 2
+
+    @pytest.mark.asyncio
+    async def test_compaction_lifecycle_events_always_passed_through(self, mock_harness) -> None:
+        """Test that compaction lifecycle events are always yielded."""
+        events = [
+            HarnessLifecycleEvent(
+                event_type="compaction_started",
+                data={"current_tokens": 85000, "soft_threshold": 100000},
+            ),
+            HarnessLifecycleEvent(
+                event_type="compaction_completed",
+                data={"tokens_before": 85000, "tokens_after": 52000, "tokens_freed": 33000, "duration_ms": 2300},
+            ),
+        ]
+        harness = mock_harness(events)
+        renderer = MarkdownRenderer()
+
+        collected = []
+        async for event in render_stream(harness, "test", renderer):
+            collected.append(event)
+
+        lifecycle = [e for e in collected if isinstance(e, HarnessLifecycleEvent)]
+        assert len(lifecycle) == 2
+        assert lifecycle[0].event_type == "compaction_started"
+        assert lifecycle[1].event_type == "compaction_completed"
+
+    @pytest.mark.asyncio
+    async def test_compaction_works_with_renderer_lacking_methods(self, mock_harness) -> None:
+        """Test that renderers without compaction methods don't cause errors."""
+
+        class MinimalRenderer:
+            def on_turn_started(self, turn_number):
+                return None
+
+            def on_deliverables_updated(self, data):
+                return None
+
+            def on_result(self, result):
+                return None
+
+            def on_text(self, text):
+                return text
+
+        events = [
+            HarnessLifecycleEvent(
+                event_type="compaction_started",
+                data={"current_tokens": 85000, "soft_threshold": 100000},
+            ),
+            HarnessLifecycleEvent(
+                event_type="compaction_completed",
+                data={"tokens_before": 85000, "tokens_after": 52000, "tokens_freed": 33000, "duration_ms": 2300},
+            ),
+        ]
+        harness = mock_harness(events)
+        renderer = MinimalRenderer()
+
+        collected = []
+        async for event in render_stream(harness, "test", renderer):
+            collected.append(event)
+
+        # Should not crash; lifecycle events still passed through
+        lifecycle = [e for e in collected if isinstance(e, HarnessLifecycleEvent)]
+        assert len(lifecycle) == 2
+
+
+class TestClassifyCompactionLevel:
+    """Tests for compaction level classification."""
+
+    def test_destructive_clear_and_drop(self) -> None:
+        """Test that clear+drop is classified as destructive."""
+        from agent_framework._harness._agent_turn_executor import _classify_compaction_level
+
+        assert _classify_compaction_level(["clear", "drop"]) == "destructive"
+
+    def test_compressed_with_summarize(self) -> None:
+        """Test that summarize presence is classified as compressed."""
+        from agent_framework._harness._agent_turn_executor import _classify_compaction_level
+
+        assert _classify_compaction_level(["clear", "summarize", "drop"]) == "compressed"
+
+    def test_compressed_summarize_only(self) -> None:
+        """Test that summarize alone is classified as compressed."""
+        from agent_framework._harness._agent_turn_executor import _classify_compaction_level
+
+        assert _classify_compaction_level(["summarize"]) == "compressed"
+
+    def test_optimized_clear_only(self) -> None:
+        """Test that clear only is classified as optimized."""
+        from agent_framework._harness._agent_turn_executor import _classify_compaction_level
+
+        assert _classify_compaction_level(["clear"]) == "optimized"
+
+    def test_optimized_empty(self) -> None:
+        """Test that no strategies is classified as optimized."""
+        from agent_framework._harness._agent_turn_executor import _classify_compaction_level
+
+        assert _classify_compaction_level([]) == "optimized"

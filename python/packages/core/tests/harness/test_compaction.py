@@ -279,7 +279,7 @@ class TestTokenBudgetV2:
         """Test default budget values."""
         budget = TokenBudgetV2()
 
-        assert budget.max_input_tokens == 100_000
+        assert budget.max_input_tokens == 128_000
         assert budget.soft_threshold_percent == 0.85
         assert budget.safety_buffer_tokens == 500
 

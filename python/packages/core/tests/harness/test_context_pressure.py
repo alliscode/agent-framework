@@ -41,12 +41,12 @@ def test_token_budget_defaults() -> None:
     """Test that TokenBudget has sensible defaults."""
     budget = TokenBudget()
 
-    assert budget.max_input_tokens == 100000
+    assert budget.max_input_tokens == 128000
     assert budget.soft_threshold_percent == 0.80
     assert budget.blocking_threshold_percent == 0.95
     assert budget.current_estimate == 0
-    assert budget.soft_threshold == 80000
-    assert budget.blocking_threshold == 95000
+    assert budget.soft_threshold == 102400
+    assert budget.blocking_threshold == 121600
     assert not budget.is_under_pressure
     assert not budget.is_blocking
     assert budget.tokens_over_threshold == 0
