@@ -9,6 +9,7 @@ These tests cover:
 - CompactionComplete.blocking signal
 """
 
+import json
 from collections.abc import AsyncIterable
 from dataclasses import dataclass
 from typing import Any
@@ -389,8 +390,6 @@ async def test_compaction_executor_signals_nonblocking_at_soft_threshold() -> No
 # ============================================================================
 # Phase 4e — ChatClientSummarizer Tests
 # ============================================================================
-
-import json
 
 
 class FakeChatResponse:

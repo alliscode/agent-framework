@@ -55,6 +55,7 @@ from ._compaction import (
     # Adapter types
     CacheMessageStore,
     CacheThreadAdapter,
+    ChatClientSummarizer,
     ClearRecord,
     # Strategy types
     ClearStrategy,
@@ -117,7 +118,6 @@ from ._compaction import (
     SummarizeStrategy,
     SummaryCache,
     SummaryCacheKey,
-    ChatClientSummarizer,
     TiktokenTokenizer,
     ToolCall,
     ToolDurability,
@@ -180,7 +180,14 @@ from ._context_pressure import (
 from ._context_pressure_executor import ContextPressureComplete, ContextPressureExecutor
 from ._context_providers import EnvironmentContextProvider, HarnessGuidanceProvider
 from ._contract_verifier import ContractVerificationResult, ContractVerifier, VerificationResult
-from ._done_tool import TASK_COMPLETE_TOOL_NAME, WORK_COMPLETE_TOOL_NAME, get_task_complete_tool, get_work_complete_tool, task_complete, work_complete
+from ._done_tool import (
+    TASK_COMPLETE_TOOL_NAME,
+    WORK_COMPLETE_TOOL_NAME,
+    get_task_complete_tool,
+    get_work_complete_tool,
+    task_complete,
+    work_complete,
+)
 from ._harness_builder import AgentHarness, HarnessWorkflowBuilder
 from ._hooks import (
     AgentStopEvent,
@@ -257,9 +264,10 @@ __all__ = [
     # Core types
     "COMPACTION_PRECEDENCE",
     "COMPACTION_RENDER_FORMAT_VERSION",
+    "DEFAULT_BLOCKING_THRESHOLD_PERCENT",
     # Durability types
     "DEFAULT_DURABILITY_POLICIES",
-    "DEFAULT_BLOCKING_THRESHOLD_PERCENT",
+    "DEFAULT_JIT_INSTRUCTIONS",
     # Constants
     "DEFAULT_MAX_INPUT_TOKENS",
     "DEFAULT_MAX_TURNS",
@@ -284,8 +292,8 @@ __all__ = [
     "SUMMARY_RENDER_VERSION",
     # Done signaling tool
     "TASK_COMPLETE_TOOL_NAME",
-    "WORK_COMPLETE_TOOL_NAME",
     "TIKTOKEN_AVAILABLE",
+    "WORK_COMPLETE_TOOL_NAME",
     # Task contract types (Phase 3)
     "AcceptabilityCriteria",
     # Main API
@@ -307,6 +315,7 @@ __all__ = [
     "CacheEntry",
     "CacheMessageStore",
     "CacheThreadAdapter",
+    "ChatClientSummarizer",
     # Context pressure types (Phase 2)
     "ClearEdit",
     "ClearRecord",
@@ -336,7 +345,6 @@ __all__ = [
     "CompactionStore",
     "CompactionStrategy",
     "CompactionTransaction",
-    "ChatClientSummarizer",
     "CompletionReport",
     "CompositeEventEmitter",
     "ContentClearedEvent",
@@ -382,7 +390,6 @@ __all__ = [
     "JitContext",
     "JitInstruction",
     "JitInstructionProcessor",
-    "DEFAULT_JIT_INSTRUCTIONS",
     "LoggingEventEmitter",
     "MarkdownRenderer",
     "MetricsCollector",
@@ -392,9 +399,9 @@ __all__ = [
     "PassthroughRenderer",
     "PendingToolCall",
     "PostToolHook",
+    "PreToolHook",
     "Predicate",
     "PredicateType",
-    "PreToolHook",
     "ProgressFingerprint",
     "ProgressTracker",
     "PromptRenderer",
@@ -461,8 +468,8 @@ __all__ = [
     "format_work_item_reminder",
     "get_default_strategies",
     "get_task_complete_tool",
-    "get_work_complete_tool",
     "get_tokenizer",
+    "get_work_complete_tool",
     "render_externalization_text",
     "render_stream",
     "render_summary_text",

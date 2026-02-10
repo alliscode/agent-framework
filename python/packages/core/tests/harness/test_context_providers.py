@@ -43,7 +43,7 @@ class TestEnvironmentContextProvider:
         sandbox = str(tmp_path)
         # Create test files
         for name in ["alpha.txt", "beta.py", "gamma.md"]:
-            open(os.path.join(sandbox, name), "w").close()
+            os.close(os.open(os.path.join(sandbox, name), os.O_CREAT | os.O_WRONLY))
 
         provider = EnvironmentContextProvider(sandbox_path=sandbox)
         context = await provider.invoking([])
@@ -58,7 +58,7 @@ class TestEnvironmentContextProvider:
         """Only max_entries directory entries are included."""
         sandbox = str(tmp_path)
         for i in range(10):
-            open(os.path.join(sandbox, f"file_{i:02d}.txt"), "w").close()
+            os.close(os.open(os.path.join(sandbox, f"file_{i:02d}.txt"), os.O_CREAT | os.O_WRONLY))
 
         provider = EnvironmentContextProvider(sandbox_path=sandbox, max_entries=3)
         context = await provider.invoking([])

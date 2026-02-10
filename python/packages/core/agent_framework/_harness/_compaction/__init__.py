@@ -167,9 +167,6 @@ from ._types import (
 )
 
 __all__ = [
-    # Adapter types
-    "CacheMessageStore",
-    "CacheThreadAdapter",
     # Constants
     "COMPACTION_PRECEDENCE",
     "COMPACTION_RENDER_FORMAT_VERSION",
@@ -187,6 +184,9 @@ __all__ = [
     "ArtifactStore",
     "ArtifactStoreEntry",
     "CacheEntry",
+    # Adapter types
+    "CacheMessageStore",
+    "CacheThreadAdapter",
     "ChatClientSummarizer",
     "ClearRecord",
     "ClearStrategy",

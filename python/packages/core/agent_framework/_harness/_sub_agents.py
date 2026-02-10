@@ -145,5 +145,7 @@ def create_document_tool(
             "Do NOT use for: quick questions (use explore) or running commands (use run_task)."
         ),
         arg_name="prompt",
-        arg_description="The documentation request including topic, scope, target files/directories, and output file path.",
+        arg_description=(
+            "The documentation request including topic, scope, target files/directories, and output file path."
+        ),
     )
