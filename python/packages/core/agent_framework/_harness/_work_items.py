@@ -87,7 +87,6 @@ def _is_narration_line(line: str, patterns: list[re.Pattern[str]]) -> bool:
     return any(p.search(line) for p in patterns)
 
 
-
 def _find_narration_lines(
     lines: list[str],
 ) -> tuple[list[int], list[int], list[int]]:

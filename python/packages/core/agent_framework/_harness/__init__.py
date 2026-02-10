@@ -117,6 +117,7 @@ from ._compaction import (
     SummarizeStrategy,
     SummaryCache,
     SummaryCacheKey,
+    ChatClientSummarizer,
     TiktokenTokenizer,
     ToolCall,
     ToolDurability,
@@ -179,7 +180,7 @@ from ._context_pressure import (
 from ._context_pressure_executor import ContextPressureComplete, ContextPressureExecutor
 from ._context_providers import EnvironmentContextProvider, HarnessGuidanceProvider
 from ._contract_verifier import ContractVerificationResult, ContractVerifier, VerificationResult
-from ._done_tool import TASK_COMPLETE_TOOL_NAME, get_task_complete_tool, task_complete
+from ._done_tool import TASK_COMPLETE_TOOL_NAME, WORK_COMPLETE_TOOL_NAME, get_task_complete_tool, get_work_complete_tool, task_complete, work_complete
 from ._harness_builder import AgentHarness, HarnessWorkflowBuilder
 from ._hooks import (
     AgentStopEvent,
@@ -190,6 +191,12 @@ from ._hooks import (
     PostToolHook,
     PreToolHook,
     ToolHookResult,
+)
+from ._jit_instructions import (
+    DEFAULT_JIT_INSTRUCTIONS,
+    JitContext,
+    JitInstruction,
+    JitInstructionProcessor,
 )
 from ._renderers import (
     ACTIVITY_VERBS,
@@ -277,6 +284,7 @@ __all__ = [
     "SUMMARY_RENDER_VERSION",
     # Done signaling tool
     "TASK_COMPLETE_TOOL_NAME",
+    "WORK_COMPLETE_TOOL_NAME",
     "TIKTOKEN_AVAILABLE",
     # Task contract types (Phase 3)
     "AcceptabilityCriteria",
@@ -328,6 +336,7 @@ __all__ = [
     "CompactionStore",
     "CompactionStrategy",
     "CompactionTransaction",
+    "ChatClientSummarizer",
     "CompletionReport",
     "CompositeEventEmitter",
     "ContentClearedEvent",
@@ -369,6 +378,11 @@ __all__ = [
     "InMemoryArtifactStore",
     "InMemoryCompactionStore",
     "InMemorySummaryCache",
+    # JIT instructions (Phase 7)
+    "JitContext",
+    "JitInstruction",
+    "JitInstructionProcessor",
+    "DEFAULT_JIT_INSTRUCTIONS",
     "LoggingEventEmitter",
     "MarkdownRenderer",
     "MetricsCollector",
@@ -447,6 +461,7 @@ __all__ = [
     "format_work_item_reminder",
     "get_default_strategies",
     "get_task_complete_tool",
+    "get_work_complete_tool",
     "get_tokenizer",
     "render_externalization_text",
     "render_stream",
@@ -454,4 +469,5 @@ __all__ = [
     "task_complete",
     "validate_artifact_content",
     "validate_control_artifact",
+    "work_complete",
 ]

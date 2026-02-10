@@ -178,11 +178,11 @@ class TestSubAgentGuidance:
 
     @pytest.mark.asyncio
     async def test_task_completion_always_present(self) -> None:
-        """Task completion instructions are present regardless of sub-agent setting."""
+        """Work completion instructions are present regardless of sub-agent setting."""
         for flag in (True, False):
             provider = HarnessGuidanceProvider(enable_sub_agents=flag)
             context = await provider.invoking([])
-            assert "<task_completion>" in context.instructions
+            assert "<work_completion>" in context.instructions
 
 
 # ---------------------------------------------------------------------------

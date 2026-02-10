@@ -73,7 +73,7 @@ DEFAULT_JIT_INSTRUCTIONS: list[JitInstruction] = [
         id="approaching_turn_limit",
         instruction=(
             "You are approaching the turn limit. Prioritize completing your "
-            "most important remaining work items and call task_complete."
+            "most important remaining work items and call work_complete."
         ),
         condition=lambda ctx: ctx.turn >= int(ctx.max_turns * 0.8),
     ),

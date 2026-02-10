@@ -413,7 +413,7 @@ async def test_stop_decision_with_contract_verification_satisfied() -> None:
             turn = (turn or 0) + 1
             await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, turn)
             # Signal done
-            await ctx.send_message(TurnComplete(agent_done=True, called_task_complete=True))
+            await ctx.send_message(TurnComplete(agent_done=True, called_work_complete=True))
 
     class SetupExecutor(Executor):
         @handler

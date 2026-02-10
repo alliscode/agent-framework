@@ -98,26 +98,34 @@ class HarnessGuidanceProvider(ContextProvider):
         "   in work items' — the user wants to SEE the answer, not be told where it is.\n"
         "   Show the full deliverable inline unless it's very large (5KB+), in which case\n"
         "   write it to a file and provide a summary.\n"
-        "5. Your final message before task_complete should contain the deliverable itself\n"
+        "5. Your final message before work_complete should contain the deliverable itself\n"
         "   or a clear summary if a file was written.\n"
         "</response_style>"
     )
 
-    TASK_COMPLETION_INSTRUCTIONS = (
-        "<task_completion>\n"
-        "* A task is not complete until the expected outcome is verified and persistent\n"
-        "* After making changes, validate they work correctly\n"
-        "* If an initial approach fails, try alternative tools or methods before concluding\n"
-        "* You MUST call task_complete when finished — do not just stop responding\n"
-        "* Only call task_complete after all work items are done and deliverables are produced\n"
-        "</task_completion>"
+    WORK_COMPLETION_INSTRUCTIONS = (
+        "<work_completion>\n"
+        "Finishing a request means actively calling the work_complete tool — simply\n"
+        "stopping your response is not enough.\n\n"
+        "Before calling work_complete, confirm each of these:\n"
+        "  - Every work item has been addressed and its deliverable produced.\n"
+        "  - Changes have been validated (tests pass, output looks correct).\n"
+        "  - If an approach failed, you pivoted to an alternative rather than giving up.\n\n"
+        "Hold off on calling work_complete if:\n"
+        "  - You hit an unresolved error — try another path first.\n"
+        "  - Steps remain that you have not yet executed.\n"
+        "  - You are waiting on input or clarification from the user.\n"
+        "  - You have not verified that your changes actually work.\n\n"
+        "When you do call work_complete, include a summary that states what was\n"
+        "delivered, which items were completed, and any caveats the user should know.\n"
+        "</work_completion>"
     )
 
     SUB_AGENT_GUIDANCE = (
         "<sub_agents>\n"
         "You have access to specialized sub-agents:\n"
-        "- explore(prompt): Fast codebase Q&A (cheap model, <300 word answers, parallel-safe)\n"
-        "- run_task(prompt): Execute commands — builds, tests, linting (brief success, verbose failure)\n"
+        "- explore(prompt): Fast codebase Q&A (cheap model, returns focused summaries, parallel-safe)\n"
+        "- run_task(prompt): Execute commands — builds, tests, linting (quiet on success, detailed on errors)\n"
         "- document(prompt): Produce comprehensive technical documents (reads files in fresh context)\n\n"
         "Use explore proactively for codebase questions before making changes.\n"
         "PARALLEL RESEARCH: When you've identified multiple files or modules to investigate,\n"
@@ -179,6 +187,6 @@ class HarnessGuidanceProvider(ContextProvider):
 
         # Response style and task completion instructions are always included
         sections.append(self.RESPONSE_STYLE_GUIDANCE)
-        sections.append(self.TASK_COMPLETION_INSTRUCTIONS)
+        sections.append(self.WORK_COMPLETION_INSTRUCTIONS)
 
         return Context(instructions="\n\n".join(sections))

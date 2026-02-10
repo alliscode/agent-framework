@@ -46,12 +46,12 @@ class AgentStopEvent:
     Attributes:
         turn_count: The current turn number.
         tool_usage: Mapping of tool name → call count for the session.
-        called_task_complete: Whether the agent called task_complete.
+        called_work_complete: Whether the agent called work_complete.
     """
 
     turn_count: int = 0
     tool_usage: dict[str, int] = field(default_factory=dict)
-    called_task_complete: bool = False
+    called_work_complete: bool = False
 
 
 @dataclass

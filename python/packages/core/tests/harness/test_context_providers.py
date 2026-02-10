@@ -100,8 +100,8 @@ class TestHarnessGuidanceProvider:
         context = await provider.invoking([])
 
         assert context.instructions is not None
-        assert "<task_completion>" in context.instructions
-        assert "task_complete" in context.instructions
+        assert "<work_completion>" in context.instructions
+        assert "work_complete" in context.instructions
 
     @pytest.mark.asyncio
     async def test_always_includes_response_style(self) -> None:
@@ -160,7 +160,7 @@ class TestHarnessGuidanceProvider:
         assert context.instructions is not None
         assert "TOOL STRATEGY GUIDE" in context.instructions
         assert "work_item_add" in context.instructions
-        assert "<task_completion>" in context.instructions
+        assert "<work_completion>" in context.instructions
 
 
 class TestContextProviderIntegration:
@@ -181,7 +181,7 @@ class TestContextProviderIntegration:
         assert sandbox in context.instructions
         # Guidance
         assert "TOOL STRATEGY GUIDE" in context.instructions
-        assert "<task_completion>" in context.instructions
+        assert "<work_completion>" in context.instructions
         assert "<response_style>" in context.instructions
 
     @pytest.mark.asyncio

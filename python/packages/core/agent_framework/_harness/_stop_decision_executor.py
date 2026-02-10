@@ -65,7 +65,7 @@ class StopDecisionExecutor(Executor):
         enable_contract_verification: bool = False,
         enable_stall_detection: bool = False,
         enable_work_item_verification: bool = False,
-        require_task_complete: bool = True,
+        require_work_complete: bool = True,
         stall_threshold: int = DEFAULT_STALL_THRESHOLD,
         hooks: "HarnessHooks | None" = None,
         id: str = "harness_stop_decision",
@@ -76,7 +76,7 @@ class StopDecisionExecutor(Executor):
             enable_contract_verification: Whether to verify contracts before stopping.
             enable_stall_detection: Whether to detect stalled progress.
             enable_work_item_verification: Whether to verify work items before stopping.
-            require_task_complete: Whether to require explicit task_complete call before stopping.
+            require_work_complete: Whether to require explicit work_complete call before stopping.
             stall_threshold: Number of unchanged turns before stall detection.
             hooks: Optional harness hooks for agent-stop interception.
             id: Unique identifier for this executor.
@@ -85,7 +85,7 @@ class StopDecisionExecutor(Executor):
         self._enable_contract_verification = enable_contract_verification
         self._enable_stall_detection = enable_stall_detection
         self._enable_work_item_verification = enable_work_item_verification
-        self._require_task_complete = require_task_complete
+        self._require_work_complete = require_work_complete
         self._stall_threshold = stall_threshold
         self._hooks = hooks
 
@@ -146,16 +146,16 @@ class StopDecisionExecutor(Executor):
 
         # Layer 3: Agent signals done - with optional contract verification
         if turn_result.agent_done:
-            # 3-pre: Require explicit task_complete call
-            if self._require_task_complete and not turn_result.called_task_complete:
-                logger.info("StopDecisionExecutor: Agent signaled done but did not call task_complete")
+            # 3-pre: Require explicit work_complete call
+            if self._require_work_complete and not turn_result.called_work_complete:
+                logger.info("StopDecisionExecutor: Agent signaled done but did not call work_complete")
                 await self._append_event(
                     ctx,
                     HarnessEvent(
                         event_type="stop_decision",
                         data={
                             "decision": "continue",
-                            "reason": "task_complete_not_called",
+                            "reason": "work_complete_not_called",
                             "turn": turn_count,
                         },
                     ),
@@ -436,7 +436,7 @@ class StopDecisionExecutor(Executor):
 
         event = AgentStopEvent(
             turn_count=turn_count,
-            called_task_complete=turn_result.called_task_complete,
+            called_work_complete=turn_result.called_work_complete,
         )
 
         for hook in self._hooks.agent_stop:  # type: ignore[union-attr]

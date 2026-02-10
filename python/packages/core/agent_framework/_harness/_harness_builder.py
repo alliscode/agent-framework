@@ -36,6 +36,7 @@ if TYPE_CHECKING:
         SummaryCache,
     )
     from ._hooks import HarnessHooks
+    from ._jit_instructions import JitInstruction
     from ._task_contract import TaskContract
     from ._work_items import WorkItemTaskListProtocol
 
@@ -111,6 +112,8 @@ class HarnessWorkflowBuilder:
         # Phase 5: Sub-agent delegation
         sub_agent_client: "ChatClientProtocol | None" = None,
         sub_agent_tools: "Sequence[ToolProtocol | Callable[..., Any]] | None" = None,
+        # Phase 7: JIT instructions
+        jit_instructions: "list[JitInstruction] | None" = None,
     ):
         """Initialize the HarnessWorkflowBuilder.
 
@@ -120,7 +123,7 @@ class HarnessWorkflowBuilder:
             max_turns: Maximum number of agent turns before stopping. Default is 50.
             checkpoint_storage: Optional checkpoint storage for durability.
             enable_context_pressure: Whether to enable legacy context pressure management.
-            max_input_tokens: Maximum input tokens for context pressure/compaction. Default is 100000.
+            max_input_tokens: Maximum input tokens for context pressure/compaction. Default is 128000.
             soft_threshold_percent: Percentage at which to trigger compaction. Default is 0.85.
             enable_compaction: Whether to enable production compaction (preferred over context_pressure).
             compaction_store: Injectable store for compaction plans. Defaults to in-memory.
@@ -148,6 +151,7 @@ class HarnessWorkflowBuilder:
             sub_agent_client: Optional chat client for sub-agents (ideally a fast/cheap model).
                 When provided, explore and run_task sub-agent tools are created and injected.
             sub_agent_tools: Optional tools to give sub-agents. When None, sub-agents get no tools.
+            jit_instructions: Optional custom JIT instructions. Defaults to built-in set.
         """
         self._agent = agent
         self._agent_thread = agent_thread
@@ -189,6 +193,9 @@ class HarnessWorkflowBuilder:
                 create_task_tool(sub_agent_client, agent_tools),
                 create_document_tool(sub_agent_client, agent_tools),
             ]
+
+        # Phase 7: JIT instructions
+        self._jit_instructions = jit_instructions
 
         # Phase 2: Wire context providers for rich system prompt
         self._wire_context_providers(
@@ -355,6 +362,9 @@ class HarnessWorkflowBuilder:
         enable_compact = self._enable_compaction
         hooks = self._hooks
         sub_agent_tools = self._sub_agent_tools
+        jit_instructions = self._jit_instructions
+        turn_summarizer = self._summarizer
+        turn_artifact_store = self._artifact_store
 
         builder.register_executor(
             lambda: AgentTurnExecutor(
@@ -364,9 +374,12 @@ class HarnessWorkflowBuilder:
                 max_continuation_prompts=max_cont,
                 continuation_prompt=cont_prompt,
                 enable_compaction=enable_compact,
+                summarizer=turn_summarizer,
+                artifact_store=turn_artifact_store,
                 task_list=task_list,
                 hooks=hooks,
                 sub_agent_tools=sub_agent_tools,
+                jit_instructions=jit_instructions,
                 id="harness_agent_turn",
             ),
             name="agent_turn",
@@ -381,7 +394,7 @@ class HarnessWorkflowBuilder:
                 enable_contract_verification=enable_contract_verification,
                 enable_stall_detection=self._enable_stall_detection,
                 enable_work_item_verification=enable_work_item_verification,
-                require_task_complete=True,
+                require_work_complete=True,
                 stall_threshold=self._stall_threshold,
                 hooks=hooks,
                 id="harness_stop_decision",
@@ -506,6 +519,8 @@ class AgentHarness:
         # Phase 5: Sub-agent delegation
         sub_agent_client: "ChatClientProtocol | None" = None,
         sub_agent_tools: "Sequence[ToolProtocol | Callable[..., Any]] | None" = None,
+        # Phase 7: JIT instructions
+        jit_instructions: "list[JitInstruction] | None" = None,
     ):
         """Initialize the AgentHarness.
 
@@ -515,7 +530,7 @@ class AgentHarness:
             max_turns: Maximum number of agent turns before stopping. Default is 50.
             checkpoint_storage: Optional checkpoint storage for durability.
             enable_context_pressure: Whether to enable legacy context pressure management.
-            max_input_tokens: Maximum input tokens for context pressure/compaction. Default is 100000.
+            max_input_tokens: Maximum input tokens for context pressure/compaction. Default is 128000.
             soft_threshold_percent: Percentage at which to trigger compaction. Default is 0.85.
             enable_compaction: Whether to enable production compaction (preferred over context_pressure).
             compaction_store: Injectable store for compaction plans. Defaults to in-memory.
@@ -543,6 +558,7 @@ class AgentHarness:
             sub_agent_client: Optional chat client for sub-agents (ideally a fast/cheap model).
                 When provided, explore and run_task sub-agent tools are created and injected.
             sub_agent_tools: Optional tools to give sub-agents. When None, sub-agents get no tools.
+            jit_instructions: Optional custom JIT instructions. Defaults to built-in set.
         """
         self._builder = HarnessWorkflowBuilder(
             agent,
@@ -572,6 +588,7 @@ class AgentHarness:
             hooks=hooks,
             sub_agent_client=sub_agent_client,
             sub_agent_tools=sub_agent_tools,
+            jit_instructions=jit_instructions,
         )
         self._workflow: Workflow | None = None
         self._harness_kwargs = self._builder.get_harness_kwargs()

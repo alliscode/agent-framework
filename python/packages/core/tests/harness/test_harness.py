@@ -251,7 +251,7 @@ async def test_stop_decision_stops_on_agent_done() -> None:
             turn = (turn or 0) + 1
             await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, turn)
             # Signal done on first turn
-            await ctx.send_message(TurnComplete(agent_done=True, called_task_complete=True))
+            await ctx.send_message(TurnComplete(agent_done=True, called_work_complete=True))
 
     workflow = (
         WorkflowBuilder()

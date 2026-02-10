@@ -190,6 +190,8 @@ class HarnessLifecycleEvent(WorkflowEvent):
             "continuation_prompt",
             "stall_detected",
             "context_pressure",
+            "compaction_started",
+            "compaction_completed",
             "deliverables_updated",
             "harness_completed",
             "work_item_changed",
@@ -262,10 +264,10 @@ class TurnComplete:
 
     Attributes:
         agent_done: Whether the agent signaled it has completed its task.
-        called_task_complete: Whether the agent explicitly called the task_complete tool.
+        called_work_complete: Whether the agent explicitly called the work_complete tool.
         error: Optional error message if the turn failed.
     """
 
     agent_done: bool = False
-    called_task_complete: bool = False
+    called_work_complete: bool = False
     error: str | None = None

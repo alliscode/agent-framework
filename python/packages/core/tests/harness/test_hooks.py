@@ -232,7 +232,7 @@ class TestAgentStopDataclasses:
         event = AgentStopEvent()
         assert event.turn_count == 0
         assert event.tool_usage == {}
-        assert event.called_task_complete is False
+        assert event.called_work_complete is False
 
     def test_stop_result_allow_by_default(self) -> None:
         result = AgentStopResult()
@@ -299,8 +299,8 @@ class TestStopDecisionAgentStopHooks:
             async def handle(self, trigger: RepairComplete, ctx: WorkflowContext[TurnComplete]) -> None:
                 turn_count = (await ctx.get_shared_state(HARNESS_TURN_COUNT_KEY) or 0) + 1
                 await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, turn_count)
-                # Signal done with task_complete
-                await ctx.send_message(TurnComplete(agent_done=True, called_task_complete=True))
+                # Signal done with work_complete
+                await ctx.send_message(TurnComplete(agent_done=True, called_work_complete=True))
 
         workflow = (
             WorkflowBuilder()
@@ -308,7 +308,7 @@ class TestStopDecisionAgentStopHooks:
             .register_executor(lambda: MockAgent(id="agent"), name="agent")
             .register_executor(
                 lambda: StopDecisionExecutor(
-                    require_task_complete=True,
+                    require_work_complete=True,
                     hooks=hooks,
                     id="stop",
                 ),
@@ -346,7 +346,7 @@ class TestStopDecisionAgentStopHooks:
             async def handle(self, trigger: RepairComplete, ctx: WorkflowContext[TurnComplete]) -> None:
                 turn_count = (await ctx.get_shared_state(HARNESS_TURN_COUNT_KEY) or 0) + 1
                 await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, turn_count)
-                await ctx.send_message(TurnComplete(agent_done=True, called_task_complete=True))
+                await ctx.send_message(TurnComplete(agent_done=True, called_work_complete=True))
 
         workflow = (
             WorkflowBuilder()
@@ -354,7 +354,7 @@ class TestStopDecisionAgentStopHooks:
             .register_executor(lambda: MockAgent(id="agent"), name="agent")
             .register_executor(
                 lambda: StopDecisionExecutor(
-                    require_task_complete=True,
+                    require_work_complete=True,
                     hooks=hooks,
                     id="stop",
                 ),
@@ -386,7 +386,7 @@ class TestStopDecisionAgentStopHooks:
             async def handle(self, trigger: RepairComplete, ctx: WorkflowContext[TurnComplete]) -> None:
                 turn_count = (await ctx.get_shared_state(HARNESS_TURN_COUNT_KEY) or 0) + 1
                 await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, turn_count)
-                await ctx.send_message(TurnComplete(agent_done=True, called_task_complete=True))
+                await ctx.send_message(TurnComplete(agent_done=True, called_work_complete=True))
 
         workflow = (
             WorkflowBuilder()
@@ -394,7 +394,7 @@ class TestStopDecisionAgentStopHooks:
             .register_executor(lambda: MockAgent(id="agent"), name="agent")
             .register_executor(
                 lambda: StopDecisionExecutor(
-                    require_task_complete=True,
+                    require_work_complete=True,
                     hooks=None,
                     id="stop",
                 ),
@@ -431,7 +431,7 @@ class TestStopDecisionAgentStopHooks:
             async def handle(self, trigger: RepairComplete, ctx: WorkflowContext[TurnComplete]) -> None:
                 turn_count = (await ctx.get_shared_state(HARNESS_TURN_COUNT_KEY) or 0) + 1
                 await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, turn_count)
-                await ctx.send_message(TurnComplete(agent_done=True, called_task_complete=True))
+                await ctx.send_message(TurnComplete(agent_done=True, called_work_complete=True))
 
         workflow = (
             WorkflowBuilder()
@@ -439,7 +439,7 @@ class TestStopDecisionAgentStopHooks:
             .register_executor(lambda: MockAgent(id="agent"), name="agent")
             .register_executor(
                 lambda: StopDecisionExecutor(
-                    require_task_complete=True,
+                    require_work_complete=True,
                     hooks=hooks,
                     id="stop",
                 ),
@@ -478,7 +478,7 @@ class TestStopDecisionAgentStopHooks:
             async def handle(self, trigger: RepairComplete, ctx: WorkflowContext[TurnComplete]) -> None:
                 turn_count = (await ctx.get_shared_state(HARNESS_TURN_COUNT_KEY) or 0) + 1
                 await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, turn_count)
-                await ctx.send_message(TurnComplete(agent_done=True, called_task_complete=True))
+                await ctx.send_message(TurnComplete(agent_done=True, called_work_complete=True))
 
         workflow = (
             WorkflowBuilder()
@@ -486,7 +486,7 @@ class TestStopDecisionAgentStopHooks:
             .register_executor(lambda: MockAgent(id="agent"), name="agent")
             .register_executor(
                 lambda: StopDecisionExecutor(
-                    require_task_complete=True,
+                    require_work_complete=True,
                     hooks=hooks,
                     id="stop",
                 ),
@@ -506,4 +506,4 @@ class TestStopDecisionAgentStopHooks:
 
         assert len(captured_events) == 1
         assert captured_events[0].turn_count == 1
-        assert captured_events[0].called_task_complete is True
+        assert captured_events[0].called_work_complete is True
