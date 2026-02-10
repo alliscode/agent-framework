@@ -148,10 +148,12 @@ class ExternalizationRecord:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ExternalizationRecord:
         """Deserialize from dictionary."""
+        from ._summary import StructuredSummary as _StructuredSummary
+
         return cls(
             span=SpanReference.from_dict(data["span"]),
             artifact_id=data["artifact_id"],
-            summary=StructuredSummary.from_dict(data["summary"]),
+            summary=_StructuredSummary.from_dict(data["summary"]),
             rehydrate_hint=data["rehydrate_hint"],
         )
 
@@ -185,9 +187,11 @@ class SummarizationRecord:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SummarizationRecord:
         """Deserialize from dictionary."""
+        from ._summary import StructuredSummary as _StructuredSummary
+
         return cls(
             span=SpanReference.from_dict(data["span"]),
-            summary=StructuredSummary.from_dict(data["summary"]),
+            summary=_StructuredSummary.from_dict(data["summary"]),
             summary_token_count=data["summary_token_count"],
         )
 

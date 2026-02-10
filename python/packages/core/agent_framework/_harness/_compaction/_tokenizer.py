@@ -485,7 +485,7 @@ class TokenBudget:
         max_rehydration_artifacts: Maximum artifacts to rehydrate.
     """
 
-    max_input_tokens: int = 100_000
+    max_input_tokens: int = 128_000
     soft_threshold_percent: float = 0.85
 
     # Overhead tracking
@@ -583,7 +583,7 @@ class TokenBudget:
     def from_dict(cls, data: dict[str, Any]) -> TokenBudget:
         """Deserialize from dictionary."""
         return cls(
-            max_input_tokens=data.get("max_input_tokens", 100_000),
+            max_input_tokens=data.get("max_input_tokens", 128_000),
             soft_threshold_percent=data.get("soft_threshold_percent", 0.85),
             system_prompt_tokens=data.get("system_prompt_tokens", 0),
             tool_schema_tokens=data.get("tool_schema_tokens", 0),
@@ -639,7 +639,7 @@ class TokenBudget:
         ]
 
         # Find matching model or use default
-        max_tokens = 100_000  # Default
+        max_tokens = 128_000  # Default
         model_lower = model.lower()
         for pattern, limit in model_limits:
             if model_lower.startswith(pattern) or pattern in model_lower:

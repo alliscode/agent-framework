@@ -119,6 +119,9 @@ from ._strategies import (
     SummarizeStrategy,
 )
 
+# Summarizer implementation
+from ._summarizer import ChatClientSummarizer
+
 # Summary types
 from ._summary import (
     STRUCTURED_SUMMARY_SCHEMA_VERSION,
@@ -184,6 +187,7 @@ __all__ = [
     "ArtifactStore",
     "ArtifactStoreEntry",
     "CacheEntry",
+    "ChatClientSummarizer",
     "ClearRecord",
     "ClearStrategy",
     "CompactionAction",

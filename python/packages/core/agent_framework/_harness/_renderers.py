@@ -134,6 +134,14 @@ class PassthroughRenderer:
         """Pass through text unchanged."""
         return text
 
+    def on_compaction_started(self, data: dict[str, Any]) -> str | None:
+        """Suppress compaction start."""
+        return None
+
+    def on_compaction_completed(self, data: dict[str, Any]) -> str | None:
+        """Suppress compaction completion."""
+        return None
+
 
 # ── Markdown Renderer ──────────────────────────────────────────────────────
 
@@ -212,6 +220,27 @@ class MarkdownRenderer:
         """Pass through text unchanged."""
         return text
 
+    def on_compaction_started(self, data: dict[str, Any]) -> str | None:
+        """Render compaction start notification with strategy info."""
+        current = data.get("current_tokens", 0)
+        threshold = data.get("soft_threshold", 0)
+        strategies = data.get("strategies_available", [])
+        via = f" via {'+'.join(strategies)}" if strategies else ""
+        return f"\n⟳ *Compacting context{via}...* ({current:,} tokens, threshold: {threshold:,})\n"
+
+    def on_compaction_completed(self, data: dict[str, Any]) -> str | None:
+        """Render compaction completion with before/after sizes and level."""
+        before = data.get("tokens_before", 0)
+        after = data.get("tokens_after", 0)
+        freed = data.get("tokens_freed", 0)
+        duration = data.get("duration_ms", 0)
+        level = data.get("compaction_level", "")
+        level_tag = f" [{level}]" if level else ""
+        return (
+            f"\n✓ *Context compacted{level_tag}:* {before:,} → {after:,} tokens "
+            f"(freed {freed:,} in {duration / 1000:.1f}s)\n"
+        )
+
     def _format_deliverable(self, title: str, content: str) -> str:
         """Format a single deliverable as a markdown block."""
         # Use horizontal rules and clear heading - blockquotes don't render well in all UIs
@@ -262,6 +291,18 @@ async def render_stream(
                 text = renderer.on_deliverables_updated(event.data)
                 if text:
                     yield _make_text_event(text)
+
+            elif event.event_type == "compaction_started" and event.data:
+                if hasattr(renderer, "on_compaction_started"):
+                    text = renderer.on_compaction_started(event.data)
+                    if text:
+                        yield _make_text_event(text)
+
+            elif event.event_type == "compaction_completed" and event.data:
+                if hasattr(renderer, "on_compaction_completed"):
+                    text = renderer.on_compaction_completed(event.data)
+                    if text:
+                        yield _make_text_event(text)
 
             # Always yield the original lifecycle event too
             yield event

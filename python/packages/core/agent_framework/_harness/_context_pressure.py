@@ -201,7 +201,7 @@ class TokenBudget:
         current_estimate: Current estimated token count.
     """
 
-    max_input_tokens: int = 100000
+    max_input_tokens: int = 128000
     soft_threshold_percent: float = 0.80
     blocking_threshold_percent: float = 0.95
     current_estimate: int = 0
@@ -244,7 +244,7 @@ class TokenBudget:
     def from_dict(cls, data: dict[str, Any]) -> "TokenBudget":
         """Deserialize from dictionary."""
         return cls(
-            max_input_tokens=data.get("max_input_tokens", 100000),
+            max_input_tokens=data.get("max_input_tokens", 128000),
             soft_threshold_percent=data.get("soft_threshold_percent", 0.80),
             blocking_threshold_percent=data.get("blocking_threshold_percent", 0.95),
             current_estimate=data.get("current_estimate", 0),

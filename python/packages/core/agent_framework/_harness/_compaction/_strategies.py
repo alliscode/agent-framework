@@ -4,8 +4,8 @@
 
 Strategies are applied in order from least to most aggressive:
 1. Clear - Replace tool results with placeholders (respecting durability)
-2. Summarize - LLM-compress older spans into structured summaries
-3. Externalize - Write large content to storage, keep pointer + summary
+2. Externalize - Write large content to storage, keep pointer + summary (full content preserved)
+3. Summarize - LLM-compress older spans into structured summaries (original lost)
 4. Drop - Remove from prompt entirely (last resort)
 
 See CONTEXT_COMPACTION_DESIGN.md for full architecture details.
@@ -44,6 +44,40 @@ if TYPE_CHECKING:
     from ._turn_context import TurnContext
 
 logger = logging.getLogger(__name__)
+
+
+def _count_message_tokens(msg: "ChatMessage", tokenizer: "ProviderAwareTokenizer") -> int:
+    """Count tokens for a message including all content types.
+
+    Unlike ``msg.text`` which only returns TextContent, this counts tokens
+    from FunctionCallContent (name + arguments) and FunctionResultContent
+    (result) as well — matching how the API counts tokens.
+    """
+    from ..._types import FunctionCallContent, FunctionResultContent, TextContent
+
+    total = 0
+    contents = getattr(msg, "contents", None)
+    if not contents:
+        # Fallback to msg.text for simple messages
+        text = getattr(msg, "text", None) or ""
+        return tokenizer.count_tokens(str(text))
+
+    for content in contents:
+        if isinstance(content, TextContent):
+            total += tokenizer.count_tokens(content.text or "")
+        elif isinstance(content, FunctionCallContent):
+            total += tokenizer.count_tokens(content.name or "")
+            args = content.arguments
+            if isinstance(args, dict):
+                import json
+
+                args = json.dumps(args)
+            total += tokenizer.count_tokens(str(args or ""))
+        elif isinstance(content, FunctionResultContent):
+            total += tokenizer.count_tokens(str(content.result or ""))
+        else:
+            total += tokenizer.count_tokens(str(content))
+    return total
 
 
 @dataclass
@@ -266,7 +300,7 @@ class ClearStrategy(CompactionStrategy):
                 continue
 
             # Check token count
-            token_count = tokenizer.count_tokens(msg.text)
+            token_count = _count_message_tokens(msg, tokenizer)
             if token_count < self._min_tokens_to_clear:
                 continue
 
@@ -367,7 +401,7 @@ class SummarizeStrategy(CompactionStrategy):
 
     @property
     def aggressiveness(self) -> int:
-        return 2
+        return 3
 
     async def analyze(
         self,
@@ -413,6 +447,20 @@ class SummarizeStrategy(CompactionStrategy):
         if not summarizable_turns:
             return proposals
 
+        # Protect turn 0: collect message indices from the initial user request
+        # and the assistant's first response (which falls in turns[1] due to
+        # user-boundary grouping). We protect all message indices < the index
+        # of the second user message in the conversation.
+        protected_indices: set[int] = set()
+        if turns:
+            protected_indices.update(turns[0])
+        # Also protect messages in turns[1] that precede the user message in that group
+        # (these are assistant responses to the initial request)
+        if len(turns) > 1:
+            for idx in turns[1]:
+                if messages[idx].role.value != "user":
+                    protected_indices.add(idx)
+
         # Find contiguous spans to summarize
         span_indices: list[int] = []
         span_tokens = 0
@@ -447,10 +495,12 @@ class SummarizeStrategy(CompactionStrategy):
                 span_first_turn = turn_idx
 
             for msg_idx in turn_msg_indices:
+                if msg_idx in protected_indices:
+                    continue
                 msg = messages[msg_idx]
                 if msg.message_id:  # Only include messages with IDs
                     span_indices.append(msg_idx)
-                    span_tokens += tokenizer.count_tokens(msg.text)
+                    span_tokens += _count_message_tokens(msg, tokenizer)
 
         # Final span
         if span_tokens >= self._min_span_tokens and len(span_indices) >= self._min_span_messages:
@@ -565,7 +615,7 @@ class ExternalizeStrategy(CompactionStrategy):
 
     @property
     def aggressiveness(self) -> int:
-        return 3
+        return 2  # Less destructive than summarize — preserves full content in store
 
     async def analyze(
         self,
@@ -605,7 +655,7 @@ class ExternalizeStrategy(CompactionStrategy):
                     continue
 
             # Check token count
-            token_count = tokenizer.count_tokens(msg.text)
+            token_count = _count_message_tokens(msg, tokenizer)
             if token_count < self._externalize_threshold_tokens:
                 continue
 
