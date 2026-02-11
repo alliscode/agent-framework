@@ -19,7 +19,6 @@ from ._constants import (
     DEFAULT_SOFT_THRESHOLD_PERCENT,
     DEFAULT_STALL_THRESHOLD,
 )
-from ._context_pressure_executor import ContextPressureExecutor
 from ._repair_executor import RepairExecutor
 from ._state import RepairTrigger
 from ._stop_decision_executor import StopDecisionExecutor
@@ -81,11 +80,10 @@ class HarnessWorkflowBuilder:
         agent_thread: AgentThread | None = None,
         max_turns: int = DEFAULT_MAX_TURNS,
         checkpoint_storage: CheckpointStorage | None = None,
-        # Phase 2: Context pressure (legacy)
-        enable_context_pressure: bool = False,
+        # Context management
         max_input_tokens: int = DEFAULT_MAX_INPUT_TOKENS,
         soft_threshold_percent: float = DEFAULT_SOFT_THRESHOLD_PERCENT,
-        # Phase 9: Production compaction (preferred)
+        # Production compaction
         enable_compaction: bool = False,
         compaction_store: "CompactionStore | None" = None,
         artifact_store: "ArtifactStore | None" = None,
@@ -94,7 +92,7 @@ class HarnessWorkflowBuilder:
         summarizer: "Summarizer | None" = None,
         tokenizer: "ProviderAwareTokenizer | None" = None,
         model_name: str = "gpt-4o",
-        # Phase 3: Task contracts and stall detection
+        # Task contracts and stall detection
         task_contract: "TaskContract | None" = None,
         enable_stall_detection: bool = False,
         stall_threshold: int = DEFAULT_STALL_THRESHOLD,
@@ -105,14 +103,14 @@ class HarnessWorkflowBuilder:
         # Work item tracking
         enable_work_items: bool = False,
         task_list: "WorkItemTaskListProtocol | None" = None,
-        # Phase 2: Rich system prompt construction
+        # Rich system prompt construction
         sandbox_path: str | None = None,
-        # Phase 3: Hooks system
+        # Hooks system
         hooks: "HarnessHooks | None" = None,
-        # Phase 5: Sub-agent delegation
+        # Sub-agent delegation
         sub_agent_client: "ChatClientProtocol | None" = None,
         sub_agent_tools: "Sequence[ToolProtocol | Callable[..., Any]] | None" = None,
-        # Phase 7: JIT instructions
+        # JIT instructions
         jit_instructions: "list[JitInstruction] | None" = None,
     ):
         """Initialize the HarnessWorkflowBuilder.
@@ -122,10 +120,9 @@ class HarnessWorkflowBuilder:
             agent_thread: Optional thread for the agent. If None, creates a new thread.
             max_turns: Maximum number of agent turns before stopping. Default is 50.
             checkpoint_storage: Optional checkpoint storage for durability.
-            enable_context_pressure: Whether to enable legacy context pressure management.
-            max_input_tokens: Maximum input tokens for context pressure/compaction. Default is 128000.
-            soft_threshold_percent: Percentage at which to trigger compaction. Default is 0.85.
-            enable_compaction: Whether to enable production compaction (preferred over context_pressure).
+            max_input_tokens: Maximum input tokens for compaction. Default is 128000.
+            soft_threshold_percent: Percentage at which to trigger compaction. Default is 0.80.
+            enable_compaction: Whether to enable production compaction.
             compaction_store: Injectable store for compaction plans. Defaults to in-memory.
             artifact_store: Injectable store for externalized content. None disables externalization.
             summary_cache: Injectable cache for LLM summaries. None disables caching.
@@ -157,7 +154,6 @@ class HarnessWorkflowBuilder:
         self._agent_thread = agent_thread
         self._max_turns = max_turns
         self._checkpoint_storage = checkpoint_storage
-        self._enable_context_pressure = enable_context_pressure
         self._max_input_tokens = max_input_tokens
         self._soft_threshold_percent = soft_threshold_percent
         # Compaction settings
@@ -285,12 +281,6 @@ class HarnessWorkflowBuilder:
                 "max_input_tokens": self._max_input_tokens,
                 "soft_threshold_percent": self._soft_threshold_percent,
             }
-        elif self._enable_context_pressure:
-            config["context_pressure"] = {
-                "enabled": True,
-                "max_input_tokens": self._max_input_tokens,
-                "soft_threshold_percent": self._soft_threshold_percent,
-            }
 
         if self._task_contract is not None:
             config["task_contract"] = self._task_contract.to_dict()
@@ -315,8 +305,7 @@ class HarnessWorkflowBuilder:
             name="repair",
         )
 
-        # Optionally add compaction or context pressure executor
-        # Compaction (Phase 9) is preferred over context pressure (Phase 2)
+        # Optionally add compaction executor
         if self._enable_compaction:
             # Capture settings for lambda
             compaction_store = self._compaction_store
@@ -343,15 +332,6 @@ class HarnessWorkflowBuilder:
                     id="harness_compaction",
                 ),
                 name="compaction",
-            )
-        elif self._enable_context_pressure:
-            builder.register_executor(
-                lambda: ContextPressureExecutor(
-                    max_input_tokens=self._max_input_tokens,
-                    soft_threshold_percent=self._soft_threshold_percent,
-                    id="harness_context_pressure",
-                ),
-                name="context_pressure",
             )
 
         # Capture continuation and work item settings for lambda
@@ -402,15 +382,11 @@ class HarnessWorkflowBuilder:
             name="stop_decision",
         )
 
-        # Wire the harness loop based on whether compaction/context pressure is enabled
+        # Wire the harness loop based on whether compaction is enabled
         if self._enable_compaction:
             # repair -> compaction -> agent_turn -> stop_decision -> repair (loop)
             builder.add_edge("repair", "compaction")
             builder.add_edge("compaction", "agent_turn")
-        elif self._enable_context_pressure:
-            # repair -> context_pressure -> agent_turn -> stop_decision -> repair (loop)
-            builder.add_edge("repair", "context_pressure")
-            builder.add_edge("context_pressure", "agent_turn")
         else:
             # repair -> agent_turn -> stop_decision -> repair (loop)
             builder.add_edge("repair", "agent_turn")
@@ -426,9 +402,8 @@ class HarnessWorkflowBuilder:
             builder.with_checkpointing(self._checkpoint_storage)
 
         # Set max iterations high enough for max_turns
-        # Each turn is roughly 3-4 supersteps depending on compaction/context pressure
-        has_pressure_executor = self._enable_compaction or self._enable_context_pressure
-        supersteps_per_turn = 4 if has_pressure_executor else 3
+        # Each turn is roughly 3-4 supersteps depending on compaction
+        supersteps_per_turn = 4 if self._enable_compaction else 3
         builder.set_max_iterations(self._max_turns * supersteps_per_turn * 2)
 
         return builder.build()
@@ -488,11 +463,10 @@ class AgentHarness:
         agent_thread: AgentThread | None = None,
         max_turns: int = DEFAULT_MAX_TURNS,
         checkpoint_storage: CheckpointStorage | None = None,
-        # Phase 2: Context pressure (legacy)
-        enable_context_pressure: bool = False,
+        # Context management
         max_input_tokens: int = DEFAULT_MAX_INPUT_TOKENS,
         soft_threshold_percent: float = DEFAULT_SOFT_THRESHOLD_PERCENT,
-        # Phase 9: Production compaction (preferred)
+        # Production compaction
         enable_compaction: bool = False,
         compaction_store: "CompactionStore | None" = None,
         artifact_store: "ArtifactStore | None" = None,
@@ -501,7 +475,7 @@ class AgentHarness:
         summarizer: "Summarizer | None" = None,
         tokenizer: "ProviderAwareTokenizer | None" = None,
         model_name: str = "gpt-4o",
-        # Phase 3: Task contracts and stall detection
+        # Task contracts and stall detection
         task_contract: "TaskContract | None" = None,
         enable_stall_detection: bool = False,
         stall_threshold: int = DEFAULT_STALL_THRESHOLD,
@@ -512,14 +486,14 @@ class AgentHarness:
         # Work item tracking
         enable_work_items: bool = False,
         task_list: "WorkItemTaskListProtocol | None" = None,
-        # Phase 2: Rich system prompt construction
+        # Rich system prompt construction
         sandbox_path: str | None = None,
-        # Phase 3: Hooks system
+        # Hooks system
         hooks: "HarnessHooks | None" = None,
-        # Phase 5: Sub-agent delegation
+        # Sub-agent delegation
         sub_agent_client: "ChatClientProtocol | None" = None,
         sub_agent_tools: "Sequence[ToolProtocol | Callable[..., Any]] | None" = None,
-        # Phase 7: JIT instructions
+        # JIT instructions
         jit_instructions: "list[JitInstruction] | None" = None,
     ):
         """Initialize the AgentHarness.
@@ -529,10 +503,9 @@ class AgentHarness:
             agent_thread: Optional thread for the agent. If None, creates a new thread.
             max_turns: Maximum number of agent turns before stopping. Default is 50.
             checkpoint_storage: Optional checkpoint storage for durability.
-            enable_context_pressure: Whether to enable legacy context pressure management.
-            max_input_tokens: Maximum input tokens for context pressure/compaction. Default is 128000.
-            soft_threshold_percent: Percentage at which to trigger compaction. Default is 0.85.
-            enable_compaction: Whether to enable production compaction (preferred over context_pressure).
+            max_input_tokens: Maximum input tokens for compaction. Default is 128000.
+            soft_threshold_percent: Percentage at which to trigger compaction. Default is 0.80.
+            enable_compaction: Whether to enable production compaction.
             compaction_store: Injectable store for compaction plans. Defaults to in-memory.
             artifact_store: Injectable store for externalized content. None disables externalization.
             summary_cache: Injectable cache for LLM summaries. None disables caching.
@@ -565,7 +538,6 @@ class AgentHarness:
             agent_thread=agent_thread,
             max_turns=max_turns,
             checkpoint_storage=checkpoint_storage,
-            enable_context_pressure=enable_context_pressure,
             max_input_tokens=max_input_tokens,
             soft_threshold_percent=soft_threshold_percent,
             enable_compaction=enable_compaction,

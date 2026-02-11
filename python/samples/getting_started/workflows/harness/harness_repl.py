@@ -19,7 +19,6 @@ a sandboxed directory.
 import argparse
 import asyncio
 import logging
-import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -114,29 +113,45 @@ def setup_otel(endpoint: str) -> None:
     Args:
         endpoint: OTLP HTTP endpoint (e.g. http://localhost:4318).
     """
-    os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint)
-    os.environ.setdefault("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
-
-    from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
-    from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    # from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+    # from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+    # from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
     from agent_framework.observability import configure_otel_providers
 
-    configure_otel_providers(
-        enable_sensitive_data=True,
-        exporters=[
-            OTLPSpanExporter(endpoint=f"{endpoint}/v1/traces"),
-            OTLPMetricExporter(endpoint=f"{endpoint}/v1/metrics"),
-            OTLPLogExporter(endpoint=f"{endpoint}/v1/logs"),
-        ],
-    )
+    configure_otel_providers()
+    # configure_otel_providers(
+    #     enable_sensitive_data=True,
+    #     exporters=[
+    #         OTLPSpanExporter(endpoint=f"{endpoint}/v1/traces"),
+    #         OTLPMetricExporter(endpoint=f"{endpoint}/v1/metrics"),
+    #         OTLPLogExporter(endpoint=f"{endpoint}/v1/logs"),
+    #     ],
+    # )
+
+    # # Register shutdown hook to flush pending telemetry on exit
+    # import atexit
+
+    # from opentelemetry import metrics, trace
+
+    # def _flush_otel() -> None:
+    #     tracer_provider = trace.get_tracer_provider()
+    #     if hasattr(tracer_provider, "force_flush"):
+    #         tracer_provider.force_flush(timeout_millis=5000)
+    #     meter_provider = metrics.get_meter_provider()
+    #     if hasattr(meter_provider, "force_flush"):
+    #         meter_provider.force_flush(timeout_millis=5000)
+
+    # atexit.register(_flush_otel)
 
 
 AGENT_INSTRUCTIONS = """You are a capable AI coding assistant with access to a local workspace.
 You can read and write files, list directories, and run shell commands.
 When asked to investigate code, be thorough — read every relevant source file
 before drawing conclusions or writing deliverables.
+Never narrate your internal mechanics — do not say things like "I will now call",
+"Marking as done", "Let me store this artifact", or "I'll use the X tool".
+Just perform the action silently and describe results naturally.
 """
 
 
@@ -285,145 +300,151 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False
             event_count = 0
 
             debug("Starting harness.run_stream()")
-            async for event in harness.run_stream(user_input):
-                event_count += 1
-                event_type = type(event).__name__
-                debug(f"Event #{event_count}: {event_type}")
-                # Track lifecycle events
-                if isinstance(event, ExecutorInvokedEvent):
-                    executor_name = event.executor_id
-                    debug(f"  ExecutorInvoked: {executor_name}")
-                    if executor_name != last_executor:
-                        last_executor = executor_name
-                        # Show interesting lifecycle events
-                        if "context_pressure" in executor_name:
-                            print()
-                            print_lifecycle("Context pressure check...")
-                        elif "stop_decision" in executor_name and show_verbose:
-                            print()
-                            print_lifecycle("Evaluating stop conditions...")
-                        elif "repair" in executor_name and turn_count > 0 and show_verbose:
-                            print()
-                            print_lifecycle("Repair check...")
+            from agent_framework.observability import get_tracer
+            from opentelemetry.trace import SpanKind
 
-                if isinstance(event, ExecutorCompletedEvent):
-                    executor_name = event.executor_id
-                    debug(f"  ExecutorCompleted: {executor_name}")
-                    if "agent_turn" in executor_name and show_verbose:
-                        print()
-                        print_lifecycle(f"Turn {turn_count + 1} completed")
-
-                if isinstance(event, SuperStepStartedEvent):
-                    debug("  SuperStepStarted")
-                    # Could track supersteps if needed
-
-                # Show compaction lifecycle events
-                if isinstance(event, HarnessLifecycleEvent):
-                    if event.event_type == "compaction_started" and event.data:
-                        current = event.data.get("current_tokens", 0)
-                        threshold = event.data.get("soft_threshold", 0)
-                        strategies = event.data.get("strategies_available", [])
-                        via = f" via {'+'.join(strategies)}" if strategies else ""
-                        print()
-                        print_lifecycle(f"Compacting context{via}... ({current:,} tokens, threshold: {threshold:,})")
-                    elif event.event_type == "compaction_completed" and event.data:
-                        before = event.data.get("tokens_before", 0)
-                        after = event.data.get("tokens_after", 0)
-                        freed = event.data.get("tokens_freed", 0)
-                        duration = event.data.get("duration_ms", 0)
-                        level = event.data.get("compaction_level", "")
-                        level_tag = f" [{level}]" if level else ""
-                        print()
-                        print_success(
-                            f"Context compacted{level_tag}: {before:,} → {after:,} tokens "
-                            f"(freed {freed:,} in {duration / 1000:.1f}s)"
-                        )
-
-                # Show agent streaming updates
-                if isinstance(event, AgentRunUpdateEvent):
-                    update = event.data
-
-                    # Debug: log update details
-                    update_role = getattr(update, "role", None)
-                    update_text_preview = (getattr(update, "text", "") or "")[:50].replace("\n", "\\n")
-                    update_contents = getattr(update, "contents", []) or []
-                    content_types = [type(c).__name__ for c in update_contents]
-                    finish_reason = getattr(update, "finish_reason", None)
-                    debug(f"  AgentRunUpdate: role={update_role}, text='{update_text_preview}...', contents={content_types}, finish={finish_reason}")
-
-                    # Detect continuation prompts by checking for the pattern
-                    if hasattr(update, "role") and str(update.role) == "user":
-                        if hasattr(update, "text") and "completed ALL" in str(update.text):
-                            print()
-                            print_lifecycle("Continuation prompt sent (verifying task completion)")
-                            continuation_count += 1
-                            print(f"\n{Colors.BLUE}Agent:{Colors.RESET} ", end="", flush=True)
-                            continue
-
-                    # Print agent's text as it streams
-                    if hasattr(update, "text") and update.text:
-                        print(update.text, end="", flush=True)
-
-                    # Show tool calls if present in contents
-                    if hasattr(update, "contents") and update.contents:
-                        for content in update.contents:
-                            content_type = type(content).__name__
-                            if "FunctionCall" in content_type:
-                                tool_name = getattr(content, "name", None)
-                                tool_args = getattr(content, "arguments", None)
-                                debug(f"    FunctionCall: {tool_name}({str(tool_args)[:100]}...)")
-                                # Only print if we have a valid tool name (skip task_complete)
-                                if tool_name and tool_name != "task_complete":
-                                    print(f"\n{Colors.DIM}  → {tool_name}(){Colors.RESET}")
-                            elif "FunctionResult" in content_type:
-                                result_str = str(getattr(content, "result", ""))[:200]
-                                debug(f"    FunctionResult: {result_str}...")
-                                if show_verbose and result_str:
-                                    print(f"\n{Colors.DIM}  ← {result_str[:80]}{Colors.RESET}", end="", flush=True)
-
-                    # Track turns
-                    if hasattr(update, "finish_reason") and update.finish_reason:
-                        turn_count += 1
-                        debug(f"  Turn incremented to {turn_count}, finish_reason={finish_reason}")
-
-                # Handle final result
-                if isinstance(event, WorkflowOutputEvent):
-                    result = event.data
-                    debug(f"  WorkflowOutput: {type(result).__name__}")
-                    if isinstance(result, HarnessResult):
-                        debug(f"  HarnessResult: status={result.status}, turns={result.turn_count}, reason={result.reason}")
-                        print()  # Newline after streaming
-
-                        # Show result status with appropriate styling
-                        if result.status == HarnessStatus.DONE:
-                            print_success(f"Completed in {result.turn_count} turns")
-                        elif result.status == HarnessStatus.STALLED:
-                            print_error(f"Stalled after {result.turn_count} turns - no progress detected")
-                        elif result.status == HarnessStatus.FAILED:
-                            print_error(f"Failed: {result.reason.message if result.reason else 'Unknown error'}")
-                        else:
-                            print_system(f"Status: {result.status.value} ({result.turn_count} turns)")
-
-                        # Show if continuation prompts were used
-                        if continuation_count > 0:
-                            print_system(f"Used {continuation_count} continuation prompt(s)")
-
-                        # Display work item artifacts
-                        if task_list and task_list.ledger and task_list.ledger.items:
-                            items_with_artifacts = [
-                                (item_id, item)
-                                for item_id, item in task_list.ledger.items.items()
-                                if item.artifact
-                            ]
-                            if items_with_artifacts:
+            with get_tracer().start_as_current_span(
+                f"Harness Message #{message_count}", kind=SpanKind.CLIENT
+            ):
+                async for event in harness.run_stream(user_input):
+                    event_count += 1
+                    event_type = type(event).__name__
+                    debug(f"Event #{event_count}: {event_type}")
+                    # Track lifecycle events
+                    if isinstance(event, ExecutorInvokedEvent):
+                        executor_name = event.executor_id
+                        debug(f"  ExecutorInvoked: {executor_name}")
+                        if executor_name != last_executor:
+                            last_executor = executor_name
+                            # Show interesting lifecycle events
+                            if "context_pressure" in executor_name:
                                 print()
-                                print(f"{Colors.BOLD}📋 Work Item Artifacts ({len(items_with_artifacts)}):{Colors.RESET}")
-                                for item_id, item in items_with_artifacts:
-                                    role_tag = f" [{item.artifact_role.value}]"
-                                    print(f"\n{Colors.CYAN}── [{item_id}] {item.title}{role_tag} ──{Colors.RESET}")
-                                    print(item.artifact)
-                                    print(f"{Colors.DIM}── end [{item_id}] ──{Colors.RESET}")
-                                    debug(f"  Artifact [{item_id}] ({len(item.artifact)} chars):\n{item.artifact}")
+                                print_lifecycle("Context pressure check...")
+                            elif "stop_decision" in executor_name and show_verbose:
+                                print()
+                                print_lifecycle("Evaluating stop conditions...")
+                            elif "repair" in executor_name and turn_count > 0 and show_verbose:
+                                print()
+                                print_lifecycle("Repair check...")
+
+                    if isinstance(event, ExecutorCompletedEvent):
+                        executor_name = event.executor_id
+                        debug(f"  ExecutorCompleted: {executor_name}")
+                        if "agent_turn" in executor_name and show_verbose:
+                            print()
+                            print_lifecycle(f"Turn {turn_count + 1} completed")
+
+                    if isinstance(event, SuperStepStartedEvent):
+                        debug("  SuperStepStarted")
+                        # Could track supersteps if needed
+
+                    # Show compaction lifecycle events
+                    if isinstance(event, HarnessLifecycleEvent):
+                        if event.event_type == "compaction_started" and event.data:
+                            current = event.data.get("current_tokens", 0)
+                            threshold = event.data.get("soft_threshold", 0)
+                            strategies = event.data.get("strategies_available", [])
+                            via = f" via {'+'.join(strategies)}" if strategies else ""
+                            print()
+                            print_lifecycle(f"Compacting context{via}... ({current:,} tokens, threshold: {threshold:,})")
+                        elif event.event_type == "compaction_completed" and event.data:
+                            before = event.data.get("tokens_before", 0)
+                            after = event.data.get("tokens_after", 0)
+                            freed = event.data.get("tokens_freed", 0)
+                            duration = event.data.get("duration_ms", 0)
+                            level = event.data.get("compaction_level", "")
+                            level_tag = f" [{level}]" if level else ""
+                            print()
+                            print_success(
+                                f"Context compacted{level_tag}: {before:,} → {after:,} tokens "
+                                f"(freed {freed:,} in {duration / 1000:.1f}s)"
+                            )
+
+                    # Show agent streaming updates
+                    if isinstance(event, AgentRunUpdateEvent):
+                        update = event.data
+
+                        # Debug: log update details
+                        update_role = getattr(update, "role", None)
+                        update_text_preview = (getattr(update, "text", "") or "")[:50].replace("\n", "\\n")
+                        update_contents = getattr(update, "contents", []) or []
+                        content_types = [type(c).__name__ for c in update_contents]
+                        finish_reason = getattr(update, "finish_reason", None)
+                        debug(f"  AgentRunUpdate: role={update_role}, text='{update_text_preview}...', contents={content_types}, finish={finish_reason}")
+
+                        # Detect continuation prompts by checking for the pattern
+                        if hasattr(update, "role") and str(update.role) == "user":
+                            if hasattr(update, "text") and "completed ALL" in str(update.text):
+                                print()
+                                print_lifecycle("Continuation prompt sent (verifying task completion)")
+                                continuation_count += 1
+                                print(f"\n{Colors.BLUE}Agent:{Colors.RESET} ", end="", flush=True)
+                                continue
+
+                        # Print agent's text as it streams
+                        if hasattr(update, "text") and update.text:
+                            print(update.text, end="", flush=True)
+
+                        # Show tool calls if present in contents
+                        if hasattr(update, "contents") and update.contents:
+                            for content in update.contents:
+                                content_type = type(content).__name__
+                                if "FunctionCall" in content_type:
+                                    tool_name = getattr(content, "name", None)
+                                    tool_args = getattr(content, "arguments", None)
+                                    debug(f"    FunctionCall: {tool_name}({str(tool_args)[:100]}...)")
+                                    # Only print if we have a valid tool name (skip task_complete)
+                                    if tool_name and tool_name != "task_complete":
+                                        print(f"\n{Colors.DIM}  → {tool_name}(){Colors.RESET}")
+                                elif "FunctionResult" in content_type:
+                                    result_str = str(getattr(content, "result", ""))[:200]
+                                    debug(f"    FunctionResult: {result_str}...")
+                                    if show_verbose and result_str:
+                                        print(f"\n{Colors.DIM}  ← {result_str[:80]}{Colors.RESET}", end="", flush=True)
+
+                        # Track turns
+                        if hasattr(update, "finish_reason") and update.finish_reason:
+                            turn_count += 1
+                            debug(f"  Turn incremented to {turn_count}, finish_reason={finish_reason}")
+
+                    # Handle final result
+                    if isinstance(event, WorkflowOutputEvent):
+                        result = event.data
+                        debug(f"  WorkflowOutput: {type(result).__name__}")
+                        if isinstance(result, HarnessResult):
+                            debug(f"  HarnessResult: status={result.status}, turns={result.turn_count}, reason={result.reason}")
+                            print()  # Newline after streaming
+
+                            # Show result status with appropriate styling
+                            if result.status == HarnessStatus.DONE:
+                                print_success(f"Completed in {result.turn_count} turns")
+                            elif result.status == HarnessStatus.STALLED:
+                                print_error(f"Stalled after {result.turn_count} turns - no progress detected")
+                            elif result.status == HarnessStatus.FAILED:
+                                print_error(f"Failed: {result.reason.message if result.reason else 'Unknown error'}")
+                            else:
+                                print_system(f"Status: {result.status.value} ({result.turn_count} turns)")
+
+                            # Show if continuation prompts were used
+                            if continuation_count > 0:
+                                print_system(f"Used {continuation_count} continuation prompt(s)")
+
+                            # Display work item artifacts
+                            if task_list and task_list.ledger and task_list.ledger.items:
+                                items_with_artifacts = [
+                                    (item_id, item)
+                                    for item_id, item in task_list.ledger.items.items()
+                                    if item.artifact
+                                ]
+                                if items_with_artifacts:
+                                    print()
+                                    print(f"{Colors.BOLD}📋 Work Item Artifacts ({len(items_with_artifacts)}):{Colors.RESET}")
+                                    for item_id, item in items_with_artifacts:
+                                        role_tag = f" [{item.artifact_role.value}]"
+                                        print(f"\n{Colors.CYAN}── [{item_id}] {item.title}{role_tag} ──{Colors.RESET}")
+                                        print(item.artifact)
+                                        print(f"{Colors.DIM}── end [{item_id}] ──{Colors.RESET}")
+                                        debug(f"  Artifact [{item_id}] ({len(item.artifact)} chars):\n{item.artifact}")
 
             debug(f"--- Message #{message_count} completed, total events: {event_count}")
 
@@ -470,10 +491,10 @@ async def main() -> None:
         "--otel",
         type=str,
         nargs="?",
-        const="http://localhost:4318",
+        const="http://localhost:4317",
         default=None,
         metavar="ENDPOINT",
-        help="Enable OTEL tracing via OTLP HTTP (default endpoint: http://localhost:4318 for Aspire dashboard)",
+        help="Enable OTEL tracing via OTLP HTTP (default endpoint: http://localhost:4317 for Aspire dashboard)",
     )
     args = parser.parse_args()
 

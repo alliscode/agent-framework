@@ -8,7 +8,6 @@ immutable-log + compaction-plan + renderer architecture.
 Key principles:
 1. AgentThread is never mutated - it's the append-only source of truth
 2. CompactionPlan is pure data describing what spans are compacted
-3. PromptRenderer takes Thread + Plan to produce the actual model request
 
 ## Core Types
 
@@ -47,57 +46,19 @@ from ._durability import (
 
 # Event types
 from ._events import (
-    CompactionCheckStartedEvent,
-    CompactionCompletedEvent,
-    CompactionErrorEvent,
     CompactionEvent,
     CompactionEventEmitter,
     CompactionEventType,
     CompactionMetrics,
-    CompositeEventEmitter,
-    ContentClearedEvent,
-    ContentDroppedEvent,
-    ContentExternalizedEvent,
-    ContentRehydratedEvent,
-    ContentSummarizedEvent,
-    LoggingEventEmitter,
-    MetricsCollector,
-    ProposalGeneratedEvent,
-    ProposalRejectedEvent,
-    VersionConflictEvent,
-)
-from ._events import (
-    RehydrationBlockedEvent as RehydrationBlockedEventV2,
 )
 
-# Rehydration types
-from ._rehydration import (
-    RehydrationBlockedEvent,
-    RehydrationEvent,
-    RehydrationInterceptor,
-    RehydrationState,
-    ToolCall,
-    create_rehydration_interceptor,
-)
-
-# Renderer types
-from ._renderer import (
-    COMPACTION_RENDER_FORMAT_VERSION,
+# Storage types
+from ._store import (
     ArtifactMetadata,
     ArtifactStore,
-    PromptRenderer,
-    RenderedPrompt,
-    SecurityContext,
-    render_externalization_text,
-    render_summary_text,
-)
-
-# Storage and concurrency types
-from ._store import (
     ArtifactStoreEntry,
     CacheEntry,
     CompactionStore,
-    CompactionTransaction,
     InMemoryArtifactStore,
     InMemoryCompactionStore,
     InMemorySummaryCache,
@@ -151,8 +112,6 @@ from ._tokenizer import (
 
 # Turn context types
 from ._turn_context import (
-    RehydrationConfig,
-    RehydrationResult,
     TurnContext,
 )
 from ._types import (
@@ -169,7 +128,6 @@ from ._types import (
 __all__ = [
     # Constants
     "COMPACTION_PRECEDENCE",
-    "COMPACTION_RENDER_FORMAT_VERSION",
     "DEFAULT_DURABILITY_POLICIES",
     "DEFAULT_ENCODING",
     "MODEL_ENCODING_MAP",
@@ -191,10 +149,7 @@ __all__ = [
     "ClearRecord",
     "ClearStrategy",
     "CompactionAction",
-    "CompactionCheckStartedEvent",
-    "CompactionCompletedEvent",
     "CompactionCoordinator",
-    "CompactionErrorEvent",
     "CompactionEvent",
     "CompactionEventEmitter",
     "CompactionEventType",
@@ -204,13 +159,6 @@ __all__ = [
     "CompactionResult",
     "CompactionStore",
     "CompactionStrategy",
-    "CompactionTransaction",
-    "CompositeEventEmitter",
-    "ContentClearedEvent",
-    "ContentDroppedEvent",
-    "ContentExternalizedEvent",
-    "ContentRehydratedEvent",
-    "ContentSummarizedEvent",
     "Decision",
     "DeterminismMetadata",
     "DropRecord",
@@ -220,24 +168,9 @@ __all__ = [
     "InMemoryArtifactStore",
     "InMemoryCompactionStore",
     "InMemorySummaryCache",
-    "LoggingEventEmitter",
-    "MetricsCollector",
     "ModelProvider",
     "OpenItem",
-    "PromptRenderer",
-    "ProposalGeneratedEvent",
-    "ProposalRejectedEvent",
     "ProviderAwareTokenizer",
-    # Rehydration types
-    "RehydrationBlockedEvent",
-    "RehydrationBlockedEventV2",
-    "RehydrationConfig",
-    "RehydrationEvent",
-    "RehydrationInterceptor",
-    "RehydrationResult",
-    "RehydrationState",
-    "RenderedPrompt",
-    "SecurityContext",
     "SimpleTokenizer",
     "SpanReference",
     "StructuredSummary",
@@ -248,18 +181,13 @@ __all__ = [
     "SummaryCacheKey",
     "TiktokenTokenizer",
     "TokenBudget",
-    "ToolCall",
     "ToolDurability",
     "ToolDurabilityPolicy",
     "ToolOutcome",
     "ToolResultEnvelope",
     "TurnContext",
-    "VersionConflictEvent",
     # Functions
     "compute_content_hash",
-    "create_rehydration_interceptor",
     "create_summary_cache_key",
     "get_tokenizer",
-    "render_externalization_text",
-    "render_summary_text",
 ]

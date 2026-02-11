@@ -10,9 +10,8 @@ HARNESS_STATUS_KEY = "harness.status"
 HARNESS_STOP_REASON_KEY = "harness.stop_reason"
 HARNESS_PENDING_TOOL_CALLS_KEY = "harness.pending_tool_calls"
 
-# Context pressure state keys (Phase 2)
+# Token budget state key (used by CompactionExecutor)
 HARNESS_TOKEN_BUDGET_KEY = "harness.token_budget"  # noqa: S105  # nosec B105
-HARNESS_CONTEXT_EDIT_HISTORY_KEY = "harness.context_edit_history"
 
 # Compaction state keys (Phase 9 - Production Compaction)
 HARNESS_COMPACTION_PLAN_KEY = "harness.compaction_plan"
@@ -33,9 +32,13 @@ HARNESS_COMPLETION_REPORT_KEY = "harness.completion_report"
 # Work item tracking state keys
 HARNESS_WORK_ITEM_LEDGER_KEY = "harness.work_item_ledger"
 
+# Work-complete enforcement tracking
+HARNESS_WORK_COMPLETE_RETRY_COUNT_KEY = "harness.work_complete_retry_count"
+
 # Default values
 DEFAULT_MAX_TURNS = 50
 DEFAULT_MAX_INPUT_TOKENS = 128000
 DEFAULT_SOFT_THRESHOLD_PERCENT = 0.80
 DEFAULT_BLOCKING_THRESHOLD_PERCENT = 0.95
 DEFAULT_STALL_THRESHOLD = 3  # Turns without progress before stall detection
+DEFAULT_WORK_COMPLETE_MAX_RETRIES = 3  # Max times to retry when agent doesn't call work_complete

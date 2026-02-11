@@ -82,7 +82,7 @@ class CompactionExecutor(Executor):
     4. Drop - Remove content entirely (last resort)
 
     The executor produces a CompactionPlan stored in SharedState, which
-    AgentTurnExecutor uses via PromptRenderer to build the actual prompt.
+    AgentTurnExecutor uses to build the actual prompt.
 
     This design supports deployment flexibility:
     - InMemory stores for local/testing

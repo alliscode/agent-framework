@@ -158,43 +158,43 @@ class TestDefaultInstructions:
                 return instr
         raise AssertionError(f"No instruction with id '{instruction_id}'")
 
-    # --- no_reads_after_5_turns ---
+    # --- no_reads_after_3_turns ---
 
-    def test_no_reads_fires_at_turn_5(self) -> None:
-        instr = self._find_instruction("no_reads_after_5_turns")
-        ctx = self._make_ctx(turn=5, tool_usage={})
+    def test_no_reads_fires_at_turn_3(self) -> None:
+        instr = self._find_instruction("no_reads_after_3_turns")
+        ctx = self._make_ctx(turn=3, tool_usage={})
         assert instr.condition(ctx) is True
 
-    def test_no_reads_does_not_fire_before_turn_5(self) -> None:
-        instr = self._find_instruction("no_reads_after_5_turns")
-        ctx = self._make_ctx(turn=4, tool_usage={})
+    def test_no_reads_does_not_fire_before_turn_3(self) -> None:
+        instr = self._find_instruction("no_reads_after_3_turns")
+        ctx = self._make_ctx(turn=2, tool_usage={})
         assert instr.condition(ctx) is False
 
     def test_no_reads_does_not_fire_if_reads_exist(self) -> None:
-        instr = self._find_instruction("no_reads_after_5_turns")
-        ctx = self._make_ctx(turn=5, tool_usage={"read_file": 1})
+        instr = self._find_instruction("no_reads_after_3_turns")
+        ctx = self._make_ctx(turn=3, tool_usage={"read_file": 1})
         assert instr.condition(ctx) is False
 
-    # --- no_writes_after_reads ---
+    # --- no_deliverable_after_many_reads ---
 
-    def test_no_writes_fires_when_many_reads_no_writes(self) -> None:
-        instr = self._find_instruction("no_writes_after_reads")
-        ctx = self._make_ctx(turn=10, tool_usage={"read_file": 5})
+    def test_no_deliverable_fires_when_many_reads_no_writes(self) -> None:
+        instr = self._find_instruction("no_deliverable_after_many_reads")
+        ctx = self._make_ctx(turn=8, tool_usage={"read_file": 5}, work_items_total=3)
         assert instr.condition(ctx) is True
 
-    def test_no_writes_does_not_fire_early(self) -> None:
-        instr = self._find_instruction("no_writes_after_reads")
-        ctx = self._make_ctx(turn=9, tool_usage={"read_file": 5})
+    def test_no_deliverable_does_not_fire_early(self) -> None:
+        instr = self._find_instruction("no_deliverable_after_many_reads")
+        ctx = self._make_ctx(turn=7, tool_usage={"read_file": 5}, work_items_total=3)
         assert instr.condition(ctx) is False
 
-    def test_no_writes_does_not_fire_if_writes_exist(self) -> None:
-        instr = self._find_instruction("no_writes_after_reads")
-        ctx = self._make_ctx(turn=10, tool_usage={"read_file": 5, "write_file": 1})
+    def test_no_deliverable_does_not_fire_if_writes_exist(self) -> None:
+        instr = self._find_instruction("no_deliverable_after_many_reads")
+        ctx = self._make_ctx(turn=8, tool_usage={"read_file": 5, "write_file": 1}, work_items_total=3)
         assert instr.condition(ctx) is False
 
-    def test_no_writes_does_not_fire_with_few_reads(self) -> None:
-        instr = self._find_instruction("no_writes_after_reads")
-        ctx = self._make_ctx(turn=10, tool_usage={"read_file": 4})
+    def test_no_deliverable_does_not_fire_with_few_reads(self) -> None:
+        instr = self._find_instruction("no_deliverable_after_many_reads")
+        ctx = self._make_ctx(turn=8, tool_usage={"read_file": 4}, work_items_total=3)
         assert instr.condition(ctx) is False
 
     # --- approaching_turn_limit ---

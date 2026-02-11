@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "agent-framework-core[all]==1.0.0b260107",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
 ]
 
 [dependency-groups]

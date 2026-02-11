@@ -481,8 +481,8 @@ class TokenBudget:
         tool_schema_tokens: Tokens used by tool schemas.
         formatting_overhead_tokens: Provider-specific formatting overhead.
         safety_buffer_tokens: Buffer for response and safety margin.
-        rehydration_reserve_tokens: Reserved space for rehydration.
-        max_rehydration_artifacts: Maximum artifacts to rehydrate.
+        rehydration_reserve_tokens: Reserved space for rehydration (not yet implemented).
+        max_rehydration_artifacts: Maximum artifacts to rehydrate (not yet implemented).
     """
 
     max_input_tokens: int = 128_000
@@ -494,7 +494,7 @@ class TokenBudget:
     formatting_overhead_tokens: int = 0
     safety_buffer_tokens: int = 500
 
-    # Reservation for rehydration
+    # Reservation for rehydration (not yet implemented — kept because it affects budget math)
     rehydration_reserve_tokens: int = 2000
     max_rehydration_artifacts: int = 3
 

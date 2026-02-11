@@ -30,97 +30,104 @@ dead or legacy code.
 
 ## Cleanup Tasks
 
-### 1. Remove Legacy Context Pressure System (~970 lines)
+### 1. Remove Legacy Context Pressure System (~970 lines) — ✅ COMPLETE
 
 **What**: The Phase 2 context pressure system has been fully superseded by the
 Phase 9 CompactionExecutor. The legacy code is only used when
 `enable_context_pressure=True`, which no sample or production code uses.
 
-**Files to remove**:
-- `_context_pressure_executor.py` (464 lines) — legacy executor
-- Three strategy classes in `_context_pressure.py`:
-  - `ClearToolResultsStrategy` (~50 lines)
-  - `CompactConversationStrategy` (~50 lines)
-  - `DropOldestStrategy` (~50 lines)
-  - `get_default_strategies()` function
-  - `ContextEditKind`, `TranscriptRange`, `ExternalizeEdit`, `ClearEdit`,
-    `CompactEdit`, `DropEdit`, `ContextEditPlan` dataclasses
-
-**Keep in `_context_pressure.py`**:
-- `TokenBudget` class — still used by CompactionExecutor for SharedState signaling
-- `estimate_tokens()` and `estimate_transcript_tokens()` — utility functions
-
-**Files to update**:
-- `_harness_builder.py`: Remove `enable_context_pressure` parameter and the
-  `ContextPressureExecutor` registration branch (lines ~326–365)
-- `_harness_builder.py` (`AgentHarness`): Remove `enable_context_pressure` param
-- `__init__.py`: Remove all context pressure exports except `TokenBudget`,
-  `estimate_tokens`, `estimate_transcript_tokens`
-- `_constants.py`: Remove `HARNESS_CONTEXT_EDIT_HISTORY_KEY` if only used by
-  context pressure
-
-**Tests to update**:
-- `test_context_pressure.py` (567 lines): Remove tests for the three legacy
-  strategies and `ContextPressureExecutor`. Keep tests for `TokenBudget` and
-  the estimation functions.
-
-**Validation**: Run `uv run pytest tests/harness/ -v` — count should drop by
-~15-20 tests but all remaining tests must pass. Then run the REPL with the
-standard test prompt to verify compaction still works.
+**Summary of changes made**:
+- Deleted `_context_pressure_executor.py` (464 lines) — legacy executor and
+  `ContextPressureComplete` message type.
+- Stripped `_context_pressure.py` down to only `TokenBudget`, `estimate_tokens()`,
+  and `estimate_transcript_tokens()` — removed `ContextEditKind`, `TranscriptRange`,
+  `ExternalizeEdit`, `ClearEdit`, `CompactEdit`, `DropEdit`, `ContextEditPlan`,
+  `ContextPressureStrategy` protocol, `ClearToolResultsStrategy`,
+  `CompactConversationStrategy`, `DropOldestStrategy`, and `get_default_strategies()`.
+- Updated `_harness_builder.py`: Removed `enable_context_pressure` parameter from
+  both `HarnessWorkflowBuilder` and `AgentHarness`, removed the
+  `ContextPressureExecutor` registration branch and edge wiring, simplified
+  supersteps-per-turn calculation.
+- Updated `_constants.py`: Removed `HARNESS_CONTEXT_EDIT_HISTORY_KEY`.
+- Updated `__init__.py`: Removed all legacy context pressure imports and exports
+  (`ClearEdit`, `CompactEdit`, `DropEdit`, `ExternalizeEdit`, `ContextEdit`,
+  `ContextEditKind`, `ContextEditPlan`, `ContextPressureComplete`,
+  `ContextPressureExecutor`, `ContextPressureStrategy`, `ClearToolResultsStrategy`,
+  `CompactConversationStrategy`, `DropOldestStrategy`, `TranscriptRange`,
+  `get_default_strategies`, `HARNESS_CONTEXT_EDIT_HISTORY_KEY`). Kept `TokenBudget`,
+  `estimate_tokens`, `estimate_transcript_tokens`.
+- Updated `test_context_pressure.py`: Removed 14 legacy tests (strategy applicability,
+  edit type defaults, executor workflow tests). Kept 6 tests for `TokenBudget` and
+  estimation functions.
+- All 466 remaining harness tests pass. Ruff lint clean.
 
 ---
 
-### 2. Remove Unfinished Rehydration System (~613 lines)
+### 2. Remove Unfinished Rehydration System (~613 lines) — ✅ COMPLETE
 
 **What**: The rehydration system (`_compaction/_rehydration.py`) is architectural
 scaffolding that was never wired into the runtime. It defines
 `RehydrationInterceptor`, `RehydrationState`, `RehydrationConfig`, etc. but
 nothing in the executor chain instantiates or calls any of it.
 
-**Files to remove**:
-- `_compaction/_rehydration.py` (613 lines) — entire file
-
-**Files to update**:
-- `_compaction/__init__.py`: Remove all rehydration imports and `__all__` entries:
-  `RehydrationBlockedEvent`, `RehydrationConfig`, `RehydrationEvent`,
-  `RehydrationInterceptor`, `RehydrationResult`, `RehydrationState`,
-  `create_rehydration_interceptor`
-- `_harness/__init__.py`: Remove same rehydration entries from `__all__`
-- `_compaction/_tokenizer.py`: The `TokenBudget` class has
-  `rehydration_reserve_tokens` and `available_for_rehydration` — keep these
-  fields (they affect budget math) but add a comment noting rehydration is
-  not yet implemented
-
-**Tests to update**:
-- `test_compaction.py`: Remove any rehydration-specific tests (search for
-  "rehydration" in test names/assertions). Keep tests for types that happen
-  to mention rehydration in passing.
-
-**Validation**: Run tests, verify compaction REPL still works.
+**Summary of changes made**:
+- Deleted `_compaction/_rehydration.py` (613 lines) — entire file containing
+  `RehydrationInterceptor`, `RehydrationState`, `RehydrationEvent`,
+  `RehydrationBlockedEvent`, `ToolCall`, and `create_rehydration_interceptor`.
+- Updated `_compaction/__init__.py`: Removed all rehydration imports
+  (`RehydrationBlockedEvent`, `RehydrationEvent`, `RehydrationInterceptor`,
+  `RehydrationState`, `ToolCall`, `create_rehydration_interceptor`) and the
+  `RehydrationBlockedEventV2` alias. Removed `RehydrationConfig` and
+  `RehydrationResult` re-exports from `_turn_context`. Removed all corresponding
+  `__all__` entries.
+- Updated `_harness/__init__.py`: Removed all rehydration imports and `__all__`
+  entries (`RehydrationBlockedEvent`, `RehydrationConfig`, `RehydrationEvent`,
+  `RehydrationInterceptor`, `RehydrationResult`, `RehydrationState`, `ToolCall`,
+  `create_rehydration_interceptor`).
+- Updated `_compaction/_tokenizer.py`: Kept `rehydration_reserve_tokens` and
+  `available_for_rehydration` fields (they affect budget math) but added comments
+  noting rehydration is not yet implemented.
+- Updated `tests/harness/test_compaction.py`: Removed `TestRehydrationInterceptor`,
+  `TestRehydrationState`, and `TestToolCall` test classes (6 tests). Removed
+  rehydration imports. Updated module docstring.
+- Kept `_turn_context.py` unchanged — `TurnContext`, `RehydrationConfig`, and
+  `RehydrationResult` remain as they are used by compaction strategies.
+- All 460 remaining harness tests pass. Ruff lint clean.
 
 ---
 
-### 3. Remove Unfinished PromptRenderer (~565 lines)
+### 3. Remove Unfinished PromptRenderer (~565 lines) — ✅ COMPLETE
 
 **What**: `_compaction/_renderer.py` defines a `PromptRenderer` that applies a
 `CompactionPlan` to produce a rendered prompt. This was the intended architecture
 but the actual runtime uses `AgentTurnExecutor._apply_compaction_plan()` instead.
 `PromptRenderer` is never instantiated.
 
-**Files to remove**:
-- `_compaction/_renderer.py` (565 lines) — entire file
-
-**Files to update**:
-- `_compaction/__init__.py`: Remove `PromptRenderer`, `RenderedPrompt` imports
-  and `__all__` entries. Also remove `COMPACTION_RENDER_FORMAT_VERSION` if only
-  used by the renderer.
-- `_harness/__init__.py`: Remove same entries from `__all__`
-
-**Validation**: Run tests, verify compaction REPL still works.
+**Summary of changes made**:
+- Deleted `_compaction/_renderer.py` (565 lines) — entire file containing
+  `PromptRenderer`, `RenderedPrompt`, `render_summary_text()`,
+  `render_externalization_text()`, and `COMPACTION_RENDER_FORMAT_VERSION`.
+- Relocated `ArtifactStore` protocol, `ArtifactMetadata`, and `SecurityContext`
+  to `_compaction/_store.py` — these were the only types from `_renderer.py`
+  with runtime usage (referenced by `_strategies.py` `ExternalizeStrategy`
+  and `_compaction_executor.py`).
+- Updated `_compaction/_strategies.py`: Changed two `from ._renderer import`
+  statements to `from ._store import` for `ArtifactStore` and `ArtifactMetadata`.
+- Updated `_compaction/__init__.py`: Removed renderer import block and all
+  `__all__` entries for `PromptRenderer`, `RenderedPrompt`,
+  `COMPACTION_RENDER_FORMAT_VERSION`, `render_summary_text`,
+  `render_externalization_text`. Added `ArtifactMetadata`, `ArtifactStore`,
+  `SecurityContext` to the `_store` import block. Updated docstring.
+- Updated `_harness/__init__.py`: Removed `COMPACTION_RENDER_FORMAT_VERSION`,
+  `PromptRenderer`, `RenderedPrompt`, `render_externalization_text`,
+  `render_summary_text` from imports and `__all__`.
+- Updated `_compaction_executor.py`: Removed stale `PromptRenderer` reference
+  in docstring.
+- All 460 harness tests pass. Ruff lint clean.
 
 ---
 
-### 4. Trim Compaction Event System (~700 lines → ~200 lines)
+### 4. Trim Compaction Event System (~700 lines → ~200 lines) — ✅ COMPLETE
 
 **What**: `_compaction/_events.py` defines 12 event subclasses, metrics
 collectors, and emitter protocols. None of these are used outside the _harness
@@ -128,18 +135,29 @@ package — they're internal telemetry infrastructure. The `CompactionCoordinato
 doesn't actually emit most of these events. Only the base `CompactionEvent` and
 a couple of emitters have any runtime usage.
 
-**Action**: Don't delete the file, but audit each class:
-- **Keep**: `CompactionEvent`, `CompactionEventType`, `CompactionMetrics`
-  (if used by coordinator)
-- **Remove if unused by coordinator**: Individual event subclasses
-  (`CompactionCheckStartedEvent`, `ProposalGeneratedEvent`,
-  `ContentClearedEvent`, etc.) — check if `CompactionCoordinator.compact()`
-  actually creates instances of these
-- **Remove from `__all__` exports**: All event types not used externally
-
-**How to verify**: Search `_compaction/_strategies.py` and
-`_compaction/_types.py` for imports from `_events`. Keep whatever is actually
-instantiated; remove the rest.
+**Summary of changes made**:
+- Trimmed `_compaction/_events.py` from 700 lines to ~195 lines. Removed all 12
+  unused event subclasses (`CompactionCheckStartedEvent`, `CompactionCompletedEvent`,
+  `ProposalGeneratedEvent`, `ProposalRejectedEvent`, `ContentClearedEvent`,
+  `ContentSummarizedEvent`, `ContentExternalizedEvent`, `ContentDroppedEvent`,
+  `ContentRehydratedEvent`, `RehydrationBlockedEvent`, `CompactionErrorEvent`,
+  `VersionConflictEvent`). Removed `MetricsCollector`, `LoggingEventEmitter`,
+  and `CompositeEventEmitter` classes — none were instantiated in runtime code.
+- Removed unused `CompactionEventType` enum members: `CONTENT_REHYDRATED`,
+  `REHYDRATION_BLOCKED`, `VERSION_CONFLICT` (rehydration was removed in Phase 2;
+  version conflicts were part of removed store complexity).
+- Kept: `CompactionEventType` (core enum), `CompactionEvent` (base class),
+  `CompactionMetrics` (aggregated statistics), `CompactionEventEmitter` (protocol).
+- Updated `_compaction/__init__.py`: Removed 14 dead event imports and corresponding
+  `__all__` entries.
+- Updated `_harness/__init__.py`: Removed 14 dead event imports and corresponding
+  `__all__` entries.
+- Updated `tests/harness/test_compaction.py`: Removed `TestMetricsCollector` class
+  (2 tests) and `MetricsCollector` import. Updated module docstring. Kept
+  `TestCompactionMetrics` (3 tests) for the retained `CompactionMetrics` class.
+- Removed `logging` import from `_events.py` (no longer needed without emitter
+  implementations).
+- All 458 remaining harness tests pass. Ruff lint clean.
 
 ---
 
@@ -207,7 +225,7 @@ internal implementation details that no external consumer uses. Same for
 
 ---
 
-### 7. Fix the 7 Failing JIT Instruction Tests
+### 7. Fix the 7 Failing JIT Instruction Tests — ✅ COMPLETE
 
 **What**: `test_jit_instructions.py` has 7 test failures because tests reference
 old instruction IDs that were renamed:
@@ -220,9 +238,19 @@ old instruction IDs that were renamed:
 
 **Validation**: All 480 tests should pass after this fix (currently 473 pass, 7 fail).
 
+**Summary of changes made**:
+Updated `tests/harness/test_jit_instructions.py` in class `TestDefaultInstructions`:
+- Renamed 3 `no_reads_after_5_turns` tests → `no_reads_after_3_turns`, updated
+  turn thresholds from 5/4 → 3/2 to match the actual condition (`turn >= 3`).
+- Renamed 4 `no_writes_after_reads` tests → `no_deliverable_after_many_reads`,
+  updated turn thresholds to match the actual condition (`turn >= 8`, `read_file >= 5`,
+  `write_file == 0`, `work_items_complete < work_items_total`), and added
+  `work_items_total=3` to contexts that need the condition to fire.
+- All 480 harness tests now pass. Ruff lint clean.
+
 ---
 
-### 8. Remove Unused Compaction Store Complexity (~697 lines → ~150 lines)
+### 8. Remove Unused Compaction Store Complexity (~697 lines → ~150 lines) — ✅ COMPLETE
 
 **What**: `_compaction/_store.py` defines `CompactionStore` protocol,
 `InMemoryCompactionStore`, `CompactionTransaction`, `SecurityContext`, and
@@ -230,12 +258,35 @@ elaborate versioning/locking infrastructure. In practice, only
 `InMemoryCompactionStore` is ever used, and the versioning/locking is never
 exercised because the harness runs single-threaded.
 
-**Action**: Simplify `_store.py`:
-- Keep: `CompactionStore` protocol, `InMemoryCompactionStore`
-- Remove: `CompactionTransaction`, `SecurityContext`, file-system store stubs,
-  elaborate version conflict handling
-- Simplify `InMemoryCompactionStore` to just store/load without transaction
-  overhead
+**Summary of changes made**:
+- Removed `CompactionTransaction` class (~76 lines) — transactional wrapper with
+  optimistic version tracking. Never used in runtime code (only `CompactionExecutor`
+  instantiates `InMemoryCompactionStore` but uses SharedState for actual plan
+  persistence, never calling store methods).
+- Removed `SecurityContext` class (~31 lines) — access control context that was
+  only referenced as a type hint in the `ArtifactStore` protocol's `retrieve`
+  method. Never instantiated anywhere.
+- Simplified `CompactionStore` protocol: replaced version-based optimistic locking
+  API (`get_current_plan` returning `(plan, version)`, `commit_plan` with
+  `expected_version`) with simple `get_plan`/`save_plan`/`delete_plan` methods.
+- Simplified `InMemoryCompactionStore`: removed `threading.Lock`, removed version
+  tracking and conflict detection logic. Now a plain dict-backed store.
+- Simplified `InMemorySummaryCache`: removed `threading.Lock` wrapping all
+  operations (single-threaded runtime).
+- Simplified `InMemoryArtifactStore`: removed `threading.Lock` wrapping all
+  operations.
+- Simplified `ArtifactStore` protocol: replaced `SecurityContext | None` parameter
+  in `retrieve` with `Any | None`.
+- Updated `_compaction/__init__.py`: removed `CompactionTransaction` and
+  `SecurityContext` imports and `__all__` entries.
+- Updated `_harness/__init__.py`: removed `CompactionTransaction` and
+  `SecurityContext` imports and `__all__` entries.
+- Updated `tests/harness/test_compaction.py`: removed `TestCompactionTransaction`
+  class (3 tests), removed `CompactionTransaction` import. Rewrote
+  `TestInMemoryCompactionStore` to use simplified `get_plan`/`save_plan` API
+  (replaced version conflict test with overwrite test).
+- File reduced from 838 lines to 624 lines (~214 lines removed).
+- All 455 remaining harness tests pass. Ruff lint clean.
 
 ---
 

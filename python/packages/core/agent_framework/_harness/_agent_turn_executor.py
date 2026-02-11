@@ -84,14 +84,16 @@ class AgentTurnExecutor(Executor):
 
     # Continuation nudge — injected when the agent ends a turn without calling work_complete
     DEFAULT_CONTINUATION_PROMPT = (
-        "Your work is still in progress — you have not yet called work_complete.\n\n"
-        "Next steps:\n"
-        "1. If you have been analyzing or planning, shift to executing now.\n"
-        "2. If something failed, work around it or try a different approach.\n"
-        "3. If open items remain, finish them before wrapping up.\n"
-        "4. Once every item is done and results are verified, call work_complete "
-        "with a summary of what you delivered.\n\n"
-        "Do not stop early — resolve uncertainties with your own judgment and press on."
+        "You stopped without calling work_complete. Review your situation:\n"
+        "- If you have fully answered the user's question or completed their request, "
+        "call work_complete now with a brief summary.\n"
+        "- If work remains (open items, unfinished analysis, untested changes), "
+        "continue working — do not stop until everything is done.\n"
+        "- If something failed, try a different approach before giving up.\n\n"
+        "You MUST call work_complete when finished. Do not simply repeat your answer.\n"
+        "Do not narrate what you are about to do — just do it. Never say things like "
+        "'Marking as done', 'I will now call work_complete', or 'Let me finalize'. "
+        "Just call the tool silently."
     )
 
     def __init__(
@@ -260,13 +262,20 @@ class AgentTurnExecutor(Executor):
                         strategies_applied,
                     )
                 else:
-                    # Fall back to direct clearing
-                    cleared_count = self._apply_direct_clear(turn_count)
+                    # Fall back to direct clearing with budget awareness.
+                    # Target freeing enough to get back to 70% of budget (not
+                    # just the soft threshold) so we don't compact again
+                    # immediately on the next turn.
+                    target_after = int(tokens_before * 0.50) if tokens_before > 0 else 0
+                    target_to_free = max(0, tokens_before - target_after) if tokens_before > 0 else 0
+                    cleared_count = self._apply_direct_clear(turn_count, target_tokens_to_free=target_to_free)
                     if cleared_count > 0:
                         strategies_applied = ["clear"]
                         logger.info(
-                            "AgentTurnExecutor: Cleared %d old tool results to reduce context pressure",
+                            "AgentTurnExecutor: Cleared %d old tool results "
+                            "to reduce context pressure (target: %d tokens)",
                             cleared_count,
+                            target_to_free,
                         )
 
                 duration_ms = (time.monotonic() - start_time) * 1000
@@ -324,12 +333,8 @@ class AgentTurnExecutor(Executor):
                     response = await self._run_agent(ctx)
 
                 if response and response.usage_details:
-                    agent_span.set_attribute(
-                        "harness.input_tokens", response.usage_details.input_token_count or 0
-                    )
-                    agent_span.set_attribute(
-                        "harness.output_tokens", response.usage_details.output_token_count or 0
-                    )
+                    agent_span.set_attribute("harness.input_tokens", response.usage_details.input_token_count or 0)
+                    agent_span.set_attribute("harness.output_tokens", response.usage_details.output_token_count or 0)
 
             if response is None:
                 # Agent did not complete (e.g., waiting for user input)
@@ -872,16 +877,26 @@ class AgentTurnExecutor(Executor):
             if getattr(msg, "message_id", None) is None:
                 msg.message_id = f"msg-{uuid.uuid4().hex[:12]}"
 
-    def _apply_direct_clear(self, current_turn: int, preserve_recent_turns: int = 2) -> int:
+    def _apply_direct_clear(
+        self,
+        current_turn: int,
+        preserve_recent_turns: int = 2,
+        target_tokens_to_free: int = 0,
+    ) -> int:
         """Clear old tool results in the cache to reduce context pressure.
 
         Replaces FunctionResultContent in older messages with short placeholders.
         This is a lightweight version of ClearStrategy that operates directly on
         the in-memory cache without needing an AgentThread.
 
+        When ``target_tokens_to_free`` is provided, stops clearing once the
+        estimated freed tokens reaches the target — preventing destructive
+        over-compaction on the first trigger.
+
         Args:
             current_turn: The current turn number.
             preserve_recent_turns: Number of recent cache entries to keep intact.
+            target_tokens_to_free: Approximate token budget to free. 0 means clear all eligible.
 
         Returns:
             Number of tool results that were cleared.
@@ -892,9 +907,14 @@ class AgentTurnExecutor(Executor):
             return 0
 
         cleared_count = 0
+        tokens_freed_estimate = 0
         cutoff = len(self._cache) - preserve_recent_turns
 
         for i in range(cutoff):
+            # Stop once we've freed enough (if a target is set)
+            if target_tokens_to_free > 0 and tokens_freed_estimate >= target_tokens_to_free:
+                break
+
             msg = self._cache[i]
             contents = getattr(msg, "contents", None)
             if not contents:
@@ -907,9 +927,16 @@ class AgentTurnExecutor(Executor):
                     result_str = str(content.result or "")
                     # Only clear results that are large enough to matter (>100 chars)
                     if len(result_str) > 100:
+                        # Stop mid-message if we've already freed enough
+                        if target_tokens_to_free > 0 and tokens_freed_estimate >= target_tokens_to_free:
+                            new_contents.append(content)
+                            continue
+                        # Estimate tokens freed (rough: 1 token ≈ 4 chars)
+                        placeholder = "[Tool result cleared to save context]"
+                        tokens_freed_estimate += max(0, len(result_str) - len(placeholder)) // 4
                         content = FunctionResultContent(
                             call_id=content.call_id,
-                            result="[Tool result cleared to save context]",
+                            result=placeholder,
                         )
                         modified = True
                         cleared_count += 1
@@ -1037,7 +1064,13 @@ class AgentTurnExecutor(Executor):
                 turn_context=turn_context,
             )
         except Exception:
-            logger.warning("AgentTurnExecutor: Full compaction failed", exc_info=True)
+            logger.warning(
+                "AgentTurnExecutor: Full compaction failed (cache_size=%d, tokens=%d, tokens_to_free=%d)",
+                len(self._cache),
+                current_tokens,
+                tokens_to_free,
+                exc_info=True,
+            )
             return []
 
         # Store updated plan if it has content
@@ -1133,14 +1166,27 @@ class AgentTurnExecutor(Executor):
     async def _inject_continuation_prompt(self, ctx: WorkflowContext[Any], current_count: int) -> None:
         """Inject a continuation prompt into the conversation.
 
+        Includes a summary of open work items (if any) to help the model
+        decide whether it is truly done.
+
         Args:
             ctx: Workflow context for state access.
             current_count: Current continuation count.
         """
         from .._types import ChatMessage
 
-        # Add continuation prompt to cache
-        continuation_msg = ChatMessage(role="user", text=self._continuation_prompt)
+        # Build prompt with work item context
+        prompt_parts = [self._continuation_prompt]
+
+        if self._task_list is not None and self._task_list.ledger:
+            incomplete = self._task_list.ledger.get_incomplete_items()
+            if incomplete:
+                items_summary = ", ".join(f'"{item.title}" ({item.status.value})' for item in incomplete)
+                prompt_parts.append(f"\nOpen work items ({len(incomplete)}): {items_summary}")
+            else:
+                prompt_parts.append("\nNo open work items remain.")
+
+        continuation_msg = ChatMessage(role="system", text="\n".join(prompt_parts))
         self._cache.append(continuation_msg)
 
         # Update continuation count
@@ -1350,7 +1396,7 @@ class AgentTurnExecutor(Executor):
         """Inject guidance about work item tools on the first turn."""
         from .._types import ChatMessage
 
-        guidance_msg = ChatMessage(role="user", text=self.WORK_ITEM_GUIDANCE)
+        guidance_msg = ChatMessage(role="system", text=self.WORK_ITEM_GUIDANCE)
         self._cache.append(guidance_msg)
         logger.info("AgentTurnExecutor: Injected work item guidance message")
 
@@ -1413,7 +1459,7 @@ class AgentTurnExecutor(Executor):
         """Inject guidance about effective tool usage patterns on the first turn."""
         from .._types import ChatMessage
 
-        guidance_msg = ChatMessage(role="user", text=self.TOOL_STRATEGY_GUIDANCE)
+        guidance_msg = ChatMessage(role="system", text=self.TOOL_STRATEGY_GUIDANCE)
         self._cache.append(guidance_msg)
         logger.info("AgentTurnExecutor: Injected tool strategy guidance")
 
@@ -1449,7 +1495,7 @@ class AgentTurnExecutor(Executor):
         """Inject a prompt asking the agent to plan before executing."""
         from .._types import ChatMessage
 
-        planning_msg = ChatMessage(role="user", text=self.PLANNING_PROMPT)
+        planning_msg = ChatMessage(role="system", text=self.PLANNING_PROMPT)
         self._cache.append(planning_msg)
         logger.info("AgentTurnExecutor: Injected planning prompt")
 
@@ -1510,7 +1556,7 @@ class AgentTurnExecutor(Executor):
 
         instructions = self._jit_processor.evaluate(jit_ctx)
         for text in instructions:
-            self._cache.append(ChatMessage(role="user", text=text))
+            self._cache.append(ChatMessage(role="system", text=text))
             logger.info("AgentTurnExecutor: Injected JIT instruction: %s", text[:80])
 
     async def _inject_work_item_state(self, ctx: WorkflowContext[Any]) -> None:
@@ -1572,7 +1618,7 @@ class AgentTurnExecutor(Executor):
         lines.append("")
         lines.append("Continue working on the next incomplete item.")
 
-        state_msg = ChatMessage(role="user", text="\n".join(lines))
+        state_msg = ChatMessage(role="system", text="\n".join(lines))
         self._cache.append(state_msg)
         logger.info(f"AgentTurnExecutor: Injected work item state ({len(incomplete)} remaining)")
 
@@ -1622,7 +1668,7 @@ class AgentTurnExecutor(Executor):
             return
 
         # Inject reminder as user message
-        reminder_msg = ChatMessage(role="user", text=reminder_text)
+        reminder_msg = ChatMessage(role="system", text=reminder_text)
         self._cache.append(reminder_msg)
 
         # Record event
@@ -1719,7 +1765,7 @@ class AgentTurnExecutor(Executor):
         if invariant_prompt:
             from .._types import ChatMessage
 
-            self._cache.append(ChatMessage(role="user", text=invariant_prompt))
+            self._cache.append(ChatMessage(role="system", text=invariant_prompt))
             await self._append_event(
                 ctx,
                 HarnessEvent(

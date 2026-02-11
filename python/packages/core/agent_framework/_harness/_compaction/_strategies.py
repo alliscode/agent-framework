@@ -39,14 +39,14 @@ from ._types import (
 if TYPE_CHECKING:
     from ..._threads import AgentThread
     from ..._types import ChatMessage
-    from ._renderer import ArtifactStore
+    from ._store import ArtifactStore
     from ._tokenizer import ProviderAwareTokenizer, TokenBudget
     from ._turn_context import TurnContext
 
 logger = logging.getLogger(__name__)
 
 
-def _count_message_tokens(msg: "ChatMessage", tokenizer: "ProviderAwareTokenizer") -> int:
+def _count_message_tokens(msg: ChatMessage, tokenizer: ProviderAwareTokenizer) -> int:
     """Count tokens for a message including all content types.
 
     Unlike ``msg.text`` which only returns TextContent, this counts tokens
@@ -721,7 +721,7 @@ class ExternalizeStrategy(CompactionStrategy):
         content = "\n\n".join(msg.text for msg in span_messages)
 
         # Create metadata
-        from ._renderer import ArtifactMetadata
+        from ._store import ArtifactMetadata
 
         metadata = ArtifactMetadata(
             thread_id=str(uuid.uuid4()),  # Should be actual thread ID

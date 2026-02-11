@@ -9,6 +9,7 @@ from .._workflows._executor import Executor, handler
 from .._workflows._workflow_context import WorkflowContext
 from ._constants import (
     DEFAULT_STALL_THRESHOLD,
+    DEFAULT_WORK_COMPLETE_MAX_RETRIES,
     HARNESS_COVERAGE_LEDGER_KEY,
     HARNESS_MAX_TURNS_KEY,
     HARNESS_PROGRESS_TRACKER_KEY,
@@ -17,6 +18,7 @@ from ._constants import (
     HARNESS_TASK_CONTRACT_KEY,
     HARNESS_TRANSCRIPT_KEY,
     HARNESS_TURN_COUNT_KEY,
+    HARNESS_WORK_COMPLETE_RETRY_COUNT_KEY,
     HARNESS_WORK_ITEM_LEDGER_KEY,
 )
 from ._state import (
@@ -66,6 +68,7 @@ class StopDecisionExecutor(Executor):
         enable_stall_detection: bool = False,
         enable_work_item_verification: bool = False,
         require_work_complete: bool = True,
+        work_complete_max_retries: int = DEFAULT_WORK_COMPLETE_MAX_RETRIES,
         stall_threshold: int = DEFAULT_STALL_THRESHOLD,
         hooks: "HarnessHooks | None" = None,
         id: str = "harness_stop_decision",
@@ -77,6 +80,9 @@ class StopDecisionExecutor(Executor):
             enable_stall_detection: Whether to detect stalled progress.
             enable_work_item_verification: Whether to verify work items before stopping.
             require_work_complete: Whether to require explicit work_complete call before stopping.
+            work_complete_max_retries: Max times to retry when agent signals done without
+                calling work_complete. After this many retries, accept the done signal anyway
+                to prevent infinite loops. Default is 3.
             stall_threshold: Number of unchanged turns before stall detection.
             hooks: Optional harness hooks for agent-stop interception.
             id: Unique identifier for this executor.
@@ -86,6 +92,7 @@ class StopDecisionExecutor(Executor):
         self._enable_stall_detection = enable_stall_detection
         self._enable_work_item_verification = enable_work_item_verification
         self._require_work_complete = require_work_complete
+        self._work_complete_max_retries = work_complete_max_retries
         self._stall_threshold = stall_threshold
         self._hooks = hooks
 
@@ -146,22 +153,52 @@ class StopDecisionExecutor(Executor):
 
         # Layer 3: Agent signals done - with optional contract verification
         if turn_result.agent_done:
-            # 3-pre: Require explicit work_complete call
+            # 3-pre: Require explicit work_complete call (with retry cap)
             if self._require_work_complete and not turn_result.called_work_complete:
-                logger.info("StopDecisionExecutor: Agent signaled done but did not call work_complete")
+                # Track how many times we've retried without work_complete
+                retry_count = await self._get_work_complete_retry_count(ctx)
+                retry_count += 1
+                await ctx.set_shared_state(HARNESS_WORK_COMPLETE_RETRY_COUNT_KEY, retry_count)
+
+                if retry_count <= self._work_complete_max_retries:
+                    logger.info(
+                        "StopDecisionExecutor: Agent signaled done but did not call work_complete (retry %d/%d)",
+                        retry_count,
+                        self._work_complete_max_retries,
+                    )
+                    await self._append_event(
+                        ctx,
+                        HarnessEvent(
+                            event_type="stop_decision",
+                            data={
+                                "decision": "continue",
+                                "reason": "work_complete_not_called",
+                                "turn": turn_count,
+                                "retry": retry_count,
+                                "max_retries": self._work_complete_max_retries,
+                            },
+                        ),
+                    )
+                    await ctx.send_message(RepairTrigger())
+                    return
+                # Max retries exceeded — accept the done signal to prevent infinite loops
+                logger.warning(
+                    "StopDecisionExecutor: Agent never called work_complete after %d retries, "
+                    "accepting done signal to prevent infinite loop",
+                    self._work_complete_max_retries,
+                )
                 await self._append_event(
                     ctx,
                     HarnessEvent(
                         event_type="stop_decision",
                         data={
-                            "decision": "continue",
-                            "reason": "work_complete_not_called",
+                            "decision": "stop",
+                            "reason": "work_complete_retries_exhausted",
                             "turn": turn_count,
+                            "retries": retry_count,
                         },
                     ),
                 )
-                await ctx.send_message(RepairTrigger())
-                return
 
             if self._enable_contract_verification:
                 # Verify contract before accepting done signal
@@ -238,6 +275,13 @@ class StopDecisionExecutor(Executor):
         """Get the current turn count."""
         try:
             return int(await ctx.get_shared_state(HARNESS_TURN_COUNT_KEY) or 0)
+        except KeyError:
+            return 0
+
+    async def _get_work_complete_retry_count(self, ctx: WorkflowContext[Any, Any]) -> int:
+        """Get the current work_complete retry count."""
+        try:
+            return int(await ctx.get_shared_state(HARNESS_WORK_COMPLETE_RETRY_COUNT_KEY) or 0)
         except KeyError:
             return 0
 

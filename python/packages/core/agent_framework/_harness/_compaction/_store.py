@@ -1,17 +1,12 @@
 # Copyright (c) Microsoft. All rights reserved.
 
-"""Storage and concurrency for context compaction.
+"""Storage for context compaction.
 
 This module provides:
-- CompactionStore protocol for persisting compaction plans
-- In-memory implementation for development/testing
-- CompactionTransaction for optimistic concurrency control
-- SummaryCache for caching expensive LLM summaries
-
-Concurrency Model:
-- Plans use optimistic locking via version numbers
-- Commits fail if version has changed (conflict detection)
-- Summaries are cached by content hash + schema version
+- CompactionStore protocol and in-memory implementation for persisting compaction plans
+- SummaryCache protocol and in-memory implementation for caching LLM summaries
+- ArtifactStore protocol and in-memory implementation for storing externalized content
+- ArtifactMetadata for artifact access control
 
 See CONTEXT_COMPACTION_DESIGN.md for full architecture details.
 """
@@ -20,8 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -39,52 +33,36 @@ logger = logging.getLogger(__name__)
 
 
 class CompactionStore(Protocol):
-    """Protocol for storing compaction plans with concurrency control.
+    """Protocol for storing compaction plans.
 
-    Implementations must support:
-    - Get current plan with version number
-    - Commit plan with optimistic locking (version check)
-    - Delete/cleanup old plans
-
-    Thread-safety requirements:
-    - get_current_plan must be thread-safe
-    - commit_plan must be atomic (check version + update)
+    Implementations provide simple get/save/delete semantics for
+    compaction plans keyed by thread ID.
     """
 
-    async def get_current_plan(
+    async def get_plan(
         self,
         thread_id: str,
-    ) -> tuple[CompactionPlan | None, int]:
-        """Get the current compaction plan and version number.
+    ) -> CompactionPlan | None:
+        """Get the current compaction plan.
 
         Args:
             thread_id: ID of the thread.
 
         Returns:
-            Tuple of (plan, version). Plan is None if no plan exists.
-            Version starts at 0 and increments with each commit.
+            The plan, or None if no plan exists.
         """
         ...
 
-    async def commit_plan(
+    async def save_plan(
         self,
         thread_id: str,
         plan: CompactionPlan,
-        expected_version: int,
-    ) -> bool:
-        """Commit a compaction plan with optimistic locking.
-
-        The commit succeeds only if the current version matches
-        expected_version. This prevents lost updates when multiple
-        processes are compacting the same thread.
+    ) -> None:
+        """Save a compaction plan.
 
         Args:
             thread_id: ID of the thread.
-            plan: The compaction plan to commit.
-            expected_version: Expected current version (from get_current_plan).
-
-        Returns:
-            True if commit succeeded, False if version conflict.
+            plan: The compaction plan to save.
         """
         ...
 
@@ -107,75 +85,38 @@ class InMemoryCompactionStore:
     """In-memory implementation of CompactionStore.
 
     Suitable for development, testing, and single-process deployments.
-    Uses a lock for thread-safety.
-
-    Attributes:
-        plans: Map of thread_id to (plan, version).
     """
 
     def __init__(self) -> None:
         """Initialize the in-memory store."""
-        self._plans: dict[str, tuple[CompactionPlan, int]] = {}
-        self._lock = threading.Lock()
+        self._plans: dict[str, CompactionPlan] = {}
 
-    async def get_current_plan(
+    async def get_plan(
         self,
         thread_id: str,
-    ) -> tuple[CompactionPlan | None, int]:
-        """Get the current plan and version.
+    ) -> CompactionPlan | None:
+        """Get the current plan.
 
         Args:
             thread_id: ID of the thread.
 
         Returns:
-            Tuple of (plan, version). Plan is None if not found.
+            The plan, or None if not found.
         """
-        with self._lock:
-            if thread_id not in self._plans:
-                return (None, 0)
-            plan, version = self._plans[thread_id]
-            return (plan, version)
+        return self._plans.get(thread_id)
 
-    async def commit_plan(
+    async def save_plan(
         self,
         thread_id: str,
         plan: CompactionPlan,
-        expected_version: int,
-    ) -> bool:
-        """Commit plan with optimistic locking.
+    ) -> None:
+        """Save a plan.
 
         Args:
             thread_id: ID of the thread.
-            plan: The plan to commit.
-            expected_version: Expected version.
-
-        Returns:
-            True if committed, False on version conflict.
+            plan: The plan to save.
         """
-        with self._lock:
-            current_version = 0
-            if thread_id in self._plans:
-                _, current_version = self._plans[thread_id]
-
-            if current_version != expected_version:
-                logger.debug(
-                    "Version conflict for thread %s: expected %d, got %d",
-                    thread_id,
-                    expected_version,
-                    current_version,
-                )
-                return False
-
-            new_version = current_version + 1
-            plan.thread_version = new_version
-            self._plans[thread_id] = (plan, new_version)
-
-            logger.debug(
-                "Committed plan for thread %s, version %d",
-                thread_id,
-                new_version,
-            )
-            return True
+        self._plans[thread_id] = plan
 
     async def delete_plan(
         self,
@@ -189,101 +130,19 @@ class InMemoryCompactionStore:
         Returns:
             True if deleted, False if not found.
         """
-        with self._lock:
-            if thread_id not in self._plans:
-                return False
-            del self._plans[thread_id]
-            logger.debug("Deleted plan for thread %s", thread_id)
-            return True
+        if thread_id not in self._plans:
+            return False
+        del self._plans[thread_id]
+        return True
 
     def clear(self) -> None:
         """Clear all stored plans."""
-        with self._lock:
-            self._plans.clear()
-            logger.debug("Cleared all plans")
+        self._plans.clear()
 
     @property
     def plan_count(self) -> int:
         """Get the number of stored plans."""
-        with self._lock:
-            return len(self._plans)
-
-
-@dataclass
-class CompactionTransaction:
-    """Transactional wrapper for compaction operations.
-
-    Provides a clean API for read-modify-commit cycles with
-    automatic version tracking.
-
-    Usage:
-        transaction = CompactionTransaction(store, thread_id)
-        await transaction.begin()
-
-        # Modify plan
-        transaction.plan.clearings.append(new_record)
-
-        # Commit with conflict detection
-        success = await transaction.commit()
-        if not success:
-            # Handle conflict (retry, etc.)
-            pass
-
-    Attributes:
-        store: The compaction store.
-        thread_id: ID of the thread.
-        plan: The current plan (None until begin() called).
-        version: Current version (for optimistic locking).
-    """
-
-    store: CompactionStore
-    thread_id: str
-    plan: CompactionPlan | None = None
-    version: int = 0
-    _started: bool = field(default=False, repr=False)
-
-    async def begin(self) -> CompactionPlan:
-        """Begin the transaction by loading the current plan.
-
-        Creates an empty plan if none exists.
-
-        Returns:
-            The current (or new) compaction plan.
-        """
-        self.plan, self.version = await self.store.get_current_plan(self.thread_id)
-
-        if self.plan is None:
-            self.plan = CompactionPlan.create_empty(self.thread_id, self.version)
-
-        self._started = True
-        return self.plan
-
-    async def commit(self) -> bool:
-        """Commit the modified plan.
-
-        Returns:
-            True if commit succeeded, False on version conflict.
-
-        Raises:
-            RuntimeError: If begin() was not called.
-        """
-        if not self._started or self.plan is None:
-            raise RuntimeError("Transaction not started. Call begin() first.")
-
-        return await self.store.commit_plan(
-            self.thread_id,
-            self.plan,
-            self.version,
-        )
-
-    async def rollback(self) -> None:
-        """Rollback the transaction by reloading the plan.
-
-        Useful after a failed commit to get the latest version.
-        """
-        self.plan, self.version = await self.store.get_current_plan(self.thread_id)
-        if self.plan is None:
-            self.plan = CompactionPlan.create_empty(self.thread_id, self.version)
+        return len(self._plans)
 
 
 class SummaryCache(Protocol):
@@ -370,11 +229,7 @@ class InMemorySummaryCache:
     """In-memory implementation of SummaryCache.
 
     Suitable for development, testing, and single-process deployments.
-    Supports TTL-based expiration.
-
-    Attributes:
-        max_entries: Maximum number of entries (LRU eviction).
-        default_ttl_seconds: Default TTL for entries.
+    Supports TTL-based expiration and LRU eviction.
     """
 
     def __init__(
@@ -391,7 +246,6 @@ class InMemorySummaryCache:
         """
         self._entries: dict[str, CacheEntry] = {}
         self._access_order: list[str] = []  # For LRU
-        self._lock = threading.Lock()
         self._max_entries = max_entries
         self._default_ttl_seconds = default_ttl_seconds
 
@@ -408,24 +262,22 @@ class InMemorySummaryCache:
             Cached summary or None if not found/expired.
         """
         key_str = key.to_string()
+        entry = self._entries.get(key_str)
+        if entry is None:
+            return None
 
-        with self._lock:
-            entry = self._entries.get(key_str)
-            if entry is None:
-                return None
-
-            if entry.is_expired():
-                del self._entries[key_str]
-                if key_str in self._access_order:
-                    self._access_order.remove(key_str)
-                return None
-
-            # Update access order (LRU)
+        if entry.is_expired():
+            del self._entries[key_str]
             if key_str in self._access_order:
                 self._access_order.remove(key_str)
-            self._access_order.append(key_str)
+            return None
 
-            return entry.summary
+        # Update access order (LRU)
+        if key_str in self._access_order:
+            self._access_order.remove(key_str)
+        self._access_order.append(key_str)
+
+        return entry.summary
 
     async def put(
         self,
@@ -456,19 +308,18 @@ class InMemorySummaryCache:
             expires_at=expires_at,
         )
 
-        with self._lock:
-            # Evict if at capacity
-            while len(self._entries) >= self._max_entries and self._access_order:
-                oldest_key = self._access_order.pop(0)
-                if oldest_key in self._entries:
-                    del self._entries[oldest_key]
+        # Evict if at capacity
+        while len(self._entries) >= self._max_entries and self._access_order:
+            oldest_key = self._access_order.pop(0)
+            if oldest_key in self._entries:
+                del self._entries[oldest_key]
 
-            self._entries[key_str] = entry
+        self._entries[key_str] = entry
 
-            # Update access order
-            if key_str in self._access_order:
-                self._access_order.remove(key_str)
-            self._access_order.append(key_str)
+        # Update access order
+        if key_str in self._access_order:
+            self._access_order.remove(key_str)
+        self._access_order.append(key_str)
 
     async def invalidate(
         self,
@@ -483,26 +334,22 @@ class InMemorySummaryCache:
             True if removed, False if not found.
         """
         key_str = key.to_string()
-
-        with self._lock:
-            if key_str not in self._entries:
-                return False
-            del self._entries[key_str]
-            if key_str in self._access_order:
-                self._access_order.remove(key_str)
-            return True
+        if key_str not in self._entries:
+            return False
+        del self._entries[key_str]
+        if key_str in self._access_order:
+            self._access_order.remove(key_str)
+        return True
 
     def clear(self) -> None:
         """Clear all cached entries."""
-        with self._lock:
-            self._entries.clear()
-            self._access_order.clear()
+        self._entries.clear()
+        self._access_order.clear()
 
     @property
     def entry_count(self) -> int:
         """Get the number of cached entries."""
-        with self._lock:
-            return len(self._entries)
+        return len(self._entries)
 
     async def cleanup_expired(self) -> int:
         """Remove all expired entries.
@@ -510,18 +357,12 @@ class InMemorySummaryCache:
         Returns:
             Number of entries removed.
         """
-        removed = 0
-
-        with self._lock:
-            expired_keys = [key for key, entry in self._entries.items() if entry.is_expired()]
-
-            for key in expired_keys:
-                del self._entries[key]
-                if key in self._access_order:
-                    self._access_order.remove(key)
-                removed += 1
-
-        return removed
+        expired_keys = [key for key, entry in self._entries.items() if entry.is_expired()]
+        for key in expired_keys:
+            del self._entries[key]
+            if key in self._access_order:
+                self._access_order.remove(key)
+        return len(expired_keys)
 
 
 def compute_content_hash(content: str) -> str:
@@ -595,7 +436,6 @@ class InMemoryArtifactStore:
     def __init__(self) -> None:
         """Initialize the store."""
         self._artifacts: dict[str, ArtifactStoreEntry] = {}
-        self._lock = threading.Lock()
         self._counter = 0
 
     async def store(
@@ -612,18 +452,14 @@ class InMemoryArtifactStore:
         Returns:
             Generated artifact ID.
         """
-        with self._lock:
-            self._counter += 1
-            artifact_id = f"artifact-{self._counter:08d}"
-
-            self._artifacts[artifact_id] = ArtifactStoreEntry(
-                content=content,
-                metadata=metadata,
-                created_at=datetime.now(timezone.utc),
-            )
-
-            logger.debug("Stored artifact %s (%d bytes)", artifact_id, len(content))
-            return artifact_id
+        self._counter += 1
+        artifact_id = f"artifact-{self._counter:08d}"
+        self._artifacts[artifact_id] = ArtifactStoreEntry(
+            content=content,
+            metadata=metadata,
+            created_at=datetime.now(timezone.utc),
+        )
+        return artifact_id
 
     async def get_metadata(
         self,
@@ -637,11 +473,10 @@ class InMemoryArtifactStore:
         Returns:
             Metadata or None if not found.
         """
-        with self._lock:
-            entry = self._artifacts.get(artifact_id)
-            if entry is None:
-                return None
-            return entry.metadata
+        entry = self._artifacts.get(artifact_id)
+        if entry is None:
+            return None
+        return entry.metadata
 
     async def retrieve(
         self,
@@ -652,16 +487,15 @@ class InMemoryArtifactStore:
 
         Args:
             artifact_id: The artifact ID.
-            requester_context: Security context (ignored in this impl).
+            requester_context: Optional context (unused in this impl).
 
         Returns:
             Content or None if not found.
         """
-        with self._lock:
-            entry = self._artifacts.get(artifact_id)
-            if entry is None:
-                return None
-            return entry.content
+        entry = self._artifacts.get(artifact_id)
+        if entry is None:
+            return None
+        return entry.content
 
     async def delete(
         self,
@@ -675,22 +509,116 @@ class InMemoryArtifactStore:
         Returns:
             True if deleted, False if not found.
         """
-        with self._lock:
-            if artifact_id not in self._artifacts:
-                return False
-            del self._artifacts[artifact_id]
-            logger.debug("Deleted artifact %s", artifact_id)
-            return True
+        if artifact_id not in self._artifacts:
+            return False
+        del self._artifacts[artifact_id]
+        return True
 
     def clear(self) -> None:
         """Clear all artifacts."""
-        with self._lock:
-            self._artifacts.clear()
-            self._counter = 0
-            logger.debug("Cleared all artifacts")
+        self._artifacts.clear()
+        self._counter = 0
 
     @property
     def artifact_count(self) -> int:
         """Get the number of stored artifacts."""
-        with self._lock:
-            return len(self._artifacts)
+        return len(self._artifacts)
+
+
+# ---------------------------------------------------------------------------
+# Artifact protocol and metadata types (moved from removed _renderer.py)
+# ---------------------------------------------------------------------------
+
+
+class ArtifactStore(Protocol):
+    """Protocol for storing and retrieving externalized content."""
+
+    async def store(
+        self,
+        content: str,
+        metadata: ArtifactMetadata,
+    ) -> str:
+        """Store content securely.
+
+        Args:
+            content: The content to store.
+            metadata: Metadata about the artifact.
+
+        Returns:
+            Unique artifact ID for retrieval.
+        """
+        ...
+
+    async def get_metadata(
+        self,
+        artifact_id: str,
+    ) -> ArtifactMetadata | None:
+        """Get metadata without retrieving content.
+
+        Args:
+            artifact_id: The artifact ID.
+
+        Returns:
+            Metadata if found, None otherwise.
+        """
+        ...
+
+    async def retrieve(
+        self,
+        artifact_id: str,
+        requester_context: Any | None = None,
+    ) -> str | None:
+        """Retrieve artifact content.
+
+        Args:
+            artifact_id: The artifact ID.
+            requester_context: Optional context for access control.
+
+        Returns:
+            Content if found and authorized, None otherwise.
+        """
+        ...
+
+
+@dataclass
+class ArtifactMetadata:
+    """Metadata for stored artifacts.
+
+    Attributes:
+        thread_id: ID of the thread this artifact belongs to.
+        tenant_id: Tenant ID for multi-tenant isolation.
+        created_at: When the artifact was created (ISO 8601).
+        ttl_seconds: Time-to-live for auto-expiry.
+        encryption_key_id: ID of the encryption key used.
+        sensitivity: Sensitivity level for access control.
+    """
+
+    thread_id: str
+    tenant_id: str | None = None
+    created_at: str | None = None
+    ttl_seconds: int | None = None
+    encryption_key_id: str | None = None
+    sensitivity: str = "internal"  # public, internal, confidential, restricted
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dictionary."""
+        return {
+            "thread_id": self.thread_id,
+            "tenant_id": self.tenant_id,
+            "created_at": self.created_at,
+            "ttl_seconds": self.ttl_seconds,
+            "encryption_key_id": self.encryption_key_id,
+            "sensitivity": self.sensitivity,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ArtifactMetadata:
+        """Deserialize from dictionary."""
+        return cls(
+            thread_id=data["thread_id"],
+            tenant_id=data.get("tenant_id"),
+            created_at=data.get("created_at"),
+            ttl_seconds=data.get("ttl_seconds"),
+            encryption_key_id=data.get("encryption_key_id"),
+            sensitivity=data.get("sensitivity", "internal"),
+        )

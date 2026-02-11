@@ -457,15 +457,23 @@ def _get_exporters_from_env(
     logs_headers = {**base_headers, **_parse_headers(logs_headers_str)}
 
     # Create exporters using helper function
-    return _create_otlp_exporters(
-        protocol=protocol,
-        traces_endpoint=traces_endpoint,
-        traces_headers=traces_headers if traces_headers else None,
-        metrics_endpoint=metrics_endpoint,
-        metrics_headers=metrics_headers if metrics_headers else None,
-        logs_endpoint=logs_endpoint,
-        logs_headers=logs_headers if logs_headers else None,
-    )
+    try:
+        return _create_otlp_exporters(
+            protocol=protocol,
+            traces_endpoint=traces_endpoint,
+            traces_headers=traces_headers if traces_headers else None,
+            metrics_endpoint=metrics_endpoint,
+            metrics_headers=metrics_headers if metrics_headers else None,
+            logs_endpoint=logs_endpoint,
+            logs_headers=logs_headers if logs_headers else None,
+        )
+    except ImportError:
+        logger.warning(
+            "OTLP %s exporter package not installed — skipping env-var-configured exporters. "
+            "Install the package or set OTEL_EXPORTER_OTLP_PROTOCOL to match an installed exporter.",
+            protocol,
+        )
+        return []
 
 
 def create_resource(

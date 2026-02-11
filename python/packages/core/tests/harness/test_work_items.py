@@ -2812,10 +2812,10 @@ class TestControlInvariantInjection:
         await executor._sync_work_item_ledger(mock_ctx)
 
         # Check that a continuation message was injected into the cache
-        user_messages = [m for m in executor._cache if getattr(getattr(m, "role", None), "value", None) == "user"]
-        assert len(user_messages) == 1
-        assert "timeline accuracy" in user_messages[0].text
-        assert "flag_revision" in user_messages[0].text
+        system_messages = [m for m in executor._cache if getattr(getattr(m, "role", None), "value", None) == "system"]
+        assert len(system_messages) == 1
+        assert "timeline accuracy" in system_messages[0].text
+        assert "flag_revision" in system_messages[0].text
 
     @pytest.mark.asyncio
     async def test_invariant_emits_event(self, mock_ctx) -> None:

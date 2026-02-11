@@ -6,8 +6,7 @@ These tests cover:
 - Core types: SpanReference, CompactionPlan, records
 - Tokenizer: TiktokenTokenizer, SimpleTokenizer, TokenBudget
 - Storage: InMemoryCompactionStore, InMemorySummaryCache, InMemoryArtifactStore
-- Events: CompactionEvent types, MetricsCollector
-- Rehydration: RehydrationInterceptor, artifact detection
+- Events: CompactionMetrics
 """
 
 from datetime import datetime, timezone
@@ -24,7 +23,6 @@ from agent_framework._harness import (
     # Summary types
     Decision,
     DropRecord,
-    MetricsCollector,
     # Tokenizer types
     OpenItem,
     SimpleTokenizer,
@@ -36,16 +34,10 @@ from agent_framework._harness import (
 )
 from agent_framework._harness._compaction import (
     # Storage types
-    CompactionTransaction,
     InMemoryArtifactStore,
     InMemoryCompactionStore,
     InMemorySummaryCache,
-    # Rehydration types
-    RehydrationInterceptor,
-    RehydrationState,
-    ToolCall,
     compute_content_hash,
-    create_rehydration_interceptor,
     create_summary_cache_key,
 )
 
@@ -335,38 +327,35 @@ class TestInMemoryCompactionStore:
         """Test getting a non-existent plan returns None."""
         store = InMemoryCompactionStore()
 
-        plan, version = await store.get_current_plan("thread-123")
+        plan = await store.get_plan("thread-123")
 
         assert plan is None
-        assert version == 0
 
     @pytest.mark.asyncio
-    async def test_store_commit_new_plan(self) -> None:
-        """Test committing a new plan."""
+    async def test_store_save_and_get_plan(self) -> None:
+        """Test saving and retrieving a plan."""
         store = InMemoryCompactionStore()
         plan = CompactionPlan.create_empty("thread-123", thread_version=0)
 
-        success = await store.commit_plan("thread-123", plan, expected_version=0)
+        await store.save_plan("thread-123", plan)
+        stored_plan = await store.get_plan("thread-123")
 
-        assert success
-        stored_plan, version = await store.get_current_plan("thread-123")
         assert stored_plan is not None
-        assert version == 1
+        assert stored_plan.thread_id == "thread-123"
 
     @pytest.mark.asyncio
-    async def test_store_version_conflict(self) -> None:
-        """Test version conflict detection."""
+    async def test_store_overwrite_plan(self) -> None:
+        """Test that saving a plan overwrites the previous one."""
         store = InMemoryCompactionStore()
         plan1 = CompactionPlan.create_empty("thread-123", thread_version=0)
-        plan2 = CompactionPlan.create_empty("thread-123", thread_version=0)
+        plan2 = CompactionPlan.create_empty("thread-123", thread_version=1)
 
-        # First commit should succeed
-        success1 = await store.commit_plan("thread-123", plan1, expected_version=0)
-        assert success1
+        await store.save_plan("thread-123", plan1)
+        await store.save_plan("thread-123", plan2)
+        stored_plan = await store.get_plan("thread-123")
 
-        # Second commit with same expected version should fail
-        success2 = await store.commit_plan("thread-123", plan2, expected_version=0)
-        assert not success2
+        assert stored_plan is not None
+        assert stored_plan.thread_version == 1
 
     @pytest.mark.asyncio
     async def test_store_delete_plan(self) -> None:
@@ -374,47 +363,12 @@ class TestInMemoryCompactionStore:
         store = InMemoryCompactionStore()
         plan = CompactionPlan.create_empty("thread-123", thread_version=0)
 
-        await store.commit_plan("thread-123", plan, expected_version=0)
+        await store.save_plan("thread-123", plan)
         deleted = await store.delete_plan("thread-123")
 
         assert deleted
-        stored_plan, _ = await store.get_current_plan("thread-123")
+        stored_plan = await store.get_plan("thread-123")
         assert stored_plan is None
-
-
-class TestCompactionTransaction:
-    """Tests for CompactionTransaction."""
-
-    @pytest.mark.asyncio
-    async def test_transaction_begin_creates_plan(self) -> None:
-        """Test that begin creates an empty plan if none exists."""
-        store = InMemoryCompactionStore()
-        transaction = CompactionTransaction(store=store, thread_id="thread-123")
-
-        plan = await transaction.begin()
-
-        assert plan is not None
-        assert plan.thread_id == "thread-123"
-
-    @pytest.mark.asyncio
-    async def test_transaction_commit_success(self) -> None:
-        """Test successful transaction commit."""
-        store = InMemoryCompactionStore()
-        transaction = CompactionTransaction(store=store, thread_id="thread-123")
-
-        await transaction.begin()
-        success = await transaction.commit()
-
-        assert success
-
-    @pytest.mark.asyncio
-    async def test_transaction_commit_without_begin_raises(self) -> None:
-        """Test that commit without begin raises error."""
-        store = InMemoryCompactionStore()
-        transaction = CompactionTransaction(store=store, thread_id="thread-123")
-
-        with pytest.raises(RuntimeError, match="not started"):
-            await transaction.commit()
 
 
 class TestInMemorySummaryCache:
@@ -554,108 +508,6 @@ class TestCompactionMetrics:
 
         assert metrics.total_rehydrations == 2
         assert metrics.total_rehydrations_blocked == 1
-
-
-class TestMetricsCollector:
-    """Tests for MetricsCollector."""
-
-    def test_collector_global_metrics(self) -> None:
-        """Test global metrics tracking."""
-        collector = MetricsCollector()
-
-        metrics = collector.get_global_metrics()
-        assert metrics.total_compactions == 0
-
-    def test_collector_reset(self) -> None:
-        """Test resetting metrics."""
-        collector = MetricsCollector()
-        metrics = collector.get_global_metrics()
-        metrics.record_compaction(1000, 1, 0, 100.0)
-
-        collector.reset()
-
-        metrics = collector.get_global_metrics()
-        assert metrics.total_compactions == 0
-
-
-# ============================================================================
-# Rehydration Tests
-# ============================================================================
-
-
-class TestRehydrationInterceptor:
-    """Tests for RehydrationInterceptor."""
-
-    def test_create_interceptor(self) -> None:
-        """Test creating a rehydration interceptor."""
-        tokenizer = SimpleTokenizer()
-        interceptor = create_rehydration_interceptor(tokenizer)
-
-        assert interceptor is not None
-        assert isinstance(interceptor, RehydrationInterceptor)
-
-    def test_interceptor_config(self) -> None:
-        """Test interceptor configuration."""
-        tokenizer = SimpleTokenizer()
-        interceptor = create_rehydration_interceptor(
-            tokenizer,
-            enabled=True,
-            max_artifacts_per_turn=5,
-            max_tokens_per_artifact=2000,
-        )
-
-        assert interceptor is not None
-
-
-class TestRehydrationState:
-    """Tests for RehydrationState."""
-
-    def test_state_creation(self) -> None:
-        """Test creating a RehydrationState."""
-        state = RehydrationState()
-
-        assert state.recent_injections == {}
-        assert state.config is None
-
-    def test_state_serialization(self) -> None:
-        """Test RehydrationState serialization."""
-        state = RehydrationState(
-            recent_injections={"artifact-001": 5},
-        )
-
-        data = state.to_dict()
-        assert data["recent_injections"] == {"artifact-001": 5}
-
-        restored = RehydrationState.from_dict(data)
-        assert restored.recent_injections == {"artifact-001": 5}
-
-
-class TestToolCall:
-    """Tests for ToolCall dataclass."""
-
-    def test_create_tool_call(self) -> None:
-        """Test creating a tool call."""
-        call = ToolCall(
-            id="call-123",
-            name="read_file",
-            arguments={"path": "/test/file.py"},
-        )
-
-        assert call.id == "call-123"
-        assert call.name == "read_file"
-        assert call.arguments["path"] == "/test/file.py"
-
-    def test_tool_call_serialization(self) -> None:
-        """Test ToolCall serialization."""
-        call = ToolCall(
-            id="call-456",
-            name="write_file",
-            arguments={"path": "/test.txt", "content": "Hello"},
-        )
-
-        data = call.to_dict()
-        assert data["id"] == "call-456"
-        assert data["name"] == "write_file"
 
 
 # ============================================================================
