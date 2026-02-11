@@ -19,6 +19,7 @@ a sandboxed directory.
 import argparse
 import asyncio
 import logging
+import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -105,6 +106,31 @@ def print_error(message: str) -> None:
 def print_success(message: str) -> None:
     """Print a success message."""
     print(f"{Colors.GREEN}[✓] {message}{Colors.RESET}")
+
+
+def setup_otel(endpoint: str) -> None:
+    """Configure OpenTelemetry to export traces, metrics, and logs via OTLP HTTP.
+
+    Args:
+        endpoint: OTLP HTTP endpoint (e.g. http://localhost:4318).
+    """
+    os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint)
+    os.environ.setdefault("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+
+    from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+    from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+    from agent_framework.observability import configure_otel_providers
+
+    configure_otel_providers(
+        enable_sensitive_data=True,
+        exporters=[
+            OTLPSpanExporter(endpoint=f"{endpoint}/v1/traces"),
+            OTLPMetricExporter(endpoint=f"{endpoint}/v1/metrics"),
+            OTLPLogExporter(endpoint=f"{endpoint}/v1/logs"),
+        ],
+    )
 
 
 AGENT_INSTRUCTIONS = """You are a capable AI coding assistant with access to a local workspace.
@@ -440,7 +466,21 @@ async def main() -> None:
         action="store_true",
         help="Show more detailed lifecycle events",
     )
+    parser.add_argument(
+        "--otel",
+        type=str,
+        nargs="?",
+        const="http://localhost:4318",
+        default=None,
+        metavar="ENDPOINT",
+        help="Enable OTEL tracing via OTLP HTTP (default endpoint: http://localhost:4318 for Aspire dashboard)",
+    )
     args = parser.parse_args()
+
+    # Configure OTEL before any other framework setup
+    if args.otel:
+        setup_otel(args.otel)
+        print_system(f"OTEL tracing enabled → {args.otel}")
 
     # Determine sandbox directory
     if args.sandbox:

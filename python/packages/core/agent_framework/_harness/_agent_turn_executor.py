@@ -8,6 +8,8 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any, cast
 
+from opentelemetry import trace
+
 from .._agents import AgentProtocol, ChatAgent
 from .._threads import AgentThread
 from .._types import AgentRunResponse, AgentRunResponseUpdate
@@ -36,6 +38,7 @@ if TYPE_CHECKING:
     from ._work_items import WorkItemEventMiddleware, WorkItemLedger, WorkItemTaskListProtocol
 
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer("agent_framework.harness")
 
 
 def _classify_compaction_level(
@@ -239,55 +242,62 @@ class AgentTurnExecutor(Executor):
 
         # 3. Apply compaction if needed — prefer full pipeline, fall back to direct clear
         if self._enable_compaction and self._is_compaction_needed(trigger):
-            # Ensure all cache messages have IDs so compaction strategies can track them
-            self._ensure_message_ids(self._cache)
+            with _tracer.start_as_current_span("harness.compaction", attributes={"harness.turn": turn_count}) as span:
+                # Ensure all cache messages have IDs so compaction strategies can track them
+                self._ensure_message_ids(self._cache)
 
-            # Get pre-compaction token count from the shared budget (set by _update_token_budget
-            # using authoritative API usage data after the previous agent turn)
-            tokens_before = await self._get_budget_estimate(ctx)
-            start_time = time.monotonic()
+                # Get pre-compaction token count from the shared budget (set by _update_token_budget
+                # using authoritative API usage data after the previous agent turn)
+                tokens_before = await self._get_budget_estimate(ctx)
+                start_time = time.monotonic()
 
-            strategies_applied = await self._run_full_compaction(ctx, turn_count)
-            if strategies_applied:
-                self._compaction_count += 1
-                logger.info(
-                    "AgentTurnExecutor: Full compaction pipeline applied successfully (count: %d, strategies: %s)",
-                    self._compaction_count,
-                    strategies_applied,
-                )
-            else:
-                # Fall back to direct clearing
-                cleared_count = self._apply_direct_clear(turn_count)
-                if cleared_count > 0:
-                    strategies_applied = ["clear"]
+                strategies_applied = await self._run_full_compaction(ctx, turn_count)
+                if strategies_applied:
+                    self._compaction_count += 1
                     logger.info(
-                        "AgentTurnExecutor: Cleared %d old tool results to reduce context pressure",
-                        cleared_count,
+                        "AgentTurnExecutor: Full compaction pipeline applied successfully (count: %d, strategies: %s)",
+                        self._compaction_count,
+                        strategies_applied,
                     )
+                else:
+                    # Fall back to direct clearing
+                    cleared_count = self._apply_direct_clear(turn_count)
+                    if cleared_count > 0:
+                        strategies_applied = ["clear"]
+                        logger.info(
+                            "AgentTurnExecutor: Cleared %d old tool results to reduce context pressure",
+                            cleared_count,
+                        )
 
-            duration_ms = (time.monotonic() - start_time) * 1000
-            # Re-estimate tokens from cache contents post-compaction and update the budget
-            await self._update_token_budget(ctx)
-            tokens_after = await self._get_budget_estimate(ctx)
-            tokens_freed = max(0, tokens_before - tokens_after)
+                duration_ms = (time.monotonic() - start_time) * 1000
+                # Re-estimate tokens from cache contents post-compaction and update the budget
+                await self._update_token_budget(ctx)
+                tokens_after = await self._get_budget_estimate(ctx)
+                tokens_freed = max(0, tokens_before - tokens_after)
 
-            # Classify compaction level for UI display
-            compaction_level = _classify_compaction_level(strategies_applied, tokens_before, tokens_after)
+                span.set_attribute("harness.compaction.tokens_before", tokens_before)
+                span.set_attribute("harness.compaction.tokens_after", tokens_after)
+                span.set_attribute("harness.compaction.tokens_freed", tokens_freed)
+                span.set_attribute("harness.compaction.duration_ms", round(duration_ms, 1))
+                span.set_attribute("harness.compaction.strategies", strategies_applied)
 
-            await ctx.add_event(
-                HarnessLifecycleEvent(
-                    event_type="compaction_completed",
-                    turn_number=turn_count,
-                    data={
-                        "tokens_before": tokens_before,
-                        "tokens_after": tokens_after,
-                        "tokens_freed": tokens_freed,
-                        "duration_ms": round(duration_ms, 1),
-                        "strategies_applied": strategies_applied,
-                        "compaction_level": compaction_level,
-                    },
-                ),
-            )
+                # Classify compaction level for UI display
+                compaction_level = _classify_compaction_level(strategies_applied, tokens_before, tokens_after)
+
+                await ctx.add_event(
+                    HarnessLifecycleEvent(
+                        event_type="compaction_completed",
+                        turn_number=turn_count,
+                        data={
+                            "tokens_before": tokens_before,
+                            "tokens_after": tokens_after,
+                            "tokens_freed": tokens_freed,
+                            "duration_ms": round(duration_ms, 1),
+                            "strategies_applied": strategies_applied,
+                            "compaction_level": compaction_level,
+                        },
+                    ),
+                )
 
         # 4. Record turn start event
         await self._append_event(
@@ -300,10 +310,26 @@ class AgentTurnExecutor(Executor):
 
         # 5. Run the agent
         try:
-            if ctx.is_streaming():
-                response = await self._run_agent_streaming(ctx)
-            else:
-                response = await self._run_agent(ctx)
+            with _tracer.start_as_current_span(
+                "harness.agent_call",
+                attributes={
+                    "harness.turn": turn_count,
+                    "harness.cache_size": len(self._cache),
+                    "harness.streaming": ctx.is_streaming(),
+                },
+            ) as agent_span:
+                if ctx.is_streaming():
+                    response = await self._run_agent_streaming(ctx)
+                else:
+                    response = await self._run_agent(ctx)
+
+                if response and response.usage_details:
+                    agent_span.set_attribute(
+                        "harness.input_tokens", response.usage_details.input_token_count or 0
+                    )
+                    agent_span.set_attribute(
+                        "harness.output_tokens", response.usage_details.output_token_count or 0
+                    )
 
             if response is None:
                 # Agent did not complete (e.g., waiting for user input)
@@ -559,7 +585,13 @@ class AgentTurnExecutor(Executor):
             return self._cache
 
         # Apply compaction to cache
-        return self._apply_compaction_plan(plan)
+        with _tracer.start_as_current_span(
+            "harness.apply_compaction_plan",
+            attributes={"harness.cache_size": len(self._cache)},
+        ) as span:
+            result = self._apply_compaction_plan(plan)
+            span.set_attribute("harness.messages_after_plan", len(result))
+            return result
 
     async def _load_compaction_plan(self, ctx: WorkflowContext[Any]) -> "CompactionPlan | None":
         """Load the compaction plan from SharedState.

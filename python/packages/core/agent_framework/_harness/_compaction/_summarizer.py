@@ -12,6 +12,8 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from opentelemetry import trace
+
 from ._summary import (
     ArtifactReference,
     Decision,
@@ -26,6 +28,7 @@ if TYPE_CHECKING:
     from ..._types import ChatMessage
 
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer("agent_framework.harness")
 
 # Prompt for structured summarization
 _SUMMARIZE_SYSTEM_PROMPT = """\
@@ -133,13 +136,17 @@ class ChatClientSummarizer:
             call_kwargs["model_id"] = self._model_id
 
         try:
-            response = await self._chat_client.get_response(
-                [
-                    CM(role="system", text=system_prompt),
-                    CM(role="user", text=user_prompt),
-                ],
-                **call_kwargs,
-            )
+            with _tracer.start_as_current_span(
+                "harness.summarizer_call",
+                attributes={"harness.summarizer.message_count": len(messages)},
+            ):
+                response = await self._chat_client.get_response(
+                    [
+                        CM(role="system", text=system_prompt),
+                        CM(role="user", text=user_prompt),
+                    ],
+                    **call_kwargs,
+                )
             response_text = ""
             for resp_msg in response.messages:
                 if resp_msg.text:
