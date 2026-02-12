@@ -84,16 +84,14 @@ class AgentTurnExecutor(Executor):
 
     # Continuation nudge — injected when the agent ends a turn without calling work_complete
     DEFAULT_CONTINUATION_PROMPT = (
-        "You stopped without calling work_complete. Review your situation:\n"
-        "- If you have fully answered the user's question or completed their request, "
-        "call work_complete now with a brief summary.\n"
-        "- If work remains (open items, unfinished analysis, untested changes), "
-        "continue working — do not stop until everything is done.\n"
-        "- If something failed, try a different approach before giving up.\n\n"
-        "You MUST call work_complete when finished. Do not simply repeat your answer.\n"
-        "Do not narrate what you are about to do — just do it. Never say things like "
-        "'Marking as done', 'I will now call work_complete', or 'Let me finalize'. "
-        "Just call the tool silently."
+        "You stopped without calling work_complete or making tool calls.\n\n"
+        "IMPORTANT: Do NOT repeat, rephrase, or summarize anything you already said. "
+        "The user has already seen your previous output.\n\n"
+        "Choose exactly one action:\n"
+        "1. If your task is complete → call work_complete now (no extra text needed).\n"
+        "2. If work remains → make the next tool call immediately.\n"
+        "3. If something failed → try a different approach.\n\n"
+        "Do not narrate. Do not restate your findings. Just act."
     )
 
     def __init__(
@@ -1345,7 +1343,8 @@ class AgentTurnExecutor(Executor):
         "3. Audit: When reviewing prior work, if you find issues, call flag_revision to "
         "create a mandatory correction item\n"
         "4. Revise: Complete any revision items with corrected artifacts\n"
-        "5. Verify: Call work_item_list to confirm all items are done before signaling completion\n\n"
+        "5. Finish: Call work_complete in the SAME tool-call batch as your final "
+        "work_item_update or work_item_set_artifact. Do not wait for another turn.\n\n"
         "IMPORTANT: Mark each item done AS SOON AS you complete it and store its artifact. "
         "All items (including revisions) must be done or skipped before the task "
         "can finish. Audit steps that find issues MUST call flag_revision - "

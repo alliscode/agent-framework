@@ -113,36 +113,9 @@ def setup_otel(endpoint: str) -> None:
     Args:
         endpoint: OTLP HTTP endpoint (e.g. http://localhost:4318).
     """
-    # from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
-    # from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
-    # from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-
     from agent_framework.observability import configure_otel_providers
 
     configure_otel_providers()
-    # configure_otel_providers(
-    #     enable_sensitive_data=True,
-    #     exporters=[
-    #         OTLPSpanExporter(endpoint=f"{endpoint}/v1/traces"),
-    #         OTLPMetricExporter(endpoint=f"{endpoint}/v1/metrics"),
-    #         OTLPLogExporter(endpoint=f"{endpoint}/v1/logs"),
-    #     ],
-    # )
-
-    # # Register shutdown hook to flush pending telemetry on exit
-    # import atexit
-
-    # from opentelemetry import metrics, trace
-
-    # def _flush_otel() -> None:
-    #     tracer_provider = trace.get_tracer_provider()
-    #     if hasattr(tracer_provider, "force_flush"):
-    #         tracer_provider.force_flush(timeout_millis=5000)
-    #     meter_provider = metrics.get_meter_provider()
-    #     if hasattr(meter_provider, "force_flush"):
-    #         meter_provider.force_flush(timeout_millis=5000)
-
-    # atexit.register(_flush_otel)
 
 
 AGENT_INSTRUCTIONS = """You are a capable AI coding assistant with access to a local workspace.
@@ -187,7 +160,15 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False
     all_tools = tools.get_tools() + [get_task_complete_tool()]
 
     # Create Azure OpenAI client and agent
-    chat_client = AzureOpenAIChatClient(credential=AzureCliCredential())
+    # Use ad_token_provider (callable) instead of credential (static token)
+    # so the token auto-refreshes on each API call, preventing 401 expiry errors.
+    azure_credential = AzureCliCredential()
+
+    def _get_token() -> str:
+        token = azure_credential.get_token("https://cognitiveservices.azure.com/.default")
+        return token.token
+
+    chat_client = AzureOpenAIChatClient(ad_token_provider=_get_token)
     agent = chat_client.create_agent(
         instructions=AGENT_INSTRUCTIONS,
         name="assistant",
@@ -429,7 +410,7 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False
                             if continuation_count > 0:
                                 print_system(f"Used {continuation_count} continuation prompt(s)")
 
-                            # Display work item artifacts
+                            # Display work item artifact summary (not full content)
                             if task_list and task_list.ledger and task_list.ledger.items:
                                 items_with_artifacts = [
                                     (item_id, item)
@@ -441,10 +422,9 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False
                                     print(f"{Colors.BOLD}📋 Work Item Artifacts ({len(items_with_artifacts)}):{Colors.RESET}")
                                     for item_id, item in items_with_artifacts:
                                         role_tag = f" [{item.artifact_role.value}]"
-                                        print(f"\n{Colors.CYAN}── [{item_id}] {item.title}{role_tag} ──{Colors.RESET}")
-                                        print(item.artifact)
-                                        print(f"{Colors.DIM}── end [{item_id}] ──{Colors.RESET}")
-                                        debug(f"  Artifact [{item_id}] ({len(item.artifact)} chars):\n{item.artifact}")
+                                        char_count = len(item.artifact)
+                                        print(f"  {Colors.CYAN}[{item_id}]{Colors.RESET} {item.title}{role_tag} ({char_count:,} chars)")
+                                        debug(f"  Artifact [{item_id}] ({char_count} chars):\n{item.artifact}")
 
             debug(f"--- Message #{message_count} completed, total events: {event_count}")
 

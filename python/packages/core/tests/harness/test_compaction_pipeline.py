@@ -590,12 +590,12 @@ class TestTurn0Protection:
         for p in proposals:
             proposed_ids.update(p.span.message_ids)
 
-        assert "u0" not in proposed_ids, "Turn 0 user message should be protected"
-        assert "a0" not in proposed_ids, "Turn 0 assistant message should be protected"
+        assert "u0" not in proposed_ids, "First user message should be protected"
+        # Assistant messages from turn 0 are now summarizable (only first user msg protected)
 
     @pytest.mark.asyncio
     async def test_turn0_protected_even_with_many_turns(self) -> None:
-        """With many turns, turn 0 stays protected while middle turns are summarizable."""
+        """With many turns, first user message stays protected while other messages are summarizable."""
         from agent_framework._harness._compaction import (
             SimpleTokenizer,
             SummarizeStrategy,
@@ -630,7 +630,7 @@ class TestTurn0Protection:
             proposed_ids.update(p.span.message_ids)
 
         assert "u0" not in proposed_ids
-        assert "a0" not in proposed_ids
+        # a0 is now summarizable (only first user message is protected)
         # Middle turns should be proposed for summarization
         assert len(proposals) > 0, "Should have proposals for middle turns"
 

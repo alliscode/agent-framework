@@ -571,7 +571,10 @@ class WorkItemTaskList:
 
             remaining = len(ledger.get_incomplete_items())
             pct = ledger.get_completion_percentage()
-            return f"Updated [{item_id}] -> {status_enum.value} ({remaining} remaining, {pct:.0f}% complete)"
+            result = f"Updated [{item_id}] -> {status_enum.value} ({remaining} remaining, {pct:.0f}% complete)"
+            if remaining == 0:
+                result += " — all items done, call work_complete now."
+            return result
 
         return work_item_update
 

@@ -14,6 +14,7 @@ on the executor's cache without modifying the strategy interfaces.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -39,9 +40,17 @@ class CacheMessageStore:
     async def list_messages(self) -> list[ChatMessage]:
         """Return a copy of the cache as a message list.
 
+        Assigns stable synthetic ``message_id`` values to any messages
+        that lack one, so that compaction strategies can reference them.
+        The IDs are written back to the original cache objects to remain
+        stable across repeated calls.
+
         Returns:
             Copy of the cache contents.
         """
+        for msg in self._cache:
+            if getattr(msg, "message_id", None) is None:
+                msg.message_id = f"cache-{uuid.uuid4().hex[:12]}"
         return list(self._cache)
 
     async def add_messages(self, messages: Sequence[ChatMessage]) -> None:

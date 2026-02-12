@@ -258,8 +258,11 @@ class ClearStrategy(CompactionStrategy):
         if not messages:
             return proposals
 
-        # Calculate current turn for recency check
-        current_turn = len([m for m in messages if m.role.value == "user"])
+        # Preserve only the last N messages by position (not by user-turn).
+        # In single-user-message conversations, user-turn-based recency
+        # treats ALL messages as "turn 1" and blocks all compaction.
+        preserve_tail = self._preserve_recent_turns * 4  # ~4 msgs per logical turn
+        clearable_end = max(0, len(messages) - preserve_tail)
 
         for i, msg in enumerate(messages):
             if msg.message_id is None:
@@ -292,11 +295,8 @@ class ClearStrategy(CompactionStrategy):
             if durability == ToolDurability.NON_REPLAYABLE:
                 continue  # Don't clear, need to externalize
 
-            # Estimate turn number for this message
-            msg_turn = len([m for m in messages[:i] if m.role.value == "user"])
-
-            # Check recency
-            if current_turn - msg_turn < self._preserve_recent_turns:
+            # Check recency — preserve recent messages by position
+            if i >= clearable_end:
                 continue
 
             # Check token count
@@ -304,7 +304,8 @@ class ClearStrategy(CompactionStrategy):
             if token_count < self._min_tokens_to_clear:
                 continue
 
-            # Create proposal
+            # Create proposal — use message index as approximate turn
+            msg_turn = len([m for m in messages[:i] if m.role.value == "user"])
             span = SpanReference(
                 message_ids=[msg.message_id],
                 first_turn=msg_turn,
@@ -378,7 +379,7 @@ class SummarizeStrategy(CompactionStrategy):
         target_token_ratio: float = 0.25,
         min_span_tokens: int = 500,
         min_span_messages: int = 3,
-        preserve_recent_turns: int = 5,
+        preserve_recent_turns: int = 2,
     ):
         """Initialize the summarize strategy.
 
@@ -426,17 +427,19 @@ class SummarizeStrategy(CompactionStrategy):
         if len(messages) < self._min_span_messages:
             return proposals
 
-        # Find conversation turns
+        # Find conversation turns — group by assistant responses, not user messages.
+        # In single-user-message conversations (common in harness), user-based
+        # grouping creates only 1-2 turns making everything "recent" and unsummarizable.
+        # Each assistant message (+ following tool results) forms a logical turn.
         turns: list[list[int]] = []  # List of message indices per turn
         current_turn_msgs: list[int] = []
-        turn_count = 0
 
         for i, msg in enumerate(messages):
-            current_turn_msgs.append(i)
-            if msg.role.value == "user" and current_turn_msgs:
+            # Start a new turn when we see an assistant message (if we have accumulated messages)
+            if msg.role.value == "assistant" and current_turn_msgs:
                 turns.append(current_turn_msgs)
                 current_turn_msgs = []
-                turn_count += 1
+            current_turn_msgs.append(i)
 
         if current_turn_msgs:
             turns.append(current_turn_msgs)
@@ -447,19 +450,14 @@ class SummarizeStrategy(CompactionStrategy):
         if not summarizable_turns:
             return proposals
 
-        # Protect turn 0: collect message indices from the initial user request
-        # and the assistant's first response (which falls in turns[1] due to
-        # user-boundary grouping). We protect all message indices < the index
-        # of the second user message in the conversation.
+        # Protect only the first user message — not the entire first turn.
+        # The user's original request must survive compaction, but assistant
+        # responses and tool results from early turns are fair game.
         protected_indices: set[int] = set()
-        if turns:
-            protected_indices.update(turns[0])
-        # Also protect messages in turns[1] that precede the user message in that group
-        # (these are assistant responses to the initial request)
-        if len(turns) > 1:
-            for idx in turns[1]:
-                if messages[idx].role.value != "user":
-                    protected_indices.add(idx)
+        for idx in range(len(messages)):
+            if messages[idx].role.value == "user":
+                protected_indices.add(idx)
+                break  # Only protect the FIRST user message
 
         # Find contiguous spans to summarize
         span_indices: list[int] = []
@@ -640,7 +638,9 @@ class ExternalizeStrategy(CompactionStrategy):
         if not messages:
             return proposals
 
-        current_turn = len([m for m in messages if m.role.value == "user"])
+        # Use message-position-based recency (same as ClearStrategy)
+        preserve_tail = self._preserve_recent_turns * 4
+        clearable_end = max(0, len(messages) - preserve_tail)
 
         for i, msg in enumerate(messages):
             if msg.message_id is None:
@@ -659,11 +659,8 @@ class ExternalizeStrategy(CompactionStrategy):
             if token_count < self._externalize_threshold_tokens:
                 continue
 
-            # Estimate turn number
-            msg_turn = len([m for m in messages[:i] if m.role.value == "user"])
-
-            # Check recency
-            if current_turn - msg_turn < self._preserve_recent_turns:
+            # Check recency — preserve recent messages by position
+            if i >= clearable_end:
                 continue
 
             # Check if this is NON_REPLAYABLE tool result (priority) or just large content
@@ -674,6 +671,8 @@ class ExternalizeStrategy(CompactionStrategy):
                     envelope = ToolResultEnvelope.from_dict(envelope_data)
                     durability = envelope.get_effective_durability()
                     is_non_replayable = durability == ToolDurability.NON_REPLAYABLE
+
+            msg_turn = len([m for m in messages[:i] if m.role.value == "user"])
 
             span = SpanReference(
                 message_ids=[msg.message_id],
@@ -768,7 +767,7 @@ class DropStrategy(CompactionStrategy):
     def __init__(
         self,
         *,
-        preserve_recent_turns: int = 5,
+        preserve_recent_turns: int = 2,
     ):
         """Initialize the drop strategy.
 
