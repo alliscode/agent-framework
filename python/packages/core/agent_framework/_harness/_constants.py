@@ -16,6 +16,9 @@ HARNESS_TOKEN_BUDGET_KEY = "harness.token_budget"  # noqa: S105  # nosec B105
 # Compaction state keys (Phase 9 - Production Compaction)
 HARNESS_COMPACTION_PLAN_KEY = "harness.compaction_plan"
 HARNESS_COMPACTION_METRICS_KEY = "harness.compaction_metrics"
+HARNESS_COMPACTION_OWNER_MODE_KEY = "harness.compaction_owner_mode"
+HARNESS_COMPACTION_SHADOW_CANDIDATE_KEY = "harness.compaction_shadow_candidate"
+HARNESS_SHARED_TURN_BUFFER_KEY = "harness.turn_buffer.shared"
 
 # Initial message key
 HARNESS_INITIAL_MESSAGE_KEY = "harness.initial_message"
@@ -34,6 +37,7 @@ HARNESS_WORK_ITEM_LEDGER_KEY = "harness.work_item_ledger"
 
 # Work-complete enforcement tracking
 HARNESS_WORK_COMPLETE_RETRY_COUNT_KEY = "harness.work_complete_retry_count"
+HARNESS_STOP_POLICY_PROFILE_KEY = "harness.stop_policy_profile"
 
 # Default values
 DEFAULT_MAX_TURNS = 50
@@ -42,3 +46,5 @@ DEFAULT_SOFT_THRESHOLD_PERCENT = 0.80
 DEFAULT_BLOCKING_THRESHOLD_PERCENT = 0.95
 DEFAULT_STALL_THRESHOLD = 3  # Turns without progress before stall detection
 DEFAULT_WORK_COMPLETE_MAX_RETRIES = 3  # Max times to retry when agent doesn't call work_complete
+DEFAULT_COMPACTION_OWNER_MODE = "compaction_executor"
+DEFAULT_STOP_POLICY_PROFILE = "interactive"

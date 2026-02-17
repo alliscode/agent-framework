@@ -23,25 +23,33 @@ from agent_framework import (
     BaseAgent,
     ChatMessage,
     Executor,
+    FunctionResultContent,
     Role,
     TextContent,
     WorkflowBuilder,
     WorkflowContext,
     handler,
 )
+from agent_framework._workflows._conversation_state import encode_chat_messages
 from agent_framework._harness import (
     CompactionComplete,
     CompactionExecutor,
     HarnessStatus,
+    OwnerCompactionResult,
     RepairComplete,
     TokenBudget,
 )
 from agent_framework._harness._compaction import (
     CacheMessageStore,
     CacheThreadAdapter,
+    CompactionPlan,
 )
 from agent_framework._harness._constants import (
+    HARNESS_COMPACTION_METRICS_KEY,
+    HARNESS_COMPACTION_OWNER_MODE_KEY,
+    HARNESS_COMPACTION_SHADOW_CANDIDATE_KEY,
     HARNESS_MAX_TURNS_KEY,
+    HARNESS_SHARED_TURN_BUFFER_KEY,
     HARNESS_STATUS_KEY,
     HARNESS_TOKEN_BUDGET_KEY,
     HARNESS_TURN_COUNT_KEY,
@@ -387,6 +395,738 @@ async def test_compaction_executor_signals_nonblocking_at_soft_threshold() -> No
     assert output.blocking is False
 
 
+@pytest.mark.asyncio
+async def test_compaction_executor_publishes_shadow_candidate_simulation() -> None:
+    """Shadow mode publishes candidate simulation metadata from shared turn buffer snapshot."""
+
+    @dataclass
+    class TestOutput:
+        candidate: dict[str, Any] | None
+
+    class TestCaptureExecutor(Executor):
+        @handler
+        async def handle(self, msg: CompactionComplete, ctx: WorkflowContext[None, TestOutput]) -> None:
+            candidate = await ctx.get_shared_state(HARNESS_COMPACTION_SHADOW_CANDIDATE_KEY)
+            await ctx.yield_output(TestOutput(candidate=candidate if isinstance(candidate, dict) else None))
+
+    class SetupExecutor(Executor):
+        @handler
+        async def setup(self, msg: str, ctx: WorkflowContext[RepairComplete]) -> None:
+            budget = TokenBudget(
+                max_input_tokens=100000,
+                soft_threshold_percent=0.80,
+                blocking_threshold_percent=0.95,
+                current_estimate=90000,
+            )
+            await ctx.set_shared_state(HARNESS_TOKEN_BUDGET_KEY, budget.to_dict())
+            await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, 3)
+            await ctx.set_shared_state(HARNESS_STATUS_KEY, HarnessStatus.RUNNING.value)
+            await ctx.set_shared_state(HARNESS_MAX_TURNS_KEY, 50)
+            await ctx.set_shared_state(HARNESS_COMPACTION_OWNER_MODE_KEY, "shadow")
+
+            snapshot_messages = [
+                ChatMessage(role="user", text="Analyze files"),
+                ChatMessage(
+                    role="tool",
+                    contents=[FunctionResultContent(call_id="c1", result="R" * 6000)],
+                ),
+            ]
+            await ctx.set_shared_state(
+                HARNESS_SHARED_TURN_BUFFER_KEY,
+                {
+                    "version": 4,
+                    "message_count": len(snapshot_messages),
+                    "messages": encode_chat_messages(snapshot_messages),
+                },
+            )
+            await ctx.send_message(RepairComplete(repairs_made=0))
+
+    workflow = (
+        WorkflowBuilder()
+        .register_executor(lambda: SetupExecutor(id="setup"), name="setup")
+        .register_executor(
+            lambda: CompactionExecutor(
+                max_input_tokens=100000,
+                soft_threshold_percent=0.80,
+                id="compaction",
+            ),
+            name="compaction",
+        )
+        .register_executor(lambda: TestCaptureExecutor(id="capture"), name="capture")
+        .add_edge("setup", "compaction")
+        .add_edge("compaction", "capture")
+        .set_start_executor("setup")
+        .build()
+    )
+
+    result = await workflow.run("start")
+    outputs = result.get_outputs()
+
+    assert len(outputs) == 1
+    candidate = outputs[0].candidate
+    assert candidate is not None
+    assert candidate.get("candidate_owner") == "compaction_executor"
+    assert candidate.get("would_compact") is True
+    assert "simulation_available" in candidate
+    assert "candidate_effective_compaction" in candidate
+
+
+@pytest.mark.asyncio
+async def test_compaction_executor_owner_mode_falls_back_without_shared_buffer() -> None:
+    """Owner mode should fall back to agent_turn path when shared buffer is missing."""
+
+    @dataclass
+    class TestOutput:
+        compaction_needed: bool
+        plan_updated: bool
+
+    class TestCaptureExecutor(Executor):
+        @handler
+        async def handle(self, msg: CompactionComplete, ctx: WorkflowContext[None, TestOutput]) -> None:
+            await ctx.yield_output(
+                TestOutput(
+                    compaction_needed=msg.compaction_needed,
+                    plan_updated=msg.plan_updated,
+                )
+            )
+
+    class SetupExecutor(Executor):
+        @handler
+        async def setup(self, msg: str, ctx: WorkflowContext[RepairComplete]) -> None:
+            budget = TokenBudget(
+                max_input_tokens=100000,
+                soft_threshold_percent=0.80,
+                blocking_threshold_percent=0.95,
+                current_estimate=90000,
+            )
+            await ctx.set_shared_state(HARNESS_TOKEN_BUDGET_KEY, budget.to_dict())
+            await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, 2)
+            await ctx.set_shared_state(HARNESS_STATUS_KEY, HarnessStatus.RUNNING.value)
+            await ctx.set_shared_state(HARNESS_MAX_TURNS_KEY, 50)
+            await ctx.set_shared_state(HARNESS_COMPACTION_OWNER_MODE_KEY, "compaction_executor")
+            await ctx.send_message(RepairComplete(repairs_made=0))
+
+    workflow = (
+        WorkflowBuilder()
+        .register_executor(lambda: SetupExecutor(id="setup"), name="setup")
+        .register_executor(lambda: CompactionExecutor(id="compaction"), name="compaction")
+        .register_executor(lambda: TestCaptureExecutor(id="capture"), name="capture")
+        .add_edge("setup", "compaction")
+        .add_edge("compaction", "capture")
+        .set_start_executor("setup")
+        .build()
+    )
+
+    result = await workflow.run("start")
+    outputs = result.get_outputs()
+
+    assert len(outputs) == 1
+    output = outputs[0]
+    assert output.compaction_needed is True
+    assert output.plan_updated is False
+
+
+@pytest.mark.asyncio
+async def test_compaction_executor_owner_fallback_gate_violation_after_bootstrap() -> None:
+    """Owner fallback outside bootstrap window should be marked as gate violation."""
+
+    @dataclass
+    class TestOutput:
+        compaction_needed: bool
+        fallback_allowed: bool | None
+        gate_violation: bool | None
+
+    class TestCaptureExecutor(Executor):
+        @handler
+        async def handle(self, msg: CompactionComplete, ctx: WorkflowContext[None, TestOutput]) -> None:
+            metrics = await ctx.get_shared_state(HARNESS_COMPACTION_METRICS_KEY)
+            latest = metrics[-1] if isinstance(metrics, list) and metrics else {}
+            fallback_allowed = latest.get("owner_fallback_allowed") if isinstance(latest, dict) else None
+            gate_violation = latest.get("owner_fallback_gate_violation") if isinstance(latest, dict) else None
+            await ctx.yield_output(
+                TestOutput(
+                    compaction_needed=msg.compaction_needed,
+                    fallback_allowed=fallback_allowed,
+                    gate_violation=gate_violation,
+                )
+            )
+
+    class SetupExecutor(Executor):
+        @handler
+        async def setup(self, msg: str, ctx: WorkflowContext[RepairComplete]) -> None:
+            budget = TokenBudget(
+                max_input_tokens=100000,
+                soft_threshold_percent=0.80,
+                blocking_threshold_percent=0.95,
+                current_estimate=90000,
+            )
+            await ctx.set_shared_state(HARNESS_TOKEN_BUDGET_KEY, budget.to_dict())
+            await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, 6)  # beyond bootstrap fallback turns
+            await ctx.set_shared_state(HARNESS_STATUS_KEY, HarnessStatus.RUNNING.value)
+            await ctx.set_shared_state(HARNESS_MAX_TURNS_KEY, 50)
+            await ctx.set_shared_state(HARNESS_COMPACTION_OWNER_MODE_KEY, "compaction_executor")
+            await ctx.send_message(RepairComplete(repairs_made=0))
+
+    workflow = (
+        WorkflowBuilder()
+        .register_executor(lambda: SetupExecutor(id="setup"), name="setup")
+        .register_executor(
+            lambda: CompactionExecutor(
+                id="compaction",
+                owner_bootstrap_fallback_turn_limit=2,
+                enforce_owner_fallback_gate=True,
+            ),
+            name="compaction",
+        )
+        .register_executor(lambda: TestCaptureExecutor(id="capture"), name="capture")
+        .add_edge("setup", "compaction")
+        .add_edge("compaction", "capture")
+        .set_start_executor("setup")
+        .build()
+    )
+
+    result = await workflow.run("start")
+    outputs = result.get_outputs()
+
+    assert len(outputs) == 1
+    output = outputs[0]
+    assert output.compaction_needed is True
+    assert output.fallback_allowed is False
+    assert output.gate_violation is True
+
+
+@pytest.mark.asyncio
+async def test_compaction_executor_owner_mode_canary_path_applies_when_available() -> None:
+    """Owner mode canary path sets compaction_needed=False when owner path applies."""
+
+    @dataclass
+    class TestOutput:
+        compaction_needed: bool
+        plan_updated: bool
+        tokens_freed: int
+
+    class CanaryCompactionExecutor(CompactionExecutor):
+        async def _try_compaction_executor_ownership(self, **kwargs: Any) -> OwnerCompactionResult:
+            return OwnerCompactionResult.applied_result(
+                tokens_freed=123,
+                proposals_applied=2,
+                strategies_applied=["clear"],
+                shared_snapshot_version=1,
+                shared_message_count=1,
+            )
+
+    class TestCaptureExecutor(Executor):
+        @handler
+        async def handle(self, msg: CompactionComplete, ctx: WorkflowContext[None, TestOutput]) -> None:
+            await ctx.yield_output(
+                TestOutput(
+                    compaction_needed=msg.compaction_needed,
+                    plan_updated=msg.plan_updated,
+                    tokens_freed=msg.tokens_freed,
+                )
+            )
+
+    class SetupExecutor(Executor):
+        @handler
+        async def setup(self, msg: str, ctx: WorkflowContext[RepairComplete]) -> None:
+            budget = TokenBudget(
+                max_input_tokens=100000,
+                soft_threshold_percent=0.80,
+                blocking_threshold_percent=0.95,
+                current_estimate=90000,
+            )
+            await ctx.set_shared_state(HARNESS_TOKEN_BUDGET_KEY, budget.to_dict())
+            await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, 2)
+            await ctx.set_shared_state(HARNESS_STATUS_KEY, HarnessStatus.RUNNING.value)
+            await ctx.set_shared_state(HARNESS_MAX_TURNS_KEY, 50)
+            await ctx.set_shared_state(HARNESS_COMPACTION_OWNER_MODE_KEY, "compaction_executor")
+            await ctx.send_message(RepairComplete(repairs_made=0))
+
+    workflow = (
+        WorkflowBuilder()
+        .register_executor(lambda: SetupExecutor(id="setup"), name="setup")
+        .register_executor(lambda: CanaryCompactionExecutor(id="compaction"), name="compaction")
+        .register_executor(lambda: TestCaptureExecutor(id="capture"), name="capture")
+        .add_edge("setup", "compaction")
+        .add_edge("compaction", "capture")
+        .set_start_executor("setup")
+        .build()
+    )
+
+    result = await workflow.run("start")
+    outputs = result.get_outputs()
+
+    assert len(outputs) == 1
+    output = outputs[0]
+    assert output.compaction_needed is False
+    assert output.plan_updated is True
+    assert output.tokens_freed == 123
+
+
+@pytest.mark.asyncio
+async def test_compaction_executor_respects_injected_policy_for_owner_attempt() -> None:
+    """Injected policy can disable owner-path attempt even in compaction_executor mode."""
+
+    @dataclass
+    class TestOutput:
+        compaction_needed: bool
+        plan_updated: bool
+
+    class DisableOwnerAttemptPolicy:
+        def is_under_pressure(self, budget: TokenBudget) -> bool:
+            return budget.is_under_pressure
+
+        def should_attempt_owner_path(self, owner_mode: str) -> bool:
+            return False
+
+        def is_blocking(self, budget: TokenBudget) -> bool:
+            return budget.is_blocking
+
+        def ensure_plan(self, plan: Any) -> Any:
+            from agent_framework._harness._compaction import CompactionPlan
+
+            return plan if plan is not None else CompactionPlan.create_empty(thread_id="harness")
+
+    class TestCaptureExecutor(Executor):
+        @handler
+        async def handle(self, msg: CompactionComplete, ctx: WorkflowContext[None, TestOutput]) -> None:
+            await ctx.yield_output(
+                TestOutput(
+                    compaction_needed=msg.compaction_needed,
+                    plan_updated=msg.plan_updated,
+                )
+            )
+
+    class SetupExecutor(Executor):
+        @handler
+        async def setup(self, msg: str, ctx: WorkflowContext[RepairComplete]) -> None:
+            budget = TokenBudget(
+                max_input_tokens=100000,
+                soft_threshold_percent=0.80,
+                blocking_threshold_percent=0.95,
+                current_estimate=90000,
+            )
+            await ctx.set_shared_state(HARNESS_TOKEN_BUDGET_KEY, budget.to_dict())
+            await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, 2)
+            await ctx.set_shared_state(HARNESS_STATUS_KEY, HarnessStatus.RUNNING.value)
+            await ctx.set_shared_state(HARNESS_MAX_TURNS_KEY, 50)
+            await ctx.set_shared_state(HARNESS_COMPACTION_OWNER_MODE_KEY, "compaction_executor")
+            await ctx.send_message(RepairComplete(repairs_made=0))
+
+    workflow = (
+        WorkflowBuilder()
+        .register_executor(lambda: SetupExecutor(id="setup"), name="setup")
+        .register_executor(
+            lambda: CompactionExecutor(
+                id="compaction",
+                policy=DisableOwnerAttemptPolicy(),  # type: ignore[arg-type]
+            ),
+            name="compaction",
+        )
+        .register_executor(lambda: TestCaptureExecutor(id="capture"), name="capture")
+        .add_edge("setup", "compaction")
+        .add_edge("compaction", "capture")
+        .set_start_executor("setup")
+        .build()
+    )
+
+    result = await workflow.run("start")
+    outputs = result.get_outputs()
+
+    assert len(outputs) == 1
+    output = outputs[0]
+    assert output.compaction_needed is True
+    assert output.plan_updated is False
+
+
+@pytest.mark.asyncio
+async def test_compaction_executor_uses_injected_owner_service() -> None:
+    """Injected owner service can drive owner-path completion without subclassing."""
+
+    @dataclass
+    class TestOutput:
+        compaction_needed: bool
+        plan_updated: bool
+        tokens_freed: int
+
+    class StubOwnerService:
+        async def try_apply(self, **kwargs: Any) -> OwnerCompactionResult:
+            return OwnerCompactionResult.applied_result(
+                tokens_freed=222,
+                proposals_applied=3,
+                strategies_applied=["clear"],
+                shared_snapshot_version=1,
+                shared_message_count=1,
+            )
+
+    class TestCaptureExecutor(Executor):
+        @handler
+        async def handle(self, msg: CompactionComplete, ctx: WorkflowContext[None, TestOutput]) -> None:
+            await ctx.yield_output(
+                TestOutput(
+                    compaction_needed=msg.compaction_needed,
+                    plan_updated=msg.plan_updated,
+                    tokens_freed=msg.tokens_freed,
+                )
+            )
+
+    class SetupExecutor(Executor):
+        @handler
+        async def setup(self, msg: str, ctx: WorkflowContext[RepairComplete]) -> None:
+            budget = TokenBudget(
+                max_input_tokens=100000,
+                soft_threshold_percent=0.80,
+                blocking_threshold_percent=0.95,
+                current_estimate=90000,
+            )
+            await ctx.set_shared_state(HARNESS_TOKEN_BUDGET_KEY, budget.to_dict())
+            await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, 2)
+            await ctx.set_shared_state(HARNESS_STATUS_KEY, HarnessStatus.RUNNING.value)
+            await ctx.set_shared_state(HARNESS_MAX_TURNS_KEY, 50)
+            await ctx.set_shared_state(HARNESS_COMPACTION_OWNER_MODE_KEY, "compaction_executor")
+            await ctx.send_message(RepairComplete(repairs_made=0))
+
+    workflow = (
+        WorkflowBuilder()
+        .register_executor(lambda: SetupExecutor(id="setup"), name="setup")
+        .register_executor(
+            lambda: CompactionExecutor(
+                id="compaction",
+                owner_service=StubOwnerService(),  # type: ignore[arg-type]
+            ),
+            name="compaction",
+        )
+        .register_executor(lambda: TestCaptureExecutor(id="capture"), name="capture")
+        .add_edge("setup", "compaction")
+        .add_edge("compaction", "capture")
+        .set_start_executor("setup")
+        .build()
+    )
+
+    result = await workflow.run("start")
+    outputs = result.get_outputs()
+    assert len(outputs) == 1
+    output = outputs[0]
+    assert output.compaction_needed is False
+    assert output.plan_updated is True
+    assert output.tokens_freed == 222
+
+
+@pytest.mark.asyncio
+async def test_compaction_executor_compact_thread_uses_injected_thread_service() -> None:
+    """compact_thread delegates to injected thread service."""
+
+    class StubThreadService:
+        def __init__(self, plan: Any) -> None:
+            self.plan = plan
+            self.called = False
+
+        async def compact_thread(self, thread: Any, current_plan: Any, budget: Any, turn_number: int) -> Any:
+            self.called = True
+            assert turn_number == 7
+            return self.plan
+
+    expected_plan = CompactionPlan.create_empty(thread_id="harness")
+    stub = StubThreadService(expected_plan)
+    executor = CompactionExecutor(thread_service=stub)  # type: ignore[arg-type]
+
+    class _NoStoreThread:
+        message_store = None
+
+    budget = TokenBudget(max_input_tokens=1000, soft_threshold_percent=0.5, current_estimate=900)
+    result_plan = await executor.compact_thread(_NoStoreThread(), None, budget, 7)  # type: ignore[arg-type]
+    assert stub.called is True
+    assert result_plan is expected_plan
+
+
+@pytest.mark.asyncio
+async def test_compaction_executor_uses_injected_lifecycle_on_fallback_path() -> None:
+    """Injected lifecycle emitter is used for started/pressure on fallback flow."""
+
+    @dataclass
+    class TestOutput:
+        compaction_needed: bool
+
+    class StubLifecycle:
+        def __init__(self) -> None:
+            self.started = 0
+            self.pressure = 0
+            self.owner_completed = 0
+
+        async def emit_started(self, *args: Any, **kwargs: Any) -> None:
+            self.started += 1
+
+        async def emit_pressure(self, *args: Any, **kwargs: Any) -> None:
+            self.pressure += 1
+
+        async def emit_owner_completed(self, *args: Any, **kwargs: Any) -> None:
+            self.owner_completed += 1
+
+    class TestCaptureExecutor(Executor):
+        @handler
+        async def handle(self, msg: CompactionComplete, ctx: WorkflowContext[None, TestOutput]) -> None:
+            await ctx.yield_output(TestOutput(compaction_needed=msg.compaction_needed))
+
+    class SetupExecutor(Executor):
+        @handler
+        async def setup(self, msg: str, ctx: WorkflowContext[RepairComplete]) -> None:
+            budget = TokenBudget(
+                max_input_tokens=100000,
+                soft_threshold_percent=0.80,
+                blocking_threshold_percent=0.95,
+                current_estimate=90000,
+            )
+            await ctx.set_shared_state(HARNESS_TOKEN_BUDGET_KEY, budget.to_dict())
+            await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, 2)
+            await ctx.set_shared_state(HARNESS_STATUS_KEY, HarnessStatus.RUNNING.value)
+            await ctx.set_shared_state(HARNESS_MAX_TURNS_KEY, 50)
+            await ctx.set_shared_state(HARNESS_COMPACTION_OWNER_MODE_KEY, "agent_turn")
+            await ctx.send_message(RepairComplete(repairs_made=0))
+
+    lifecycle = StubLifecycle()
+    workflow = (
+        WorkflowBuilder()
+        .register_executor(lambda: SetupExecutor(id="setup"), name="setup")
+        .register_executor(lambda: CompactionExecutor(id="compaction", lifecycle=lifecycle), name="compaction")  # type: ignore[arg-type]
+        .register_executor(lambda: TestCaptureExecutor(id="capture"), name="capture")
+        .add_edge("setup", "compaction")
+        .add_edge("compaction", "capture")
+        .set_start_executor("setup")
+        .build()
+    )
+
+    result = await workflow.run("start")
+    outputs = result.get_outputs()
+    assert len(outputs) == 1
+    assert outputs[0].compaction_needed is True
+    assert lifecycle.started == 1
+    assert lifecycle.pressure == 1
+    assert lifecycle.owner_completed == 0
+
+
+@pytest.mark.asyncio
+async def test_compaction_executor_uses_injected_lifecycle_on_owner_path() -> None:
+    """Injected lifecycle emitter is used for owner completion flow."""
+
+    @dataclass
+    class TestOutput:
+        compaction_needed: bool
+
+    class StubLifecycle:
+        def __init__(self) -> None:
+            self.started = 0
+            self.pressure = 0
+            self.owner_completed = 0
+
+        async def emit_started(self, *args: Any, **kwargs: Any) -> None:
+            self.started += 1
+
+        async def emit_pressure(self, *args: Any, **kwargs: Any) -> None:
+            self.pressure += 1
+
+        async def emit_owner_completed(self, *args: Any, **kwargs: Any) -> None:
+            self.owner_completed += 1
+
+    class StubOwnerService:
+        async def try_apply(self, **kwargs: Any) -> OwnerCompactionResult:
+            return OwnerCompactionResult.applied_result(
+                tokens_freed=10,
+                proposals_applied=1,
+                strategies_applied=["clear"],
+                shared_snapshot_version=1,
+                shared_message_count=1,
+            )
+
+    class TestCaptureExecutor(Executor):
+        @handler
+        async def handle(self, msg: CompactionComplete, ctx: WorkflowContext[None, TestOutput]) -> None:
+            await ctx.yield_output(TestOutput(compaction_needed=msg.compaction_needed))
+
+    class SetupExecutor(Executor):
+        @handler
+        async def setup(self, msg: str, ctx: WorkflowContext[RepairComplete]) -> None:
+            budget = TokenBudget(
+                max_input_tokens=100000,
+                soft_threshold_percent=0.80,
+                blocking_threshold_percent=0.95,
+                current_estimate=90000,
+            )
+            await ctx.set_shared_state(HARNESS_TOKEN_BUDGET_KEY, budget.to_dict())
+            await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, 2)
+            await ctx.set_shared_state(HARNESS_STATUS_KEY, HarnessStatus.RUNNING.value)
+            await ctx.set_shared_state(HARNESS_MAX_TURNS_KEY, 50)
+            await ctx.set_shared_state(HARNESS_COMPACTION_OWNER_MODE_KEY, "compaction_executor")
+            await ctx.send_message(RepairComplete(repairs_made=0))
+
+    lifecycle = StubLifecycle()
+    workflow = (
+        WorkflowBuilder()
+        .register_executor(lambda: SetupExecutor(id="setup"), name="setup")
+        .register_executor(
+            lambda: CompactionExecutor(
+                id="compaction",
+                owner_service=StubOwnerService(),  # type: ignore[arg-type]
+                lifecycle=lifecycle,  # type: ignore[arg-type]
+            ),
+            name="compaction",
+        )
+        .register_executor(lambda: TestCaptureExecutor(id="capture"), name="capture")
+        .add_edge("setup", "compaction")
+        .add_edge("compaction", "capture")
+        .set_start_executor("setup")
+        .build()
+    )
+
+    result = await workflow.run("start")
+    outputs = result.get_outputs()
+    assert len(outputs) == 1
+    assert outputs[0].compaction_needed is False
+    assert lifecycle.owner_completed == 1
+    assert lifecycle.started == 0
+    assert lifecycle.pressure == 0
+
+
+@pytest.mark.asyncio
+async def test_compaction_executor_uses_injected_shadow_service() -> None:
+    """Injected shadow service is invoked during compaction check."""
+
+    @dataclass
+    class TestOutput:
+        compaction_needed: bool
+
+    class StubShadowService:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def publish_candidate(self, **kwargs: Any) -> None:
+            self.calls += 1
+
+    class TestCaptureExecutor(Executor):
+        @handler
+        async def handle(self, msg: CompactionComplete, ctx: WorkflowContext[None, TestOutput]) -> None:
+            await ctx.yield_output(TestOutput(compaction_needed=msg.compaction_needed))
+
+    class SetupExecutor(Executor):
+        @handler
+        async def setup(self, msg: str, ctx: WorkflowContext[RepairComplete]) -> None:
+            budget = TokenBudget(
+                max_input_tokens=100000,
+                soft_threshold_percent=0.80,
+                blocking_threshold_percent=0.95,
+                current_estimate=1000,  # under threshold
+            )
+            await ctx.set_shared_state(HARNESS_TOKEN_BUDGET_KEY, budget.to_dict())
+            await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, 1)
+            await ctx.set_shared_state(HARNESS_STATUS_KEY, HarnessStatus.RUNNING.value)
+            await ctx.set_shared_state(HARNESS_MAX_TURNS_KEY, 50)
+            await ctx.set_shared_state(HARNESS_COMPACTION_OWNER_MODE_KEY, "shadow")
+            await ctx.send_message(RepairComplete(repairs_made=0))
+
+    stub_shadow = StubShadowService()
+    workflow = (
+        WorkflowBuilder()
+        .register_executor(lambda: SetupExecutor(id="setup"), name="setup")
+        .register_executor(
+            lambda: CompactionExecutor(
+                id="compaction",
+                shadow_service=stub_shadow,  # type: ignore[arg-type]
+            ),
+            name="compaction",
+        )
+        .register_executor(lambda: TestCaptureExecutor(id="capture"), name="capture")
+        .add_edge("setup", "compaction")
+        .add_edge("compaction", "capture")
+        .set_start_executor("setup")
+        .build()
+    )
+
+    result = await workflow.run("start")
+    outputs = result.get_outputs()
+    assert len(outputs) == 1
+    assert outputs[0].compaction_needed is False
+    assert stub_shadow.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_compaction_executor_uses_injected_state_store() -> None:
+    """Injected state store is used for control-flow reads/writes."""
+
+    @dataclass
+    class TestOutput:
+        compaction_needed: bool
+
+    class StubStateStore:
+        def __init__(self) -> None:
+            self.get_budget_calls = 0
+            self.get_turn_calls = 0
+            self.get_mode_calls = 0
+            self.load_plan_calls = 0
+            self.save_budget_calls = 0
+
+        async def get_or_create_budget(self, ctx: Any) -> TokenBudget:
+            self.get_budget_calls += 1
+            return TokenBudget(max_input_tokens=100000, soft_threshold_percent=0.80, current_estimate=1000)
+
+        async def get_turn_count(self, ctx: Any) -> int:
+            self.get_turn_calls += 1
+            return 3
+
+        async def get_owner_mode(self, ctx: Any) -> str:
+            self.get_mode_calls += 1
+            return "agent_turn"
+
+        async def load_plan(self, ctx: Any) -> tuple[Any, int]:
+            self.load_plan_calls += 1
+            return None, 0
+
+        async def save_budget(self, ctx: Any, budget: Any) -> None:
+            self.save_budget_calls += 1
+
+        async def save_plan(self, ctx: Any, plan: Any, version: int) -> None:
+            return None
+
+        async def append_metrics(self, ctx: Any, metrics: Any) -> None:
+            return None
+
+    class TestCaptureExecutor(Executor):
+        @handler
+        async def handle(self, msg: CompactionComplete, ctx: WorkflowContext[None, TestOutput]) -> None:
+            await ctx.yield_output(TestOutput(compaction_needed=msg.compaction_needed))
+
+    class SetupExecutor(Executor):
+        @handler
+        async def setup(self, msg: str, ctx: WorkflowContext[RepairComplete]) -> None:
+            await ctx.send_message(RepairComplete(repairs_made=0))
+
+    store = StubStateStore()
+    workflow = (
+        WorkflowBuilder()
+        .register_executor(lambda: SetupExecutor(id="setup"), name="setup")
+        .register_executor(
+            lambda: CompactionExecutor(
+                id="compaction",
+                state_store=store,  # type: ignore[arg-type]
+            ),
+            name="compaction",
+        )
+        .register_executor(lambda: TestCaptureExecutor(id="capture"), name="capture")
+        .add_edge("setup", "compaction")
+        .add_edge("compaction", "capture")
+        .set_start_executor("setup")
+        .build()
+    )
+
+    result = await workflow.run("start")
+    outputs = result.get_outputs()
+    assert len(outputs) == 1
+    assert outputs[0].compaction_needed is False
+    assert store.get_budget_calls == 1
+    assert store.get_turn_calls == 1
+    assert store.get_mode_calls == 1
+    assert store.load_plan_calls == 1
+    assert store.save_budget_calls == 1
+
+
 # ============================================================================
 # Phase 4e — ChatClientSummarizer Tests
 # ============================================================================
@@ -569,12 +1309,12 @@ class TestTurn0Protection:
 
         strategy = SummarizeStrategy(
             NoopSummarizer(),  # type: ignore[arg-type]
-            preserve_recent_turns=2,
+            preserve_recent_messages=4,
             min_span_messages=1,
             min_span_tokens=1,
         )
 
-        # Build 8 turns worth of messages — turn 0 should be protected
+        # Build 8 turns worth of messages — first user message should be protected
         messages = []
         for turn in range(8):
             messages.append(ChatMessage(role="user", text=f"User turn {turn}", message_id=f"u{turn}"))
@@ -591,7 +1331,6 @@ class TestTurn0Protection:
             proposed_ids.update(p.span.message_ids)
 
         assert "u0" not in proposed_ids, "First user message should be protected"
-        # Assistant messages from turn 0 are now summarizable (only first user msg protected)
 
     @pytest.mark.asyncio
     async def test_turn0_protected_even_with_many_turns(self) -> None:
@@ -608,12 +1347,12 @@ class TestTurn0Protection:
 
         strategy = SummarizeStrategy(
             NoopSummarizer(),  # type: ignore[arg-type]
-            preserve_recent_turns=2,
+            preserve_recent_messages=4,
             min_span_messages=1,
             min_span_tokens=1,
         )
 
-        # 15 turns
+        # 15 turns (30 messages), preserve last 4 → 26 candidates minus first user msg
         messages = []
         for turn in range(15):
             messages.append(ChatMessage(role="user", text=f"User turn {turn} " * 20, message_id=f"u{turn}"))
@@ -630,13 +1369,11 @@ class TestTurn0Protection:
             proposed_ids.update(p.span.message_ids)
 
         assert "u0" not in proposed_ids
-        # a0 is now summarizable (only first user message is protected)
-        # Middle turns should be proposed for summarization
-        assert len(proposals) > 0, "Should have proposals for middle turns"
+        assert len(proposals) > 0, "Should have proposals for middle messages"
 
     @pytest.mark.asyncio
     async def test_no_proposals_when_only_recent_and_turn0(self) -> None:
-        """With only turn 0 + recent turns, no summarization should happen."""
+        """With only a few messages, nothing should be summarizable."""
         from agent_framework._harness._compaction import (
             SimpleTokenizer,
             SummarizeStrategy,
@@ -649,14 +1386,12 @@ class TestTurn0Protection:
 
         strategy = SummarizeStrategy(
             NoopSummarizer(),  # type: ignore[arg-type]
-            preserve_recent_turns=6,
+            preserve_recent_messages=12,
             min_span_messages=1,
             min_span_tokens=1,
         )
 
-        # 6 user messages produce 7 turn groups (due to user-boundary grouping).
-        # With preserve_recent_turns=6, only turns[:1] is a candidate.
-        # Turn 0 is protected → nothing to summarize.
+        # 6 turns = 12 messages. With preserve_recent_messages=12, everything is recent.
         messages = []
         for turn in range(6):
             messages.append(ChatMessage(role="user", text=f"Turn {turn}", message_id=f"u{turn}"))

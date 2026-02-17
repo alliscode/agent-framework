@@ -219,18 +219,18 @@ class ClearStrategy(CompactionStrategy):
         *,
         policy_overrides: dict[str, ToolDurabilityPolicy] | None = None,
         min_tokens_to_clear: int = 100,
-        preserve_recent_turns: int = 3,
+        preserve_recent_messages: int = 12,
     ):
         """Initialize the clear strategy.
 
         Args:
             policy_overrides: Override durability policies for specific tools.
             min_tokens_to_clear: Minimum token count before considering clearing.
-            preserve_recent_turns: Don't clear results from recent turns.
+            preserve_recent_messages: Don't clear results in the last N messages.
         """
         self._policy_overrides = policy_overrides or {}
         self._min_tokens_to_clear = min_tokens_to_clear
-        self._preserve_recent_turns = preserve_recent_turns
+        self._preserve_recent_messages = preserve_recent_messages
 
     @property
     def name(self) -> str:
@@ -258,26 +258,28 @@ class ClearStrategy(CompactionStrategy):
         if not messages:
             return proposals
 
-        # Preserve only the last N messages by position (not by user-turn).
-        # In single-user-message conversations, user-turn-based recency
-        # treats ALL messages as "turn 1" and blocks all compaction.
-        preserve_tail = self._preserve_recent_turns * 4  # ~4 msgs per logical turn
-        clearable_end = max(0, len(messages) - preserve_tail)
+        # Preserve only the last N messages by position.
+        # Message-count-based recency gives predictable protection regardless
+        # of how many tool calls are in a single turn.
+        clearable_end = max(0, len(messages) - self._preserve_recent_messages)
 
         for i, msg in enumerate(messages):
             if msg.message_id is None:
                 continue
 
-            # Skip if already compacted
-            if current_plan is not None:
-                action, _ = current_plan.get_action(msg.message_id)
-                from ._types import CompactionAction
-
-                if action != CompactionAction.INCLUDE:
-                    continue
-
             # Only process tool results
             if msg.role.value != "tool":
+                continue
+
+            # Skip already-cleared placeholders (after cache flattening)
+            text = getattr(msg, "text", None) or ""
+            if text.startswith("[Cleared:"):
+                continue
+            contents = getattr(msg, "contents", None) or []
+            already_cleared = any(
+                str(getattr(c, "result", "") or "").startswith("[Cleared:") for c in contents
+            )
+            if already_cleared:
                 continue
 
             # Check for tool result envelope in additional_properties
@@ -379,7 +381,7 @@ class SummarizeStrategy(CompactionStrategy):
         target_token_ratio: float = 0.25,
         min_span_tokens: int = 500,
         min_span_messages: int = 3,
-        preserve_recent_turns: int = 2,
+        preserve_recent_messages: int = 12,
     ):
         """Initialize the summarize strategy.
 
@@ -388,13 +390,13 @@ class SummarizeStrategy(CompactionStrategy):
             target_token_ratio: Target ratio of summary to original.
             min_span_tokens: Minimum tokens in span before summarizing.
             min_span_messages: Minimum messages in span before summarizing.
-            preserve_recent_turns: Don't summarize recent turns.
+            preserve_recent_messages: Don't summarize the last N messages.
         """
         self._summarizer = summarizer
         self._target_token_ratio = target_token_ratio
         self._min_span_tokens = min_span_tokens
         self._min_span_messages = min_span_messages
-        self._preserve_recent_turns = preserve_recent_turns
+        self._preserve_recent_messages = preserve_recent_messages
 
     @property
     def name(self) -> str:
@@ -412,7 +414,13 @@ class SummarizeStrategy(CompactionStrategy):
         tokenizer: ProviderAwareTokenizer,
         turn_context: TurnContext | None = None,
     ) -> list[CompactionProposal]:
-        """Find spans suitable for summarization."""
+        """Find spans suitable for summarization.
+
+        Uses message-position-based recency: protects the last N messages and the
+        first user message. Everything in between is a candidate for summarization.
+        After cache flattening, previous summaries appear as regular messages and
+        can be re-summarized ("summary of summaries").
+        """
         proposals: list[CompactionProposal] = []
 
         # Skip if rehydration happened this turn
@@ -427,85 +435,33 @@ class SummarizeStrategy(CompactionStrategy):
         if len(messages) < self._min_span_messages:
             return proposals
 
-        # Find conversation turns — group by assistant responses, not user messages.
-        # In single-user-message conversations (common in harness), user-based
-        # grouping creates only 1-2 turns making everything "recent" and unsummarizable.
-        # Each assistant message (+ following tool results) forms a logical turn.
-        turns: list[list[int]] = []  # List of message indices per turn
-        current_turn_msgs: list[int] = []
-
-        for i, msg in enumerate(messages):
-            # Start a new turn when we see an assistant message (if we have accumulated messages)
-            if msg.role.value == "assistant" and current_turn_msgs:
-                turns.append(current_turn_msgs)
-                current_turn_msgs = []
-            current_turn_msgs.append(i)
-
-        if current_turn_msgs:
-            turns.append(current_turn_msgs)
-
-        # Don't summarize recent turns
-        summarizable_turns = turns[: -self._preserve_recent_turns] if len(turns) > self._preserve_recent_turns else []
-
-        if not summarizable_turns:
+        # Message-position-based recency: protect the last N messages
+        summarizable_end = max(0, len(messages) - self._preserve_recent_messages)
+        if summarizable_end < 2:  # Need at least 2 messages to summarize
             return proposals
 
-        # Protect only the first user message — not the entire first turn.
-        # The user's original request must survive compaction, but assistant
-        # responses and tool results from early turns are fair game.
+        # Protect only the first user message
         protected_indices: set[int] = set()
         for idx in range(len(messages)):
             if messages[idx].role.value == "user":
                 protected_indices.add(idx)
-                break  # Only protect the FIRST user message
+                break
 
-        # Find contiguous spans to summarize
+        # Build a single contiguous span of summarizable messages
         span_indices: list[int] = []
         span_tokens = 0
-        span_first_turn = 0
 
-        for turn_idx, turn_msg_indices in enumerate(summarizable_turns):
-            # Check if any message in this turn is already compacted
-            any_compacted = False
-            if current_plan is not None:
-                for msg_idx in turn_msg_indices:
-                    msg = messages[msg_idx]
-                    if msg.message_id:
-                        from ._types import CompactionAction
-
-                        action, _ = current_plan.get_action(msg.message_id)
-                        if action != CompactionAction.INCLUDE:
-                            any_compacted = True
-                            break
-
-            if any_compacted:
-                # Create proposal for current span if big enough
-                if span_tokens >= self._min_span_tokens and len(span_indices) >= self._min_span_messages:
-                    proposals.append(
-                        self._create_proposal(messages, span_indices, span_tokens, span_first_turn, turn_idx - 1),
-                    )
-                span_indices = []
-                span_tokens = 0
+        for i in range(summarizable_end):
+            if i in protected_indices:
                 continue
+            msg = messages[i]
+            if msg.message_id:
+                span_indices.append(i)
+                span_tokens += _count_message_tokens(msg, tokenizer)
 
-            # Add turn to span
-            if not span_indices:
-                span_first_turn = turn_idx
-
-            for msg_idx in turn_msg_indices:
-                if msg_idx in protected_indices:
-                    continue
-                msg = messages[msg_idx]
-                if msg.message_id:  # Only include messages with IDs
-                    span_indices.append(msg_idx)
-                    span_tokens += _count_message_tokens(msg, tokenizer)
-
-        # Final span
         if span_tokens >= self._min_span_tokens and len(span_indices) >= self._min_span_messages:
             proposals.append(
-                self._create_proposal(
-                    messages, span_indices, span_tokens, span_first_turn, len(summarizable_turns) - 1
-                ),
+                self._create_proposal(messages, span_indices, span_tokens, 0, summarizable_end - 1),
             )
 
         return proposals
@@ -586,7 +542,7 @@ class ExternalizeStrategy(CompactionStrategy):
         summarizer: Summarizer,
         *,
         externalize_threshold_tokens: int = 1000,
-        preserve_recent_turns: int = 3,
+        preserve_recent_messages: int = 12,
         default_sensitivity: str = "internal",
         default_ttl_seconds: int | None = None,
     ):
@@ -596,14 +552,14 @@ class ExternalizeStrategy(CompactionStrategy):
             artifact_store: Where to store externalized content.
             summarizer: For generating summaries of externalized content.
             externalize_threshold_tokens: Minimum tokens before externalizing.
-            preserve_recent_turns: Don't externalize recent turns.
+            preserve_recent_messages: Don't externalize the last N messages.
             default_sensitivity: Default sensitivity level for artifacts.
             default_ttl_seconds: Default TTL for artifacts.
         """
         self._artifact_store = artifact_store
         self._summarizer = summarizer
         self._externalize_threshold_tokens = externalize_threshold_tokens
-        self._preserve_recent_turns = preserve_recent_turns
+        self._preserve_recent_messages = preserve_recent_messages
         self._default_sensitivity = default_sensitivity
         self._default_ttl_seconds = default_ttl_seconds
 
@@ -638,21 +594,12 @@ class ExternalizeStrategy(CompactionStrategy):
         if not messages:
             return proposals
 
-        # Use message-position-based recency (same as ClearStrategy)
-        preserve_tail = self._preserve_recent_turns * 4
-        clearable_end = max(0, len(messages) - preserve_tail)
+        # Message-position-based recency
+        clearable_end = max(0, len(messages) - self._preserve_recent_messages)
 
         for i, msg in enumerate(messages):
             if msg.message_id is None:
                 continue
-
-            # Skip if already compacted
-            if current_plan is not None:
-                from ._types import CompactionAction
-
-                action, _ = current_plan.get_action(msg.message_id)
-                if action != CompactionAction.INCLUDE:
-                    continue
 
             # Check token count
             token_count = _count_message_tokens(msg, tokenizer)
@@ -767,14 +714,14 @@ class DropStrategy(CompactionStrategy):
     def __init__(
         self,
         *,
-        preserve_recent_turns: int = 2,
+        preserve_recent_messages: int = 12,
     ):
         """Initialize the drop strategy.
 
         Args:
-            preserve_recent_turns: Don't drop content from recent turns.
+            preserve_recent_messages: Don't drop content in the last N messages.
         """
-        self._preserve_recent_turns = preserve_recent_turns
+        self._preserve_recent_messages = preserve_recent_messages
 
     @property
     def name(self) -> str:
@@ -792,7 +739,12 @@ class DropStrategy(CompactionStrategy):
         tokenizer: ProviderAwareTokenizer,
         turn_context: TurnContext | None = None,
     ) -> list[CompactionProposal]:
-        """Find content that can be dropped."""
+        """Find content that can be dropped.
+
+        After cache flattening, cleared messages appear as small placeholders
+        (e.g., '[Cleared: tool message]'). This strategy identifies those
+        placeholders outside the recency window and proposes dropping them.
+        """
         proposals: list[CompactionProposal] = []
 
         # Skip if rehydration happened this turn
@@ -803,36 +755,43 @@ class DropStrategy(CompactionStrategy):
         if thread.message_store is None:
             return proposals
 
-        # Only drop already-cleared EPHEMERAL content
-        if current_plan is None:
-            return proposals
-
         messages = await thread.message_store.list_messages()
-        current_turn = len([m for m in messages if m.role.value == "user"])
+        droppable_end = max(0, len(messages) - self._preserve_recent_messages)
 
-        for clear_record in current_plan.clearings:
-            span = clear_record.span
-
-            # Check recency
-            if current_turn - span.last_turn < self._preserve_recent_turns:
+        for i, msg in enumerate(messages):
+            if i >= droppable_end:
+                break
+            if msg.message_id is None:
                 continue
 
-            # Only drop if it was EPHEMERAL
-            # Check preserved_fields for durability hint
-            durability = clear_record.preserved_fields.get("durability", "anchoring")
-            if durability != "ephemeral":
+            # Detect cleared placeholders by checking for the marker text
+            text = getattr(msg, "text", None) or ""
+            is_cleared = text.startswith("[Cleared:")
+            if not is_cleared:
+                # Also check FunctionResultContent for cleared tool results
+                contents = getattr(msg, "contents", None) or []
+                for content in contents:
+                    result_text = str(getattr(content, "result", "") or "")
+                    if result_text.startswith("[Cleared:"):
+                        is_cleared = True
+                        break
+
+            if not is_cleared:
                 continue
 
-            # Estimate tokens (cleared content is small, ~20 tokens)
-            estimated_freed = 20
-
+            token_count = _count_message_tokens(msg, tokenizer)
+            span = SpanReference(
+                message_ids=[msg.message_id],
+                first_turn=i,
+                last_turn=i,
+            )
             proposals.append(
                 CompactionProposal(
                     strategy=self.name,
                     span=span,
-                    estimated_tokens_freed=estimated_freed,
-                    reason=f"Drop cleared ephemeral content from turns {span.first_turn}-{span.last_turn}",
-                    priority=span.first_turn,  # Older first
+                    estimated_tokens_freed=token_count,
+                    reason=f"Drop cleared placeholder at position {i}",
+                    priority=i,
                 ),
             )
 

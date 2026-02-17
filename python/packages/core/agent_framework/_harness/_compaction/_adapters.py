@@ -10,6 +10,11 @@ ChatMessage objects — not an AgentThread.
 This module provides lightweight adapters that wrap the cache as an
 AgentThread-like object, allowing the CompactionCoordinator to operate
 on the executor's cache without modifying the strategy interfaces.
+
+After each compaction cycle, the cache is **flattened** — the compaction plan
+is applied and the cache is replaced with the compacted view. This means
+strategies always see the actual messages (including rendered summaries from
+previous cycles), enabling re-summarization of accumulated summaries.
 """
 
 from __future__ import annotations
@@ -27,6 +32,10 @@ class CacheMessageStore:
 
     Implements the subset of ChatMessageStoreProtocol needed by
     compaction strategies (``list_messages()``).
+
+    After flattening, the cache contains rendered summaries, cleared
+    placeholders, and original messages — strategies see the real
+    context the LLM would receive.
     """
 
     def __init__(self, cache: list[Any]):

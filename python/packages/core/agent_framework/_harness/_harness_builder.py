@@ -3,7 +3,7 @@
 """HarnessWorkflowBuilder for creating agent harness workflows."""
 
 from collections.abc import AsyncIterator, Callable, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .._agents import AgentProtocol
 from .._memory import ContextProvider
@@ -13,14 +13,22 @@ from .._workflows._workflow import Workflow
 from .._workflows._workflow_builder import WorkflowBuilder
 from ._agent_turn_executor import AgentTurnExecutor
 from ._compaction_executor import CompactionExecutor
+from ._compaction_owner_mode import (
+    CompactionOwnerMode,
+    VALID_COMPACTION_OWNER_MODES,
+    is_valid_compaction_owner_mode,
+)
 from ._constants import (
+    DEFAULT_COMPACTION_OWNER_MODE,
     DEFAULT_MAX_INPUT_TOKENS,
     DEFAULT_MAX_TURNS,
     DEFAULT_SOFT_THRESHOLD_PERCENT,
+    DEFAULT_STOP_POLICY_PROFILE,
     DEFAULT_STALL_THRESHOLD,
 )
 from ._repair_executor import RepairExecutor
 from ._state import RepairTrigger
+from ._stop_policy import StopPolicyProfile, resolve_stop_policy_settings
 from ._stop_decision_executor import StopDecisionExecutor
 
 if TYPE_CHECKING:
@@ -85,6 +93,7 @@ class HarnessWorkflowBuilder:
         soft_threshold_percent: float = DEFAULT_SOFT_THRESHOLD_PERCENT,
         # Production compaction
         enable_compaction: bool = False,
+        compaction_owner_mode: CompactionOwnerMode = DEFAULT_COMPACTION_OWNER_MODE,
         compaction_store: "CompactionStore | None" = None,
         artifact_store: "ArtifactStore | None" = None,
         summary_cache: "SummaryCache | None" = None,
@@ -96,6 +105,7 @@ class HarnessWorkflowBuilder:
         task_contract: "TaskContract | None" = None,
         enable_stall_detection: bool = False,
         stall_threshold: int = DEFAULT_STALL_THRESHOLD,
+        stop_policy_profile: StopPolicyProfile = DEFAULT_STOP_POLICY_PROFILE,
         # Continuation prompts
         enable_continuation_prompts: bool = True,
         max_continuation_prompts: int = 5,
@@ -123,6 +133,7 @@ class HarnessWorkflowBuilder:
             max_input_tokens: Maximum input tokens for compaction. Default is 128000.
             soft_threshold_percent: Percentage at which to trigger compaction. Default is 0.80.
             enable_compaction: Whether to enable production compaction.
+            compaction_owner_mode: Compaction ownership mode. Defaults to "compaction_executor".
             compaction_store: Injectable store for compaction plans. Defaults to in-memory.
             artifact_store: Injectable store for externalized content. None disables externalization.
             summary_cache: Injectable cache for LLM summaries. None disables caching.
@@ -134,6 +145,9 @@ class HarnessWorkflowBuilder:
                 contract verification is automatically enabled.
             enable_stall_detection: Whether to detect stalled progress.
             stall_threshold: Number of unchanged turns before stall detection. Default is 3.
+            stop_policy_profile: Stop policy profile. "interactive" accepts done after
+                work-complete retries are exhausted. "strict_automation" requires explicit
+                work_complete and will continue until another stop condition is met.
             enable_continuation_prompts: Whether to prompt agent to continue if it stops early.
             max_continuation_prompts: Maximum continuation prompts before accepting done. Default is 5.
             continuation_prompt: Custom continuation prompt text.
@@ -158,6 +172,7 @@ class HarnessWorkflowBuilder:
         self._soft_threshold_percent = soft_threshold_percent
         # Compaction settings
         self._enable_compaction = enable_compaction
+        self._compaction_owner_mode = self._validate_compaction_owner_mode(compaction_owner_mode)
         self._compaction_store = compaction_store
         self._artifact_store = artifact_store
         self._summary_cache = summary_cache
@@ -169,6 +184,7 @@ class HarnessWorkflowBuilder:
         self._task_contract = task_contract
         self._enable_stall_detection = enable_stall_detection
         self._stall_threshold = stall_threshold
+        self._stop_policy = resolve_stop_policy_settings(stop_policy_profile)
         self._enable_continuation_prompts = enable_continuation_prompts
         self._max_continuation_prompts = max_continuation_prompts
         self._continuation_prompt = continuation_prompt
@@ -265,6 +281,13 @@ class HarnessWorkflowBuilder:
             else:
                 agent.context_provider = AggregateContextProvider(providers)
 
+    @staticmethod
+    def _validate_compaction_owner_mode(mode: str) -> CompactionOwnerMode:
+        if not is_valid_compaction_owner_mode(mode):
+            valid = ", ".join(VALID_COMPACTION_OWNER_MODES)
+            raise ValueError(f"Invalid compaction_owner_mode '{mode}'. Must be one of: {valid}")
+        return cast("CompactionOwnerMode", mode)
+
     def get_harness_kwargs(self) -> dict[str, Any]:
         """Get the kwargs to pass to workflow.run() for harness configuration.
 
@@ -273,6 +296,7 @@ class HarnessWorkflowBuilder:
         """
         config: dict[str, Any] = {
             "max_turns": self._max_turns,
+            "stop_policy_profile": self._stop_policy.profile,
         }
 
         if self._enable_compaction:
@@ -280,6 +304,7 @@ class HarnessWorkflowBuilder:
                 "enabled": True,
                 "max_input_tokens": self._max_input_tokens,
                 "soft_threshold_percent": self._soft_threshold_percent,
+                "owner_mode": self._compaction_owner_mode,
             }
 
         if self._task_contract is not None:
@@ -375,6 +400,7 @@ class HarnessWorkflowBuilder:
                 enable_stall_detection=self._enable_stall_detection,
                 enable_work_item_verification=enable_work_item_verification,
                 require_work_complete=True,
+                accept_done_after_retries_exhausted=self._stop_policy.accept_done_after_retries_exhausted,
                 stall_threshold=self._stall_threshold,
                 hooks=hooks,
                 id="harness_stop_decision",
@@ -468,6 +494,7 @@ class AgentHarness:
         soft_threshold_percent: float = DEFAULT_SOFT_THRESHOLD_PERCENT,
         # Production compaction
         enable_compaction: bool = False,
+        compaction_owner_mode: CompactionOwnerMode = DEFAULT_COMPACTION_OWNER_MODE,
         compaction_store: "CompactionStore | None" = None,
         artifact_store: "ArtifactStore | None" = None,
         summary_cache: "SummaryCache | None" = None,
@@ -479,6 +506,7 @@ class AgentHarness:
         task_contract: "TaskContract | None" = None,
         enable_stall_detection: bool = False,
         stall_threshold: int = DEFAULT_STALL_THRESHOLD,
+        stop_policy_profile: StopPolicyProfile = DEFAULT_STOP_POLICY_PROFILE,
         # Continuation prompts
         enable_continuation_prompts: bool = True,
         max_continuation_prompts: int = 5,
@@ -506,6 +534,7 @@ class AgentHarness:
             max_input_tokens: Maximum input tokens for compaction. Default is 128000.
             soft_threshold_percent: Percentage at which to trigger compaction. Default is 0.80.
             enable_compaction: Whether to enable production compaction.
+            compaction_owner_mode: Compaction ownership mode. Defaults to "compaction_executor".
             compaction_store: Injectable store for compaction plans. Defaults to in-memory.
             artifact_store: Injectable store for externalized content. None disables externalization.
             summary_cache: Injectable cache for LLM summaries. None disables caching.
@@ -517,6 +546,9 @@ class AgentHarness:
                 contract verification is automatically enabled.
             enable_stall_detection: Whether to detect stalled progress.
             stall_threshold: Number of unchanged turns before stall detection. Default is 3.
+            stop_policy_profile: Stop policy profile. "interactive" accepts done after
+                work-complete retries are exhausted. "strict_automation" requires explicit
+                work_complete and will continue until another stop condition is met.
             enable_continuation_prompts: Whether to prompt agent to continue if it stops early.
             max_continuation_prompts: Maximum continuation prompts before accepting done. Default is 5.
             continuation_prompt: Custom continuation prompt text.
@@ -541,6 +573,7 @@ class AgentHarness:
             max_input_tokens=max_input_tokens,
             soft_threshold_percent=soft_threshold_percent,
             enable_compaction=enable_compaction,
+            compaction_owner_mode=compaction_owner_mode,
             compaction_store=compaction_store,
             artifact_store=artifact_store,
             summary_cache=summary_cache,
@@ -551,6 +584,7 @@ class AgentHarness:
             task_contract=task_contract,
             enable_stall_detection=enable_stall_detection,
             stall_threshold=stall_threshold,
+            stop_policy_profile=stop_policy_profile,
             enable_continuation_prompts=enable_continuation_prompts,
             max_continuation_prompts=max_continuation_prompts,
             continuation_prompt=continuation_prompt,

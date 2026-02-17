@@ -25,7 +25,7 @@ def test_token_budget_defaults() -> None:
     assert budget.blocking_threshold == 121600
     assert not budget.is_under_pressure
     assert not budget.is_blocking
-    assert budget.tokens_over_threshold == 0
+    assert budget.tokens_over == 0
 
 
 def test_token_budget_pressure_detection() -> None:
@@ -35,17 +35,17 @@ def test_token_budget_pressure_detection() -> None:
     # Under threshold - no pressure
     budget.current_estimate = 7000
     assert not budget.is_under_pressure
-    assert budget.tokens_over_threshold == 0
+    assert budget.tokens_over == 0
 
     # At threshold - under pressure
     budget.current_estimate = 8000
     assert budget.is_under_pressure
-    assert budget.tokens_over_threshold == 0
+    assert budget.tokens_over == 0
 
     # Over threshold - under pressure
     budget.current_estimate = 9000
     assert budget.is_under_pressure
-    assert budget.tokens_over_threshold == 1000
+    assert budget.tokens_over == 1000
 
 
 def test_token_budget_serialization() -> None:

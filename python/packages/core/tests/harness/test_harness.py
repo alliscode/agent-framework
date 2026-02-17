@@ -6,6 +6,8 @@ from collections.abc import AsyncIterable
 from dataclasses import dataclass
 from typing import Any
 
+import pytest
+
 from agent_framework import (
     AgentRunResponse,
     AgentRunResponseUpdate,
@@ -30,8 +32,10 @@ from agent_framework._harness import (
     TurnComplete,
 )
 from agent_framework._harness._constants import (
+    HARNESS_COMPACTION_OWNER_MODE_KEY,
     HARNESS_MAX_TURNS_KEY,
     HARNESS_PENDING_TOOL_CALLS_KEY,
+    HARNESS_STOP_POLICY_PROFILE_KEY,
     HARNESS_STATUS_KEY,
     HARNESS_TRANSCRIPT_KEY,
     HARNESS_TURN_COUNT_KEY,
@@ -102,13 +106,24 @@ async def test_repair_executor_initializes_harness_state() -> None:
     class TestOutput:
         status: str
         max_turns: int
+        compaction_owner_mode: str
+        stop_policy_profile: str
 
     class TestExecutor(Executor):
         @handler
         async def handle(self, msg: RepairComplete, ctx: WorkflowContext[None, TestOutput]) -> None:
             status = await ctx.get_shared_state(HARNESS_STATUS_KEY)
             max_turns = await ctx.get_shared_state(HARNESS_MAX_TURNS_KEY)
-            await ctx.yield_output(TestOutput(status=status, max_turns=max_turns))
+            compaction_owner_mode = await ctx.get_shared_state(HARNESS_COMPACTION_OWNER_MODE_KEY)
+            stop_policy_profile = await ctx.get_shared_state(HARNESS_STOP_POLICY_PROFILE_KEY)
+            await ctx.yield_output(
+                TestOutput(
+                    status=status,
+                    max_turns=max_turns,
+                    compaction_owner_mode=compaction_owner_mode,
+                    stop_policy_profile=stop_policy_profile,
+                )
+            )
 
     workflow = (
         WorkflowBuilder()
@@ -130,6 +145,8 @@ async def test_repair_executor_initializes_harness_state() -> None:
     output = outputs[0]
     assert output.status == HarnessStatus.RUNNING.value
     assert output.max_turns == 25
+    assert output.compaction_owner_mode == "compaction_executor"
+    assert output.stop_policy_profile == "interactive"
 
 
 async def test_repair_executor_repairs_dangling_tool_calls() -> None:
@@ -321,6 +338,52 @@ async def test_stop_decision_stops_on_error() -> None:
     assert harness_result.reason.kind == "failed"
 
 
+async def test_stop_decision_strict_policy_requires_work_complete_until_max_turns() -> None:
+    """Strict policy should not accept done when work_complete is never called."""
+
+    class TestAgentTurnExecutor(Executor):
+        @handler
+        async def handle(self, trigger: RepairComplete, ctx: WorkflowContext[TurnComplete]) -> None:
+            turn = await ctx.get_shared_state(HARNESS_TURN_COUNT_KEY)
+            turn = (turn or 0) + 1
+            await ctx.set_shared_state(HARNESS_TURN_COUNT_KEY, turn)
+            await ctx.send_message(TurnComplete(agent_done=True, called_work_complete=False))
+
+    workflow = (
+        WorkflowBuilder()
+        .register_executor(lambda: RepairExecutor(id="repair"), name="repair")
+        .register_executor(lambda: TestAgentTurnExecutor(id="agent"), name="agent")
+        .register_executor(
+            lambda: StopDecisionExecutor(
+                require_work_complete=True,
+                work_complete_max_retries=1,
+                accept_done_after_retries_exhausted=False,
+                id="stop",
+            ),
+            name="stop",
+        )
+        .add_edge("repair", "agent")
+        .add_edge("agent", "stop")
+        .add_edge("stop", "repair")
+        .set_start_executor("repair")
+        .set_max_iterations(100)
+        .build()
+    )
+
+    result = await workflow.run(
+        RepairTrigger(),
+        **{HARNESS_CONFIG_KEY: {"max_turns": 3}},
+    )
+    outputs = result.get_outputs()
+    assert len(outputs) == 1
+    harness_result = outputs[0]
+    assert isinstance(harness_result, HarnessResult)
+    assert harness_result.status == HarnessStatus.DONE
+    assert harness_result.reason is not None
+    assert harness_result.reason.kind == "max_turns"
+    assert harness_result.turn_count == 3
+
+
 # Test HarnessWorkflowBuilder
 
 
@@ -345,3 +408,42 @@ async def test_harness_workflow_builder_get_harness_kwargs() -> None:
 
     assert HARNESS_CONFIG_KEY in kwargs
     assert kwargs[HARNESS_CONFIG_KEY]["max_turns"] == 25
+    assert kwargs[HARNESS_CONFIG_KEY]["stop_policy_profile"] == "interactive"
+
+
+async def test_harness_workflow_builder_stop_policy_profile_in_kwargs() -> None:
+    """Stop policy profile should be surfaced in harness config kwargs."""
+    agent = MockAgent()
+    builder = HarnessWorkflowBuilder(agent, stop_policy_profile="strict_automation")
+
+    kwargs = builder.get_harness_kwargs()
+
+    assert kwargs[HARNESS_CONFIG_KEY]["stop_policy_profile"] == "strict_automation"
+
+
+async def test_harness_workflow_builder_compaction_owner_mode_in_kwargs() -> None:
+    """Test compaction owner mode plumbing in harness kwargs."""
+    agent = MockAgent()
+    builder = HarnessWorkflowBuilder(
+        agent,
+        max_turns=25,
+        enable_compaction=True,
+        compaction_owner_mode="shadow",
+    )
+
+    kwargs = builder.get_harness_kwargs()
+
+    assert HARNESS_CONFIG_KEY in kwargs
+    assert kwargs[HARNESS_CONFIG_KEY]["max_turns"] == 25
+    assert kwargs[HARNESS_CONFIG_KEY]["compaction"]["owner_mode"] == "shadow"
+
+
+async def test_harness_workflow_builder_rejects_invalid_compaction_owner_mode() -> None:
+    """Invalid compaction owner mode should raise a clear error."""
+    agent = MockAgent()
+    with pytest.raises(ValueError, match="Invalid compaction_owner_mode"):
+        HarnessWorkflowBuilder(
+            agent,
+            enable_compaction=True,
+            compaction_owner_mode="invalid-mode",  # type: ignore[arg-type]
+        )

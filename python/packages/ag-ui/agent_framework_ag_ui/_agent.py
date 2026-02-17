@@ -1,5 +1,5 @@
+# --- PATCHED FOR RELIABILITY (Correctness/Durability) ---
 # Copyright (c) Microsoft. All rights reserved.
-
 """AgentFrameworkAgent wrapper for AG-UI protocol - Clean Architecture."""
 
 from collections.abc import AsyncGenerator
@@ -16,6 +16,13 @@ from ._orchestrators import (
     Orchestrator,
 )
 
+# --- BEGIN PATCH: Strict State/Tool Schema Validation ---
+import logging
+logger = logging.getLogger(__name__)
+
+class ValidationError(Exception):
+    pass
+# --- END PATCH ---
 
 class AgentConfig:
     """Configuration for agent wrapper."""
@@ -34,7 +41,7 @@ class AgentConfig:
             require_confirmation: Whether predictive updates require confirmation
         """
         self.state_schema = self._normalize_state_schema(state_schema)
-        self.predict_state_config = predict_state_config or {}
+        self.predict_state_config = self._validate_predict_state_config(predict_state_config)
         self.require_confirmation = require_confirmation
 
     @staticmethod
@@ -64,6 +71,18 @@ class AgentConfig:
 
         return {}
 
+    @staticmethod
+    def _validate_predict_state_config(conf) -> dict[str, dict[str, str]]:
+        # --- PATCH: Validate structure/contents strictly ---
+        if not conf:
+            return {}
+        result = {}
+        for key, value in conf.items():
+            if not isinstance(value, dict) or "tool" not in value or "tool_argument" not in value:
+                logger.warning(f"Invalid predict_state_config for key '{key}': {value} (expected dict with 'tool' and 'tool_argument')")
+                continue
+            result[key] = value
+        return result
 
 class AgentFrameworkAgent:
     """Wraps Agent Framework agents for AG-UI protocol compatibility.
@@ -162,7 +181,13 @@ class AgentFrameworkAgent:
             RuntimeError: If no orchestrator matches (should never happen if
                 DefaultOrchestrator is last in the chain)
         """
-        # Create execution context with all needed data
+        # --- PATCH: Validate input state before execution ---
+        state = input_data.get("state")
+        if self.config.state_schema and state is not None and not isinstance(state, dict):
+            logger.error(f"State provided is not a dict: {state} (type={type(state)}) - resetting to schema defaults")
+            input_data["state"] = None
+        # --- END PATCH ---
+
         context = ExecutionContext(
             input_data=input_data,
             agent=self.agent,
@@ -170,16 +195,13 @@ class AgentFrameworkAgent:
             confirmation_strategy=self.confirmation_strategy,
         )
 
-        # Find matching orchestrator and execute
         for orchestrator in self.orchestrators:
             if orchestrator.can_handle(context):
                 async for event in orchestrator.run(context):
                     yield event
                 return
 
-        # Should never reach here if DefaultOrchestrator is last
         raise RuntimeError("No orchestrator matched - check configuration")
-
 
 __all__ = [
     "AgentFrameworkAgent",

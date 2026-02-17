@@ -29,7 +29,7 @@ from agent_framework._harness import (
     SpanReference,
     StructuredSummary,
     SummaryCacheKey,
-    TokenBudgetV2,
+    TokenBudget,
     ToolOutcome,
 )
 from agent_framework._harness._compaction import (
@@ -264,45 +264,43 @@ class TestSimpleTokenizer:
         assert tokenizer.count_tokens("") == 0
 
 
-class TestTokenBudgetV2:
-    """Tests for TokenBudgetV2."""
+class TestTokenBudget:
+    """Tests for unified TokenBudget."""
 
     def test_budget_defaults(self) -> None:
         """Test default budget values."""
-        budget = TokenBudgetV2()
+        budget = TokenBudget()
 
         assert budget.max_input_tokens == 128_000
-        assert budget.soft_threshold_percent == 0.85
+        assert budget.soft_threshold_percent == 0.80
+        assert budget.blocking_threshold_percent == 0.95
+        assert budget.current_estimate == 0
         assert budget.safety_buffer_tokens == 500
 
     def test_budget_soft_threshold(self) -> None:
         """Test budget soft threshold calculation."""
-        budget = TokenBudgetV2(max_input_tokens=10000, soft_threshold_percent=0.80)
+        budget = TokenBudget(max_input_tokens=10000, soft_threshold_percent=0.80)
 
         # 10000 * 0.80 = 8000
         assert budget.soft_threshold == 8000
 
     def test_budget_pressure_detection(self) -> None:
-        """Test budget pressure detection."""
-        budget = TokenBudgetV2(
+        """Test budget pressure detection via current_estimate."""
+        budget = TokenBudget(
             max_input_tokens=10000,
             soft_threshold_percent=0.80,
-            system_prompt_tokens=1000,
-            tool_schema_tokens=500,
-            safety_buffer_tokens=500,
-            rehydration_reserve_tokens=500,
         )
 
-        # Overhead = 1000 + 500 + 500 + 500 = 2500
         # Soft threshold = 10000 * 0.8 = 8000
-        # Available = 8000 - 2500 = 5500
+        budget.current_estimate = 7000
+        assert not budget.is_under_pressure
 
-        assert not budget.is_under_pressure(5000)
-        assert budget.is_under_pressure(6000)
+        budget.current_estimate = 9000
+        assert budget.is_under_pressure
 
     def test_budget_tokens_over_threshold(self) -> None:
-        """Test tokens over threshold calculation."""
-        budget = TokenBudgetV2(
+        """Test tokens over threshold calculation (method form)."""
+        budget = TokenBudget(
             max_input_tokens=10000,
             soft_threshold_percent=0.80,
             safety_buffer_tokens=0,
@@ -312,6 +310,41 @@ class TestTokenBudgetV2:
         # With no overhead, available = 8000
         assert budget.tokens_over_threshold(7000) == 0
         assert budget.tokens_over_threshold(9000) > 0
+
+    def test_budget_tokens_over_property(self) -> None:
+        """Test tokens_over property (uses current_estimate)."""
+        budget = TokenBudget(max_input_tokens=10000, soft_threshold_percent=0.80, current_estimate=9000)
+
+        # Soft threshold = 8000, current_estimate = 9000 → 1000 over
+        assert budget.tokens_over == 1000
+
+    def test_budget_blocking_detection(self) -> None:
+        """Test blocking threshold detection."""
+        budget = TokenBudget(max_input_tokens=10000, blocking_threshold_percent=0.95)
+
+        budget.current_estimate = 9000
+        assert not budget.is_blocking
+
+        budget.current_estimate = 9500
+        assert budget.is_blocking
+
+    def test_budget_serialization(self) -> None:
+        """Test to_dict/from_dict round-trip."""
+        budget = TokenBudget(
+            max_input_tokens=50000,
+            soft_threshold_percent=0.90,
+            blocking_threshold_percent=0.95,
+            current_estimate=40000,
+            system_prompt_tokens=1000,
+        )
+        data = budget.to_dict()
+        restored = TokenBudget.from_dict(data)
+
+        assert restored.max_input_tokens == 50000
+        assert restored.soft_threshold_percent == 0.90
+        assert restored.blocking_threshold_percent == 0.95
+        assert restored.current_estimate == 40000
+        assert restored.system_prompt_tokens == 1000
 
 
 # ============================================================================

@@ -18,6 +18,7 @@ a sandboxed directory.
 
 import argparse
 import asyncio
+import time
 import logging
 import tempfile
 from datetime import datetime
@@ -192,7 +193,7 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False
         summary_cache=InMemorySummaryCache(max_entries=100),
         summarizer=summarizer,
         max_input_tokens=128_000,
-        soft_threshold_percent=0.85,
+        soft_threshold_percent=0.80,
         sandbox_path=str(sandbox_dir),
     )
 
@@ -244,7 +245,7 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False
                     summary_cache=InMemorySummaryCache(max_entries=100),
                     summarizer=summarizer,
                     max_input_tokens=128_000,
-                    soft_threshold_percent=0.85,
+                    soft_threshold_percent=0.80,
                     sandbox_path=str(sandbox_dir),
                 )
                 message_count = 0
@@ -279,6 +280,7 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False
             continuation_count = 0
             last_executor = None
             event_count = 0
+            _post_compaction_time = None  # type: float | None
 
             debug("Starting harness.run_stream()")
             from agent_framework.observability import get_tracer
@@ -319,8 +321,15 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False
                         debug("  SuperStepStarted")
                         # Could track supersteps if needed
 
-                    # Show compaction lifecycle events
+                    # Show compaction lifecycle events and token budget
                     if isinstance(event, HarnessLifecycleEvent):
+                        if event.event_type == "turn_completed" and event.data:
+                            tokens = event.data.get("token_estimate", 0)
+                            cache_sz = event.data.get("cache_size", 0)
+                            if tokens > 0:
+                                debug(f"  Token budget: {tokens:,} tokens, cache: {cache_sz} messages")
+                                print()
+                                print_lifecycle(f"Context: {tokens:,} tokens, {cache_sz} messages")
                         if event.event_type == "compaction_started" and event.data:
                             current = event.data.get("current_tokens", 0)
                             threshold = event.data.get("soft_threshold", 0)
@@ -340,10 +349,19 @@ async def run_repl(sandbox_dir: Path, max_turns: int = 50, verbose: bool = False
                                 f"Context compacted{level_tag}: {before:,} → {after:,} tokens "
                                 f"(freed {freed:,} in {duration / 1000:.1f}s)"
                             )
+                            # Start timing from compaction_completed to first streaming token
+                            _post_compaction_time = time.monotonic()
 
                     # Show agent streaming updates
                     if isinstance(event, AgentRunUpdateEvent):
                         update = event.data
+
+                        # Timing: measure gap from compaction to first agent token
+                        if _post_compaction_time is not None:
+                            _gap_ms = (time.monotonic() - _post_compaction_time) * 1000
+                            print()
+                            print_lifecycle(f"First agent token arrived {_gap_ms / 1000:.1f}s after compaction")
+                            _post_compaction_time = None
 
                         # Debug: log update details
                         update_role = getattr(update, "role", None)

@@ -10,17 +10,8 @@ from .._workflows._workflow_context import WorkflowContext
 from ._constants import (
     DEFAULT_STALL_THRESHOLD,
     DEFAULT_WORK_COMPLETE_MAX_RETRIES,
-    HARNESS_COVERAGE_LEDGER_KEY,
-    HARNESS_MAX_TURNS_KEY,
-    HARNESS_PROGRESS_TRACKER_KEY,
-    HARNESS_STATUS_KEY,
-    HARNESS_STOP_REASON_KEY,
-    HARNESS_TASK_CONTRACT_KEY,
-    HARNESS_TRANSCRIPT_KEY,
-    HARNESS_TURN_COUNT_KEY,
-    HARNESS_WORK_COMPLETE_RETRY_COUNT_KEY,
-    HARNESS_WORK_ITEM_LEDGER_KEY,
 )
+from ._state_store import HarnessStateStore
 from ._state import (
     HarnessEvent,
     HarnessLifecycleEvent,
@@ -69,6 +60,7 @@ class StopDecisionExecutor(Executor):
         enable_work_item_verification: bool = False,
         require_work_complete: bool = True,
         work_complete_max_retries: int = DEFAULT_WORK_COMPLETE_MAX_RETRIES,
+        accept_done_after_retries_exhausted: bool = True,
         stall_threshold: int = DEFAULT_STALL_THRESHOLD,
         hooks: "HarnessHooks | None" = None,
         id: str = "harness_stop_decision",
@@ -83,6 +75,8 @@ class StopDecisionExecutor(Executor):
             work_complete_max_retries: Max times to retry when agent signals done without
                 calling work_complete. After this many retries, accept the done signal anyway
                 to prevent infinite loops. Default is 3.
+            accept_done_after_retries_exhausted: Whether to accept an agent_done signal after
+                work_complete retries are exhausted. Set False for strict automation mode.
             stall_threshold: Number of unchanged turns before stall detection.
             hooks: Optional harness hooks for agent-stop interception.
             id: Unique identifier for this executor.
@@ -93,8 +87,10 @@ class StopDecisionExecutor(Executor):
         self._enable_work_item_verification = enable_work_item_verification
         self._require_work_complete = require_work_complete
         self._work_complete_max_retries = work_complete_max_retries
+        self._accept_done_after_retries_exhausted = accept_done_after_retries_exhausted
         self._stall_threshold = stall_threshold
         self._hooks = hooks
+        self._state_store = HarnessStateStore()
 
     @handler
     async def evaluate(self, turn_result: TurnComplete, ctx: WorkflowContext[RepairTrigger, HarnessResult]) -> None:
@@ -105,8 +101,8 @@ class StopDecisionExecutor(Executor):
             ctx: Workflow context for state access and message/output sending.
         """
         # Get current state
-        turn_count = await self._get_turn_count(ctx)
-        max_turns = await self._get_max_turns(ctx)
+        turn_count = await self._state_store.get_turn_count(ctx)
+        max_turns = await self._state_store.get_max_turns(ctx)
 
         logger.debug("StopDecisionExecutor: Evaluating turn %s/%s", turn_count, max_turns)
 
@@ -156,9 +152,9 @@ class StopDecisionExecutor(Executor):
             # 3-pre: Require explicit work_complete call (with retry cap)
             if self._require_work_complete and not turn_result.called_work_complete:
                 # Track how many times we've retried without work_complete
-                retry_count = await self._get_work_complete_retry_count(ctx)
+                retry_count = await self._state_store.get_work_complete_retry_count(ctx)
                 retry_count += 1
-                await ctx.set_shared_state(HARNESS_WORK_COMPLETE_RETRY_COUNT_KEY, retry_count)
+                await self._state_store.set_work_complete_retry_count(ctx, retry_count)
 
                 if retry_count <= self._work_complete_max_retries:
                     logger.info(
@@ -181,7 +177,29 @@ class StopDecisionExecutor(Executor):
                     )
                     await ctx.send_message(RepairTrigger())
                     return
-                # Max retries exceeded — accept the done signal to prevent infinite loops
+                if not self._accept_done_after_retries_exhausted:
+                    logger.info(
+                        "StopDecisionExecutor: Agent did not call work_complete after %d retries; "
+                        "strict policy continues execution",
+                        self._work_complete_max_retries,
+                    )
+                    await self._append_event(
+                        ctx,
+                        HarnessEvent(
+                            event_type="stop_decision",
+                            data={
+                                "decision": "continue",
+                                "reason": "work_complete_required_strict",
+                                "turn": turn_count,
+                                "retries": retry_count,
+                                "max_retries": self._work_complete_max_retries,
+                            },
+                        ),
+                    )
+                    await ctx.send_message(RepairTrigger())
+                    return
+
+                # Max retries exceeded — accept the done signal to prevent infinite loops.
                 logger.warning(
                     "StopDecisionExecutor: Agent never called work_complete after %d retries, "
                     "accepting done signal to prevent infinite loop",
@@ -271,27 +289,6 @@ class StopDecisionExecutor(Executor):
         logger.info(f"StopDecisionExecutor: Continuing to turn {turn_count + 1}")
         await ctx.send_message(RepairTrigger())
 
-    async def _get_turn_count(self, ctx: WorkflowContext[Any, Any]) -> int:
-        """Get the current turn count."""
-        try:
-            return int(await ctx.get_shared_state(HARNESS_TURN_COUNT_KEY) or 0)
-        except KeyError:
-            return 0
-
-    async def _get_work_complete_retry_count(self, ctx: WorkflowContext[Any, Any]) -> int:
-        """Get the current work_complete retry count."""
-        try:
-            return int(await ctx.get_shared_state(HARNESS_WORK_COMPLETE_RETRY_COUNT_KEY) or 0)
-        except KeyError:
-            return 0
-
-    async def _get_max_turns(self, ctx: WorkflowContext[Any, Any]) -> int:
-        """Get the maximum turns limit."""
-        try:
-            return int(await ctx.get_shared_state(HARNESS_MAX_TURNS_KEY) or 50)
-        except KeyError:
-            return 50
-
     async def _check_stall(self, ctx: WorkflowContext[Any, Any], turn_count: int) -> tuple[bool, int]:
         """Check if progress has stalled.
 
@@ -326,7 +323,7 @@ class StopDecisionExecutor(Executor):
         tracker.add_fingerprint(fingerprint)
 
         # Save updated tracker
-        await ctx.set_shared_state(HARNESS_PROGRESS_TRACKER_KEY, tracker.to_dict())
+        await self._state_store.set_progress_tracker_data(ctx, tracker.to_dict())
 
         # Check for stall
         is_stalled = tracker.is_stalled()
@@ -338,26 +335,20 @@ class StopDecisionExecutor(Executor):
         """Get work item statuses for progress fingerprint."""
         from ._work_items import WorkItemLedger
 
-        try:
-            ledger_data = await ctx.get_shared_state(HARNESS_WORK_ITEM_LEDGER_KEY)
-            if ledger_data and isinstance(ledger_data, dict):
-                ledger = WorkItemLedger.from_dict(cast("dict[str, Any]", ledger_data))
-                if ledger.items:
-                    return {item_id: item.status.value for item_id, item in ledger.items.items()}
-        except KeyError:
-            pass
+        ledger_data = await self._state_store.get_work_item_ledger_data(ctx)
+        if ledger_data and isinstance(ledger_data, dict):
+            ledger = WorkItemLedger.from_dict(cast("dict[str, Any]", ledger_data))
+            if ledger.items:
+                return {item_id: item.status.value for item_id, item in ledger.items.items()}
         return None
 
     async def _get_progress_tracker(self, ctx: WorkflowContext[Any, Any]) -> Any:
         """Get or create the progress tracker."""
         from ._task_contract import ProgressTracker
 
-        try:
-            tracker_data = await ctx.get_shared_state(HARNESS_PROGRESS_TRACKER_KEY)
-            if tracker_data and isinstance(tracker_data, dict):
-                return ProgressTracker.from_dict(cast("dict[str, Any]", tracker_data))
-        except KeyError:
-            pass
+        tracker_data = await self._state_store.get_progress_tracker_data(ctx)
+        if tracker_data and isinstance(tracker_data, dict):
+            return ProgressTracker.from_dict(cast("dict[str, Any]", tracker_data))
 
         return ProgressTracker(stall_threshold=self._stall_threshold)
 
@@ -365,24 +356,18 @@ class StopDecisionExecutor(Executor):
         """Get the coverage ledger if available."""
         from ._task_contract import CoverageLedger
 
-        try:
-            ledger_data = await ctx.get_shared_state(HARNESS_COVERAGE_LEDGER_KEY)
-            if ledger_data and isinstance(ledger_data, dict):
-                return CoverageLedger.from_dict(cast("dict[str, Any]", ledger_data))
-        except KeyError:
-            pass
+        ledger_data = await self._state_store.get_coverage_ledger_data(ctx)
+        if ledger_data and isinstance(ledger_data, dict):
+            return CoverageLedger.from_dict(cast("dict[str, Any]", ledger_data))
 
         return None
 
     async def _get_transcript(self, ctx: WorkflowContext[Any, Any]) -> list[dict[str, Any]]:
         """Get the current transcript."""
         try:
-            transcript = await ctx.get_shared_state(HARNESS_TRANSCRIPT_KEY)
-            if transcript:
-                return list(transcript)
-        except KeyError:
-            pass
-        return []
+            return await self._state_store.get_transcript_data(ctx)
+        except Exception:
+            return []
 
     async def _verify_contract(self, ctx: WorkflowContext[Any, Any]) -> tuple[bool, dict[str, Any]]:
         """Verify the task contract is satisfied.
@@ -415,7 +400,7 @@ class StopDecisionExecutor(Executor):
         result = verifier.verify_contract(contract, ledger)
 
         # Save updated ledger
-        await ctx.set_shared_state(HARNESS_COVERAGE_LEDGER_KEY, ledger.to_dict())
+        await self._state_store.set_coverage_ledger_data(ctx, ledger.to_dict())
 
         if result.satisfied:
             return True, {}
@@ -436,13 +421,10 @@ class StopDecisionExecutor(Executor):
         """
         from ._work_items import WorkItemLedger
 
-        try:
-            ledger_data = await ctx.get_shared_state(HARNESS_WORK_ITEM_LEDGER_KEY)
-            if ledger_data and isinstance(ledger_data, dict):
-                ledger = WorkItemLedger.from_dict(cast("dict[str, Any]", ledger_data))
-                return ledger.is_all_complete()
-        except KeyError:
-            pass
+        ledger_data = await self._state_store.get_work_item_ledger_data(ctx)
+        if ledger_data and isinstance(ledger_data, dict):
+            ledger = WorkItemLedger.from_dict(cast("dict[str, Any]", ledger_data))
+            return ledger.is_all_complete()
 
         # No ledger means no items to verify
         return True
@@ -451,12 +433,9 @@ class StopDecisionExecutor(Executor):
         """Get the task contract if available."""
         from ._task_contract import TaskContract
 
-        try:
-            contract_data = await ctx.get_shared_state(HARNESS_TASK_CONTRACT_KEY)
-            if contract_data and isinstance(contract_data, dict):
-                return TaskContract.from_dict(cast("dict[str, Any]", contract_data))
-        except KeyError:
-            pass
+        contract_data = await self._state_store.get_task_contract_data(ctx)
+        if contract_data and isinstance(contract_data, dict):
+            return TaskContract.from_dict(cast("dict[str, Any]", contract_data))
 
         return None
 
@@ -541,11 +520,14 @@ class StopDecisionExecutor(Executor):
         )
 
         # Update shared state
-        await ctx.set_shared_state(HARNESS_STATUS_KEY, status.value)
-        await ctx.set_shared_state(HARNESS_STOP_REASON_KEY, reason.to_dict())
+        await self._state_store.set_completion_state(
+            ctx,
+            status=status.value,
+            stop_reason=reason.to_dict(),
+        )
 
         # Get max_turns for lifecycle event
-        max_turns = await self._get_max_turns(ctx)
+        max_turns = await self._state_store.get_max_turns(ctx)
 
         # Emit lifecycle event for DevUI
         await ctx.add_event(
@@ -562,28 +544,22 @@ class StopDecisionExecutor(Executor):
         )
 
         # Get transcript for final result
-        try:
-            transcript_data = await ctx.get_shared_state(HARNESS_TRANSCRIPT_KEY)
-            transcript = [HarnessEvent.from_dict(e) for e in transcript_data] if transcript_data else []
-        except KeyError:
-            transcript = []
+        transcript_data = await self._state_store.get_transcript_data(ctx)
+        transcript = [HarnessEvent.from_dict(e) for e in transcript_data] if transcript_data else []
 
         # Collect deliverable artifacts from work item ledger
         deliverables: list[dict[str, Any]] = []
-        try:
-            ledger_data = await ctx.get_shared_state(HARNESS_WORK_ITEM_LEDGER_KEY)
-            if ledger_data and isinstance(ledger_data, dict):
-                from ._work_items import WorkItemLedger
+        ledger_data = await self._state_store.get_work_item_ledger_data(ctx)
+        if ledger_data and isinstance(ledger_data, dict):
+            from ._work_items import WorkItemLedger
 
-                ledger = WorkItemLedger.from_dict(cast("dict[str, Any]", ledger_data))
-                for item in ledger.get_deliverables():
-                    deliverables.append({
-                        "item_id": item.id,
-                        "title": item.title,
-                        "content": item.artifact,
-                    })
-        except KeyError:
-            pass
+            ledger = WorkItemLedger.from_dict(cast("dict[str, Any]", ledger_data))
+            for item in ledger.get_deliverables():
+                deliverables.append({
+                    "item_id": item.id,
+                    "title": item.title,
+                    "content": item.artifact,
+                })
 
         # Yield final result
         result = HarnessResult(
@@ -602,13 +578,4 @@ class StopDecisionExecutor(Executor):
             ctx: Workflow context for state access.
             event: The event to append.
         """
-        transcript: list[dict[str, Any]] = []
-        try:
-            stored = await ctx.get_shared_state(HARNESS_TRANSCRIPT_KEY)
-            if stored is not None:
-                transcript = list(stored)
-        except KeyError:
-            pass
-
-        transcript.append(event.to_dict())
-        await ctx.set_shared_state(HARNESS_TRANSCRIPT_KEY, transcript)
+        await self._state_store.append_transcript_event(ctx, event)

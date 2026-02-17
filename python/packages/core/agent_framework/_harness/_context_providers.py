@@ -174,14 +174,14 @@ class HarnessGuidanceProvider(ContextProvider):
         Returns:
             Context with guidance as instructions.
         """
-        from ._agent_turn_executor import AgentTurnExecutor
+        from ._turn_prompt_catalog import PLANNING_PROMPT, TOOL_STRATEGY_GUIDANCE, WORK_ITEM_GUIDANCE
 
         sections: list[str] = []
         if self._enable_tool_guidance:
-            sections.append(AgentTurnExecutor.TOOL_STRATEGY_GUIDANCE)
+            sections.append(TOOL_STRATEGY_GUIDANCE)
         if self._enable_work_items:
-            sections.append(AgentTurnExecutor.WORK_ITEM_GUIDANCE)
-            sections.append(AgentTurnExecutor.PLANNING_PROMPT)
+            sections.append(WORK_ITEM_GUIDANCE)
+            sections.append(PLANNING_PROMPT)
         if self._enable_sub_agents:
             sections.append(self.SUB_AGENT_GUIDANCE)
 

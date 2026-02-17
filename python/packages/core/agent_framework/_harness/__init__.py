@@ -94,6 +94,7 @@ from ._compaction import (
     SummaryCache,
     SummaryCacheKey,
     TiktokenTokenizer,
+    TokenBudget,
     ToolDurability,
     ToolDurabilityPolicy,
     ToolOutcome,
@@ -103,15 +104,14 @@ from ._compaction import (
     create_summary_cache_key,
     get_tokenizer,
 )
-from ._compaction import (
-    TokenBudget as TokenBudgetV2,  # Alias to avoid conflict with existing TokenBudget
-)
 from ._compaction_executor import CompactionComplete, CompactionExecutor
+from ._compaction_owner import OwnerCompactionResult, OwnerFallbackReason
 from ._constants import (
     DEFAULT_BLOCKING_THRESHOLD_PERCENT,
     DEFAULT_MAX_INPUT_TOKENS,
     DEFAULT_MAX_TURNS,
     DEFAULT_SOFT_THRESHOLD_PERCENT,
+    DEFAULT_STOP_POLICY_PROFILE,
     DEFAULT_STALL_THRESHOLD,
     HARNESS_COMPACTION_METRICS_KEY,
     HARNESS_COMPACTION_PLAN_KEY,
@@ -122,6 +122,7 @@ from ._constants import (
     HARNESS_PROGRESS_TRACKER_KEY,
     HARNESS_STATUS_KEY,
     HARNESS_STOP_REASON_KEY,
+    HARNESS_STOP_POLICY_PROFILE_KEY,
     HARNESS_TASK_CONTRACT_KEY,
     HARNESS_TOKEN_BUDGET_KEY,
     HARNESS_TRANSCRIPT_KEY,
@@ -129,7 +130,6 @@ from ._constants import (
     HARNESS_WORK_ITEM_LEDGER_KEY,
 )
 from ._context_pressure import (
-    TokenBudget,
     estimate_tokens,
     estimate_transcript_tokens,
 )
@@ -179,7 +179,9 @@ from ._state import (
     StopReason,
     TurnComplete,
 )
+from ._state_store import HarnessStateStore
 from ._stop_decision_executor import StopDecisionExecutor
+from ._stop_policy import StopPolicyProfile
 from ._sub_agents import create_document_tool, create_explore_tool, create_task_tool
 from ._task_contract import (
     AcceptabilityCriteria,
@@ -197,6 +199,7 @@ from ._task_contract import (
     TaskContract,
     UserQuestion,
 )
+from ._turn_buffer import ExecutorLocalTurnBuffer, SharedStateTurnBuffer, TurnBuffer
 from ._work_items import (
     ArtifactContaminationLevel,
     ArtifactRole,
@@ -226,6 +229,7 @@ __all__ = [
     "DEFAULT_MAX_INPUT_TOKENS",
     "DEFAULT_MAX_TURNS",
     "DEFAULT_SOFT_THRESHOLD_PERCENT",
+    "DEFAULT_STOP_POLICY_PROFILE",
     "DEFAULT_STALL_THRESHOLD",
     "HARNESS_COMPACTION_METRICS_KEY",
     "HARNESS_COMPACTION_PLAN_KEY",
@@ -236,6 +240,7 @@ __all__ = [
     "HARNESS_PROGRESS_TRACKER_KEY",
     "HARNESS_STATUS_KEY",
     "HARNESS_STOP_REASON_KEY",
+    "HARNESS_STOP_POLICY_PROFILE_KEY",
     "HARNESS_TASK_CONTRACT_KEY",
     "HARNESS_TOKEN_BUDGET_KEY",
     "HARNESS_TRANSCRIPT_KEY",
@@ -285,6 +290,8 @@ __all__ = [
     "CompactionPlan",
     "CompactionProposal",
     "CompactionResult",
+    "OwnerFallbackReason",
+    "OwnerCompactionResult",
     # Storage and concurrency types
     "CompactionStore",
     "CompactionStrategy",
@@ -307,6 +314,7 @@ __all__ = [
     "HarnessLifecycleEvent",
     "HarnessRenderer",
     "HarnessResult",
+    "HarnessStateStore",
     "HarnessStatus",
     "HarnessToolMiddleware",
     "HarnessWorkflowBuilder",
@@ -339,6 +347,7 @@ __all__ = [
     "SimpleTokenizer",
     "SpanReference",
     "StopDecisionExecutor",
+    "StopPolicyProfile",
     "StopReason",
     "StructuredSummary",
     "SummarizationRecord",
@@ -349,14 +358,16 @@ __all__ = [
     "TaskContract",
     "TiktokenTokenizer",
     "TokenBudget",
-    "TokenBudgetV2",
     "ToolDurability",
     "ToolDurabilityPolicy",
     "ToolHookResult",
     "ToolOutcome",
     "ToolResultEnvelope",
+    "TurnBuffer",
     "TurnComplete",
     "TurnContext",
+    "ExecutorLocalTurnBuffer",
+    "SharedStateTurnBuffer",
     "UserQuestion",
     "VerificationResult",
     # Work item tracking types

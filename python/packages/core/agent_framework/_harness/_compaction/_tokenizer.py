@@ -466,17 +466,17 @@ def get_tokenizer(
 
 @dataclass
 class TokenBudget:
-    """Token budget that accounts for all overhead.
+    """Unified token budget for context pressure signaling and compaction.
 
-    This is the v2 budget for compaction internals. It tracks not just message
-    tokens but all the overhead that goes into a request: system prompt, tool
-    schemas, formatting, and reserves for response and rehydration. For the
-    simpler SharedState pressure signaling budget, see
-    ``_context_pressure.TokenBudget``.
+    Tracks the current token estimate, checks pressure thresholds, and
+    accounts for overhead (system prompt, tool schemas, formatting).
+    Stored in SharedState under ``HARNESS_TOKEN_BUDGET_KEY``.
 
     Attributes:
-        max_input_tokens: Maximum tokens allowed in input.
+        max_input_tokens: Maximum tokens allowed in input context.
         soft_threshold_percent: Percentage at which to trigger compaction.
+        blocking_threshold_percent: Percentage at which compaction is mandatory.
+        current_estimate: Current estimated token count (set from API usage or tokenizer).
         system_prompt_tokens: Tokens used by system prompt.
         tool_schema_tokens: Tokens used by tool schemas.
         formatting_overhead_tokens: Provider-specific formatting overhead.
@@ -486,7 +486,9 @@ class TokenBudget:
     """
 
     max_input_tokens: int = 128_000
-    soft_threshold_percent: float = 0.85
+    soft_threshold_percent: float = 0.80
+    blocking_threshold_percent: float = 0.95
+    current_estimate: int = 0
 
     # Overhead tracking
     system_prompt_tokens: int = 0
@@ -515,6 +517,11 @@ class TokenBudget:
         return int(self.max_input_tokens * self.soft_threshold_percent)
 
     @property
+    def blocking_threshold(self) -> int:
+        """Calculate the blocking threshold in tokens (must compact before LLM call)."""
+        return int(self.max_input_tokens * self.blocking_threshold_percent)
+
+    @property
     def available_for_messages(self) -> int:
         """Tokens available for conversation messages."""
         return max(0, self.soft_threshold - self.total_overhead)
@@ -524,19 +531,23 @@ class TokenBudget:
         """Tokens available for auto-rehydrated content."""
         return self.rehydration_reserve_tokens
 
-    def is_under_pressure(self, current_tokens: int) -> bool:
-        """Check if context is under pressure.
+    @property
+    def is_under_pressure(self) -> bool:
+        """Check if context is under pressure (above soft threshold)."""
+        return self.current_estimate >= self.soft_threshold
 
-        Args:
-            current_tokens: Current token count of messages.
+    @property
+    def is_blocking(self) -> bool:
+        """Check if context requires blocking compaction before proceeding."""
+        return self.current_estimate >= self.blocking_threshold
 
-        Returns:
-            True if above soft threshold.
-        """
-        return current_tokens >= self.available_for_messages
+    @property
+    def tokens_over(self) -> int:
+        """Calculate how many tokens over the soft threshold."""
+        return max(0, self.current_estimate - self.soft_threshold)
 
     def tokens_over_threshold(self, current_tokens: int) -> int:
-        """Calculate how many tokens over the threshold.
+        """Calculate how many tokens over the threshold for a given count.
 
         Args:
             current_tokens: Current token count of messages.
@@ -567,16 +578,14 @@ class TokenBudget:
         return {
             "max_input_tokens": self.max_input_tokens,
             "soft_threshold_percent": self.soft_threshold_percent,
+            "blocking_threshold_percent": self.blocking_threshold_percent,
+            "current_estimate": self.current_estimate,
             "system_prompt_tokens": self.system_prompt_tokens,
             "tool_schema_tokens": self.tool_schema_tokens,
             "formatting_overhead_tokens": self.formatting_overhead_tokens,
             "safety_buffer_tokens": self.safety_buffer_tokens,
             "rehydration_reserve_tokens": self.rehydration_reserve_tokens,
             "max_rehydration_artifacts": self.max_rehydration_artifacts,
-            # Computed values
-            "total_overhead": self.total_overhead,
-            "soft_threshold": self.soft_threshold,
-            "available_for_messages": self.available_for_messages,
         }
 
     @classmethod
@@ -584,7 +593,9 @@ class TokenBudget:
         """Deserialize from dictionary."""
         return cls(
             max_input_tokens=data.get("max_input_tokens", 128_000),
-            soft_threshold_percent=data.get("soft_threshold_percent", 0.85),
+            soft_threshold_percent=data.get("soft_threshold_percent", 0.80),
+            blocking_threshold_percent=data.get("blocking_threshold_percent", 0.95),
+            current_estimate=data.get("current_estimate", 0),
             system_prompt_tokens=data.get("system_prompt_tokens", 0),
             tool_schema_tokens=data.get("tool_schema_tokens", 0),
             formatting_overhead_tokens=data.get("formatting_overhead_tokens", 0),
@@ -598,7 +609,7 @@ class TokenBudget:
         cls,
         model: str,
         *,
-        soft_threshold_percent: float = 0.85,
+        soft_threshold_percent: float = 0.80,
         safety_buffer_tokens: int = 500,
         rehydration_reserve_tokens: int = 2000,
     ) -> TokenBudget:

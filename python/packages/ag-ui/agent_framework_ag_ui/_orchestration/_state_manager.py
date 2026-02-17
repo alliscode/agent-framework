@@ -1,5 +1,5 @@
+# --- PATCHED FOR RELIABILITY (Durability/fallbacks) ---
 # Copyright (c) Microsoft. All rights reserved.
-
 """State orchestration utilities."""
 
 import json
@@ -7,7 +7,6 @@ from typing import Any
 
 from ag_ui.core import CustomEvent, EventType
 from agent_framework import ChatMessage, TextContent
-
 
 class StateManager:
     """Coordinates state defaults, snapshots, and structured updates."""
@@ -27,15 +26,20 @@ class StateManager:
     def initialize(self, initial_state: dict[str, Any] | None) -> dict[str, Any]:
         """Initialize state with schema defaults."""
         self._state_from_input = initial_state is not None
+        # --- PATCH: Defensive fallback for malformed state ---
+        if initial_state is not None and not isinstance(initial_state, dict):
+            # Allow only dicts as input; forcibly reset and log
+            import logging
+            logging.warning(f"StateManager: initial_state was {type(initial_state)} - ignoring and using defaults.")
+            initial_state = None
+        # --- END PATCH ---
         self.current_state = (initial_state or {}).copy()
         self._apply_schema_defaults()
         return self.current_state
 
     def predict_state_event(self) -> CustomEvent | None:
-        """Create predict-state custom event when configured."""
         if not self.predict_state_config:
             return None
-
         predict_state_value = [
             {
                 "state_key": state_key,
@@ -44,7 +48,6 @@ class StateManager:
             }
             for state_key, config in self.predict_state_config.items()
         ]
-
         return CustomEvent(
             type=EventType.CUSTOM,
             name="PredictState",
@@ -52,21 +55,18 @@ class StateManager:
         )
 
     def initial_snapshot_event(self, event_bridge: Any) -> Any:
-        """Emit initial snapshot when schema and state present."""
         if not self.state_schema:
             return None
         self._apply_schema_defaults()
         return event_bridge.create_state_snapshot_event(self.current_state)
 
     def state_context_message(self, is_new_user_turn: bool, conversation_has_tool_calls: bool) -> ChatMessage | None:
-        """Inject state context only when starting a new user turn."""
         if not self.current_state or not self.state_schema:
             return None
         if not is_new_user_turn:
             return None
         if conversation_has_tool_calls and not self._state_from_input:
             return None
-
         state_json = json.dumps(self.current_state, indent=2)
         return ChatMessage(
             role="system",
@@ -84,19 +84,16 @@ class StateManager:
         )
 
     def extract_state_updates(self, response_dict: dict[str, Any]) -> dict[str, Any]:
-        """Extract state updates from structured response payloads."""
         if self.state_schema:
             return {key: response_dict[key] for key in self.state_schema.keys() if key in response_dict}
         return {k: v for k, v in response_dict.items() if k != "message"}
 
     def apply_state_updates(self, updates: dict[str, Any]) -> None:
-        """Merge state updates into current state."""
         if not updates:
             return
         self.current_state.update(updates)
 
     def _apply_schema_defaults(self) -> None:
-        """Fill missing state fields based on schema hints."""
         for key, schema in self.state_schema.items():
             if key in self.current_state:
                 continue
