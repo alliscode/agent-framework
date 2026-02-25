@@ -2594,3 +2594,161 @@ async def test_agent_no_instructions_in_default_or_options(
     span = spans[0]
 
     assert OtelAttr.SYSTEM_INSTRUCTIONS not in span.attributes
+
+
+# region Test configure_otel_providers and helpers
+
+
+def test_configure_otel_providers_without_env_file(monkeypatch):
+    """Test configure_otel_providers without env_file updates settings and calls _configure."""
+    from unittest.mock import MagicMock, patch
+
+    import agent_framework.observability as observability
+
+    # Clear all OTEL env vars to avoid side effects
+    for key in [
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_PROTOCOL",
+        "OTEL_EXPORTER_OTLP_HEADERS",
+        "ENABLE_INSTRUMENTATION",
+        "ENABLE_SENSITIVE_DATA",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+
+    mock_settings = MagicMock()
+    mock_settings.ENABLED = False
+    mock_settings._executed_setup = False
+
+    with patch.object(observability, "OBSERVABILITY_SETTINGS", mock_settings):
+        observability.configure_otel_providers(enable_sensitive_data=True)
+
+    assert mock_settings.enable_instrumentation is True
+    assert mock_settings.enable_sensitive_data is True
+    mock_settings._configure.assert_called_once()
+
+
+def test_configure_otel_providers_with_env_file(monkeypatch, tmp_path):
+    """Test configure_otel_providers with env_file creates new settings."""
+    from unittest.mock import patch
+
+    import agent_framework.observability as observability
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("")
+
+    with (
+        patch.object(observability, "OBSERVABILITY_SETTINGS", observability.ObservabilitySettings()),
+        patch.object(observability.ObservabilitySettings, "_configure"),
+    ):
+        observability.configure_otel_providers(
+            env_file_path=str(env_file),
+            enable_sensitive_data=True,
+            vs_code_extension_port=4317,
+        )
+        assert observability.OBSERVABILITY_SETTINGS.enable_instrumentation is True
+        assert observability.OBSERVABILITY_SETTINGS.enable_sensitive_data is True
+        assert observability.OBSERVABILITY_SETTINGS.vs_code_extension_port == 4317
+
+
+def test_configure_otel_providers_with_vs_code_port(monkeypatch):
+    """Test configure_otel_providers sets vs_code_extension_port."""
+    from unittest.mock import MagicMock, patch
+
+    import agent_framework.observability as observability
+
+    for key in ["OTEL_EXPORTER_OTLP_ENDPOINT", "ENABLE_INSTRUMENTATION"]:
+        monkeypatch.delenv(key, raising=False)
+
+    mock_settings = MagicMock()
+    with patch.object(observability, "OBSERVABILITY_SETTINGS", mock_settings):
+        observability.configure_otel_providers(vs_code_extension_port=5555)
+
+    assert mock_settings.vs_code_extension_port == 5555
+
+
+def test_get_instructions_from_options_none():
+    """Test _get_instructions_from_options returns None for None input."""
+    from agent_framework.observability import _get_instructions_from_options
+
+    assert _get_instructions_from_options(None) is None
+
+
+def test_get_instructions_from_options_dict():
+    """Test _get_instructions_from_options extracts instructions from dict."""
+    from agent_framework.observability import _get_instructions_from_options
+
+    assert _get_instructions_from_options({"instructions": "test"}) == "test"
+    assert _get_instructions_from_options({"model_id": "gpt-4"}) is None
+
+
+def test_get_instructions_from_options_non_dict():
+    """Test _get_instructions_from_options returns None for non-dict input."""
+    from agent_framework.observability import _get_instructions_from_options
+
+    assert _get_instructions_from_options("not a dict") is None
+    assert _get_instructions_from_options(42) is None
+
+
+def test_get_span_attributes_with_non_dict_options():
+    """Test _get_span_attributes handles non-dict options gracefully."""
+    from agent_framework.observability import _get_span_attributes
+
+    attrs = _get_span_attributes(
+        operation_name="chat",
+        provider_name="test",
+        model="test-model",
+        options="not_a_dict",
+    )
+    assert attrs[OtelAttr.OPERATION] == "chat"
+    assert attrs[OtelAttr.PROVIDER_NAME] == "test"
+
+
+def test_capture_response_with_error_type():
+    """Test _capture_response includes error_type in duration histogram attrs."""
+    from unittest.mock import MagicMock
+
+    from agent_framework.observability import _capture_response
+
+    mock_span = MagicMock()
+    mock_histogram = MagicMock()
+    attrs = {
+        OtelAttr.OPERATION: "chat",
+        OtelAttr.PROVIDER_NAME: "test",
+        OtelAttr.REQUEST_MODEL: "model",
+        OtelAttr.ERROR_TYPE: "ValueError",
+    }
+    _capture_response(
+        span=mock_span,
+        attributes=attrs,
+        operation_duration_histogram=mock_histogram,
+        duration=1.5,
+    )
+    mock_span.set_attributes.assert_called_once_with(attrs)
+    call_args = mock_histogram.record.call_args
+    assert call_args[0][0] == 1.5
+    assert OtelAttr.ERROR_TYPE in call_args[1]["attributes"]
+
+
+def test_get_meter_fallback():
+    """Test get_meter falls back on TypeError for older OpenTelemetry."""
+    from unittest.mock import MagicMock, patch
+
+    from agent_framework.observability import get_meter
+
+    call_count = 0
+
+    def mock_get_meter(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1 and "attributes" in kwargs:
+            raise TypeError("Unexpected keyword argument 'attributes'")
+        kwargs.pop("attributes", None)
+        return MagicMock()
+
+    with patch("agent_framework.observability.metrics.get_meter", side_effect=mock_get_meter):
+        meter = get_meter(attributes={"test": "value"})
+        assert meter is not None
+        assert call_count == 2
