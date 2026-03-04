@@ -11,6 +11,18 @@ from ._embedding_client import (
     AzureAIInferenceEmbeddingSettings,
     RawAzureAIInferenceEmbeddingClient,
 )
+from ._foundry_evals import (
+    AgentEvalConverter,
+    EvalResults,
+    Evaluators,
+    evaluate_agent,
+    evaluate_dataset,
+    evaluate_foundry_target,
+    evaluate_response,
+    evaluate_traces,
+    evaluate_workflow,
+    setup_continuous_eval,
+)
 from ._foundry_memory_provider import FoundryMemoryProvider
 from ._project_provider import AzureAIProjectAgentProvider
 from ._shared import AzureAISettings
@@ -21,6 +33,7 @@ except importlib.metadata.PackageNotFoundError:
     __version__ = "0.0.0"  # Fallback for development mode
 
 __all__ = [
+    "AgentEvalConverter",
     "AzureAIAgentClient",
     "AzureAIAgentOptions",
     "AzureAIAgentsProvider",
@@ -31,8 +44,17 @@ __all__ = [
     "AzureAIProjectAgentOptions",
     "AzureAIProjectAgentProvider",
     "AzureAISettings",
+    "EvalResults",
+    "Evaluators",
     "FoundryMemoryProvider",
     "RawAzureAIClient",
     "RawAzureAIInferenceEmbeddingClient",
     "__version__",
+    "evaluate_agent",
+    "evaluate_dataset",
+    "evaluate_foundry_target",
+    "evaluate_response",
+    "evaluate_traces",
+    "evaluate_workflow",
+    "setup_continuous_eval",
 ]
