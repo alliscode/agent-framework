@@ -1,6 +1,6 @@
 # Copyright (c) Microsoft. All rights reserved.
 
-"""Tests for the AgentEvalConverter and eval helper functions."""
+"""Tests for the AgentEvalConverter, FoundryEvals, and eval helper functions."""
 
 from __future__ import annotations
 
@@ -9,23 +9,26 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from agent_framework import AgentExecutorResponse, AgentResponse, Content, FunctionTool, Message, WorkflowEvent
+from agent_framework._eval import (
+    AgentEvalConverter,
+    EvalItem,
+    EvalResults,
+    _extract_agent_eval_data,
+    _extract_overall_query,
+    evaluate_response,
+    evaluate_workflow,
+)
 from agent_framework._workflows._workflow import WorkflowRunResult
 
 from agent_framework_azure_ai._foundry_evals import (
-    AgentEvalConverter,
-    EvalResults,
     Evaluators,
-    _AgentEvalData,
+    FoundryEvals,
     _build_item_schema,
     _build_testing_criteria,
-    _extract_agent_eval_data,
-    _extract_overall_query,
+    _filter_tool_evaluators,
     _resolve_default_evaluators,
     _resolve_evaluator,
     _resolve_openai_client,
-    evaluate_dataset,
-    evaluate_response,
-    evaluate_workflow,
 )
 
 # ---------------------------------------------------------------------------
@@ -58,20 +61,20 @@ class TestConvertMessage:
         msg = Message("user", ["Hello, world!"])
         result = AgentEvalConverter.convert_message(msg)
         assert len(result) == 1
-        assert result[0] == {"role": "user", "content": "Hello, world!"}
+        assert result[0] == {"role": "user", "content": [{"type": "text", "text": "Hello, world!"}]}
 
     def test_system_message(self) -> None:
         msg = Message("system", ["You are helpful."])
         result = AgentEvalConverter.convert_message(msg)
-        assert result[0] == {"role": "system", "content": "You are helpful."}
+        assert result[0] == {"role": "system", "content": [{"type": "text", "text": "You are helpful."}]}
 
     def test_assistant_text_message(self) -> None:
         msg = Message("assistant", ["Here is the answer."])
         result = AgentEvalConverter.convert_message(msg)
         assert len(result) == 1
         assert result[0]["role"] == "assistant"
-        assert result[0]["content"] == "Here is the answer."
-        assert "tool_calls" not in result[0]
+        assert result[0]["content"] == [{"type": "text", "text": "Here is the answer."}]
+        assert len(result[0]["content"]) == 1
 
     def test_assistant_with_tool_call(self) -> None:
         msg = Message(
@@ -87,13 +90,11 @@ class TestConvertMessage:
         result = AgentEvalConverter.convert_message(msg)
         assert len(result) == 1
         assert result[0]["role"] == "assistant"
-        assert result[0]["content"] is None
-        assert len(result[0]["tool_calls"]) == 1
-        tc = result[0]["tool_calls"][0]
-        assert tc["id"] == "call_1"
-        assert tc["type"] == "function"
-        assert tc["function"]["name"] == "get_weather"
-        assert json.loads(tc["function"]["arguments"]) == {"location": "Seattle"}
+        tc = result[0]["content"][0]
+        assert tc["type"] == "tool_call"
+        assert tc["tool_call_id"] == "call_1"
+        assert tc["name"] == "get_weather"
+        assert tc["arguments"] == {"location": "Seattle"}
 
     def test_assistant_text_and_tool_call(self) -> None:
         msg = Message(
@@ -109,10 +110,10 @@ class TestConvertMessage:
         )
         result = AgentEvalConverter.convert_message(msg)
         assert len(result) == 1
-        assert result[0]["content"] == "Let me check that."
-        assert len(result[0]["tool_calls"]) == 1
-        # Dict arguments should be JSON-serialized
-        assert json.loads(result[0]["tool_calls"][0]["function"]["arguments"]) == {"query": "flights"}
+        assert result[0]["content"][0] == {"type": "text", "text": "Let me check that."}
+        tc = result[0]["content"][1]
+        assert tc["type"] == "tool_call"
+        assert tc["arguments"] == {"query": "flights"}
 
     def test_tool_result_message(self) -> None:
         msg = Message(
@@ -126,11 +127,9 @@ class TestConvertMessage:
         )
         result = AgentEvalConverter.convert_message(msg)
         assert len(result) == 1
-        assert result[0] == {
-            "role": "tool",
-            "tool_call_id": "call_1",
-            "content": "72°F, sunny",
-        }
+        assert result[0]["role"] == "tool"
+        assert result[0]["tool_call_id"] == "call_1"
+        assert result[0]["content"] == [{"type": "tool_result", "tool_result": "72°F, sunny"}]
 
     def test_multiple_tool_results(self) -> None:
         msg = Message(
@@ -145,7 +144,7 @@ class TestConvertMessage:
         assert result[0]["tool_call_id"] == "call_1"
         assert result[1]["tool_call_id"] == "call_2"
 
-    def test_non_string_result_serialized(self) -> None:
+    def test_non_string_result_kept_as_object(self) -> None:
         msg = Message(
             "tool",
             [
@@ -156,13 +155,14 @@ class TestConvertMessage:
             ],
         )
         result = AgentEvalConverter.convert_message(msg)
-        parsed = json.loads(result[0]["content"])
-        assert parsed == {"temp": 72, "unit": "F"}
+        tr = result[0]["content"][0]
+        assert tr["type"] == "tool_result"
+        assert tr["tool_result"] == {"temp": 72, "unit": "F"}
 
     def test_empty_message(self) -> None:
         msg = Message("user", [])
         result = AgentEvalConverter.convert_message(msg)
-        assert result[0] == {"role": "user", "content": ""}
+        assert result[0] == {"role": "user", "content": [{"type": "text", "text": ""}]}
 
 
 # ---------------------------------------------------------------------------
@@ -185,10 +185,12 @@ class TestConvertMessages:
         assert len(result) == 4
         assert result[0]["role"] == "user"
         assert result[1]["role"] == "assistant"
-        assert "tool_calls" in result[1]
+        assert result[1]["content"][0]["type"] == "tool_call"
+        assert result[1]["content"][0]["name"] == "get_weather"
         assert result[2]["role"] == "tool"
+        assert result[2]["content"][0]["type"] == "tool_result"
         assert result[3]["role"] == "assistant"
-        assert result[3]["content"] == "It's sunny in Seattle!"
+        assert result[3]["content"] == [{"type": "text", "text": "It's sunny in Seattle!"}]
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +232,7 @@ class TestExtractTools:
 
 
 # ---------------------------------------------------------------------------
-# AgentEvalConverter.to_eval_item
+# AgentEvalConverter.to_eval_item (now returns EvalItem)
 # ---------------------------------------------------------------------------
 
 
@@ -239,13 +241,12 @@ class TestToEvalItem:
         response = AgentResponse(messages=[Message("assistant", ["The weather is sunny."])])
         item = AgentEvalConverter.to_eval_item(query="What's the weather?", response=response)
 
-        assert item["query"] == "What's the weather?"
-        assert item["response"] == "The weather is sunny."
-        assert "conversation" in item
-        conv = json.loads(item["conversation"])
-        assert len(conv) == 2
-        assert conv[0]["role"] == "user"
-        assert conv[1]["role"] == "assistant"
+        assert isinstance(item, EvalItem)
+        assert item.query == "What's the weather?"
+        assert item.response == "The weather is sunny."
+        assert len(item.conversation) == 2
+        assert item.conversation[0]["role"] == "user"
+        assert item.conversation[1]["role"] == "assistant"
 
     def test_message_query(self) -> None:
         input_msgs = [
@@ -255,9 +256,8 @@ class TestToEvalItem:
         response = AgentResponse(messages=[Message("assistant", ["Hi there!"])])
         item = AgentEvalConverter.to_eval_item(query=input_msgs, response=response)
 
-        assert item["query"] == "Hello"  # Only user messages
-        conv = json.loads(item["conversation"])
-        assert len(conv) == 3  # system + user + assistant
+        assert item.query == "Hello"  # Only user messages
+        assert len(item.conversation) == 3  # system + user + assistant
 
     def test_with_context(self) -> None:
         response = AgentResponse(messages=[Message("assistant", ["Answer."])])
@@ -266,7 +266,7 @@ class TestToEvalItem:
             response=response,
             context="Some reference document.",
         )
-        assert item["context"] == "Some reference document."
+        assert item.context == "Some reference document."
 
     def test_with_explicit_tools(self) -> None:
         tool = FunctionTool(
@@ -280,10 +280,9 @@ class TestToEvalItem:
             response=response,
             tools=[tool],
         )
-        assert "tool_definitions" in item
-        tool_defs = json.loads(item["tool_definitions"])
-        assert len(tool_defs) == 1
-        assert tool_defs[0]["name"] == "search"
+        assert item.tool_definitions is not None
+        assert len(item.tool_definitions) == 1
+        assert item.tool_definitions[0]["name"] == "search"
 
     def test_with_agent_tools(self) -> None:
         tool = FunctionTool(name="calc", description="Calculate", func=lambda x: str(x))
@@ -296,8 +295,8 @@ class TestToEvalItem:
             response=response,
             agent=agent,
         )
-        tool_defs = json.loads(item["tool_definitions"])
-        assert tool_defs[0]["name"] == "calc"
+        assert item.tool_definitions is not None
+        assert item.tool_definitions[0]["name"] == "calc"
 
     def test_explicit_tools_override_agent(self) -> None:
         agent_tool = FunctionTool(name="agent_tool", description="from agent", func=lambda: "")
@@ -313,9 +312,27 @@ class TestToEvalItem:
             agent=agent,
             tools=[explicit_tool],
         )
-        tool_defs = json.loads(item["tool_definitions"])
-        assert len(tool_defs) == 1
-        assert tool_defs[0]["name"] == "explicit_tool"
+        assert item.tool_definitions is not None
+        assert len(item.tool_definitions) == 1
+        assert item.tool_definitions[0]["name"] == "explicit_tool"
+
+    def test_to_dict_format(self) -> None:
+        """EvalItem.to_dict() should split conversation into query_messages and response_messages."""
+        response = AgentResponse(messages=[Message("assistant", ["Answer"])])
+        item = AgentEvalConverter.to_eval_item(
+            query="Q",
+            response=response,
+            tools=[FunctionTool(name="t", description="d", func=lambda: "")],
+        )
+        d = item.to_dict()
+        assert isinstance(d["query_messages"], list)
+        assert isinstance(d["response_messages"], list)
+        # user messages go to query_messages, assistant to response_messages
+        assert all(m["role"] in ("system", "user") for m in d["query_messages"])
+        assert all(m["role"] in ("assistant", "tool") for m in d["response_messages"])
+        assert isinstance(d["tool_definitions"], list)
+        assert d["tool_definitions"] == item.tool_definitions
+        assert "conversation" not in d
 
 
 # ---------------------------------------------------------------------------
@@ -334,21 +351,39 @@ class TestBuildTestingCriteria:
     def test_with_data_mapping(self) -> None:
         criteria = _build_testing_criteria(["relevance", "groundedness"], "gpt-4o", include_data_mapping=True)
         assert "data_mapping" in criteria[0]
+        # Quality evaluators should NOT have conversation
         assert criteria[0]["data_mapping"] == {
             "query": "{{item.query}}",
             "response": "{{item.response}}",
         }
         # Groundedness has an extra context mapping
         assert "context" in criteria[1]["data_mapping"]
+        assert "conversation" not in criteria[1]["data_mapping"]
 
     def test_tool_evaluator_includes_tool_definitions(self) -> None:
-        criteria = _build_testing_criteria(
-            ["relevance", "tool_call_accuracy"], "gpt-4o", include_data_mapping=True
-        )
-        # relevance should NOT have tool_definitions
+        criteria = _build_testing_criteria(["relevance", "tool_call_accuracy"], "gpt-4o", include_data_mapping=True)
+        # relevance: string query/response
+        assert criteria[0]["data_mapping"]["query"] == "{{item.query}}"
+        assert criteria[0]["data_mapping"]["response"] == "{{item.response}}"
         assert "tool_definitions" not in criteria[0]["data_mapping"]
-        # tool_call_accuracy should have tool_definitions
+        # tool_call_accuracy: array query/response + tool_definitions
+        assert criteria[1]["data_mapping"]["query"] == "{{item.query_messages}}"
+        assert criteria[1]["data_mapping"]["response"] == "{{item.response_messages}}"
         assert criteria[1]["data_mapping"]["tool_definitions"] == "{{item.tool_definitions}}"
+
+    def test_agent_evaluators_use_message_arrays(self) -> None:
+        agent_evals = ["task_adherence", "intent_resolution", "task_completion"]
+        criteria = _build_testing_criteria(agent_evals, "gpt-4o", include_data_mapping=True)
+        for c in criteria:
+            assert c["data_mapping"]["query"] == "{{item.query_messages}}", f"{c['name']}"
+            assert c["data_mapping"]["response"] == "{{item.response_messages}}", f"{c['name']}"
+
+    def test_quality_evaluators_use_strings(self) -> None:
+        quality_evals = ["coherence", "relevance", "fluency"]
+        criteria = _build_testing_criteria(quality_evals, "gpt-4o", include_data_mapping=True)
+        for c in criteria:
+            assert c["data_mapping"]["query"] == "{{item.query}}", f"{c['name']}"
+            assert c["data_mapping"]["response"] == "{{item.response}}", f"{c['name']}"
 
     def test_all_tool_evaluators_include_tool_definitions(self) -> None:
         tool_evals = [
@@ -389,26 +424,51 @@ class TestBuildItemSchema:
 
 
 # ---------------------------------------------------------------------------
-# evaluate_dataset (integration shape test with mocks)
+# FoundryEvals (constructor, name, select, evaluate via dataset)
 # ---------------------------------------------------------------------------
 
 
-class TestEvaluateDataset:
+class TestFoundryEvals:
+    def test_constructor_with_openai_client(self) -> None:
+        mock_client = MagicMock()
+        fe = FoundryEvals(openai_client=mock_client, model_deployment="gpt-4o")
+        assert fe.name == "Azure AI Foundry"
+
+    def test_constructor_with_project_client(self) -> None:
+        mock_oai = MagicMock()
+        mock_project = MagicMock()
+        mock_project.get_openai_client.return_value = mock_oai
+        fe = FoundryEvals(project_client=mock_project, model_deployment="gpt-4o")
+        assert fe.name == "Azure AI Foundry"
+        mock_project.get_openai_client.assert_called_once()
+
+    def test_constructor_no_client_raises(self) -> None:
+        with pytest.raises(ValueError, match="Provide either"):
+            FoundryEvals(model_deployment="gpt-4o")
+
+    def test_name_property(self) -> None:
+        fe = FoundryEvals(openai_client=MagicMock(), model_deployment="gpt-4o")
+        assert fe.name == "Azure AI Foundry"
+
+    def test_select_returns_new_instance(self) -> None:
+        fe = FoundryEvals(openai_client=MagicMock(), model_deployment="gpt-4o")
+        selected = fe.select("relevance", "coherence")
+        assert isinstance(selected, FoundryEvals)
+        assert selected is not fe
+        assert selected._evaluators == ["relevance", "coherence"]
+
     @pytest.mark.asyncio
-    async def test_calls_evals_api(self) -> None:
+    async def test_evaluate_calls_evals_api(self) -> None:
         mock_client = MagicMock()
 
-        # Mock evals.create
         mock_eval = MagicMock()
         mock_eval.id = "eval_123"
         mock_client.evals.create.return_value = mock_eval
 
-        # Mock evals.runs.create
         mock_run = MagicMock()
         mock_run.id = "run_456"
         mock_client.evals.runs.create.return_value = mock_run
 
-        # Mock evals.runs.retrieve to return completed
         mock_completed = MagicMock()
         mock_completed.status = "completed"
         mock_completed.result_counts = {"passed": 2, "failed": 0}
@@ -417,16 +477,16 @@ class TestEvaluateDataset:
         mock_client.evals.runs.retrieve.return_value = mock_completed
 
         items = [
-            {"query": "Hello", "response": "Hi there!"},
-            {"query": "Weather?", "response": "Sunny."},
+            EvalItem(query="Hello", response="Hi there!", conversation=[]),
+            EvalItem(query="Weather?", response="Sunny.", conversation=[]),
         ]
 
-        results = await evaluate_dataset(
-            items=items,
-            evaluators=[Evaluators.RELEVANCE],
+        fe = FoundryEvals(
             openai_client=mock_client,
             model_deployment="gpt-4o",
+            evaluators=[Evaluators.RELEVANCE],
         )
+        results = await fe.evaluate(items)
 
         assert isinstance(results, EvalResults)
         assert results.status == "completed"
@@ -449,7 +509,7 @@ class TestEvaluateDataset:
         assert len(content) == 2
 
     @pytest.mark.asyncio
-    async def test_uses_default_evaluators(self) -> None:
+    async def test_evaluate_uses_default_evaluators(self) -> None:
         mock_client = MagicMock()
 
         mock_eval = MagicMock()
@@ -467,11 +527,8 @@ class TestEvaluateDataset:
         mock_completed.per_testing_criteria_results = None
         mock_client.evals.runs.retrieve.return_value = mock_completed
 
-        await evaluate_dataset(
-            items=[{"query": "Hi", "response": "Hello"}],
-            openai_client=mock_client,
-            model_deployment="gpt-4o",
-        )
+        fe = FoundryEvals(openai_client=mock_client, model_deployment="gpt-4o")
+        await fe.evaluate([EvalItem(query="Hi", response="Hello", conversation=[])])
 
         # Verify default evaluators were used
         create_call = mock_client.evals.create.call_args
@@ -480,6 +537,143 @@ class TestEvaluateDataset:
         assert "relevance" in names
         assert "coherence" in names
         assert "task_adherence" in names
+
+    @pytest.mark.asyncio
+    async def test_evaluate_responses_api_path(self) -> None:
+        """Items with response_id and no tool evaluators use the Responses API path."""
+        mock_client = MagicMock()
+
+        mock_eval = MagicMock()
+        mock_eval.id = "eval_fast"
+        mock_client.evals.create.return_value = mock_eval
+
+        mock_run = MagicMock()
+        mock_run.id = "run_fast"
+        mock_client.evals.runs.create.return_value = mock_run
+
+        mock_completed = MagicMock()
+        mock_completed.status = "completed"
+        mock_completed.result_counts = {"passed": 1, "failed": 0}
+        mock_completed.report_url = None
+        mock_completed.per_testing_criteria_results = None
+        mock_client.evals.runs.retrieve.return_value = mock_completed
+
+        items = [
+            EvalItem(query="", response="Answer", conversation=[], response_id="resp_xyz"),
+        ]
+
+        fe = FoundryEvals(openai_client=mock_client, model_deployment="gpt-4o")
+        await fe.evaluate(items)
+
+        run_call = mock_client.evals.runs.create.call_args
+        ds = run_call.kwargs["data_source"]
+        assert ds["type"] == "azure_ai_responses"
+
+    @pytest.mark.asyncio
+    async def test_evaluate_dataset_path_when_no_response_id(self) -> None:
+        """Items without response_id use the JSONL dataset path."""
+        mock_client = MagicMock()
+
+        mock_eval = MagicMock()
+        mock_eval.id = "eval_ds"
+        mock_client.evals.create.return_value = mock_eval
+
+        mock_run = MagicMock()
+        mock_run.id = "run_ds"
+        mock_client.evals.runs.create.return_value = mock_run
+
+        mock_completed = MagicMock()
+        mock_completed.status = "completed"
+        mock_completed.result_counts = {"passed": 1, "failed": 0}
+        mock_completed.report_url = None
+        mock_completed.per_testing_criteria_results = None
+        mock_client.evals.runs.retrieve.return_value = mock_completed
+
+        items = [
+            EvalItem(
+                query="What's the weather?",
+                response="Sunny",
+                conversation=[{"role": "user", "content": "What's the weather?"}],
+            ),
+        ]
+
+        fe = FoundryEvals(openai_client=mock_client, model_deployment="gpt-4o")
+        await fe.evaluate(items)
+
+        run_call = mock_client.evals.runs.create.call_args
+        ds = run_call.kwargs["data_source"]
+        assert ds["type"] == "jsonl"
+        content = ds["source"]["content"]
+        assert content[0]["item"]["query"] == "What's the weather?"
+
+    @pytest.mark.asyncio
+    async def test_evaluate_with_tool_items_uses_dataset_path(self) -> None:
+        """Items with tool_definitions force the dataset path even with response_id."""
+        mock_client = MagicMock()
+
+        mock_eval = MagicMock()
+        mock_eval.id = "eval_tool"
+        mock_client.evals.create.return_value = mock_eval
+
+        mock_run = MagicMock()
+        mock_run.id = "run_tool"
+        mock_client.evals.runs.create.return_value = mock_run
+
+        mock_completed = MagicMock()
+        mock_completed.status = "completed"
+        mock_completed.result_counts = {"passed": 1, "failed": 0}
+        mock_completed.report_url = None
+        mock_completed.per_testing_criteria_results = None
+        mock_client.evals.runs.retrieve.return_value = mock_completed
+
+        items = [
+            EvalItem(
+                query="Do the thing",
+                response="Done",
+                conversation=[],
+                tool_definitions=[{"name": "my_tool"}],
+                response_id="resp_xyz",
+            ),
+        ]
+
+        fe = FoundryEvals(
+            openai_client=mock_client,
+            model_deployment="gpt-4o",
+            evaluators=[Evaluators.TOOL_CALL_ACCURACY],
+        )
+        await fe.evaluate(items)
+
+        run_call = mock_client.evals.runs.create.call_args
+        ds = run_call.kwargs["data_source"]
+        assert ds["type"] == "jsonl"
+        assert "tool_definitions" in ds["source"]["content"][0]["item"]
+
+    @pytest.mark.asyncio
+    async def test_evaluate_with_project_client(self) -> None:
+        mock_oai = MagicMock()
+        mock_project = MagicMock()
+        mock_project.get_openai_client.return_value = mock_oai
+
+        mock_eval = MagicMock()
+        mock_eval.id = "eval_pc"
+        mock_oai.evals.create.return_value = mock_eval
+
+        mock_run = MagicMock()
+        mock_run.id = "run_pc"
+        mock_oai.evals.runs.create.return_value = mock_run
+
+        mock_completed = MagicMock()
+        mock_completed.status = "completed"
+        mock_completed.result_counts = {"passed": 1, "failed": 0}
+        mock_completed.report_url = None
+        mock_completed.per_testing_criteria_results = None
+        mock_oai.evals.runs.retrieve.return_value = mock_completed
+
+        fe = FoundryEvals(project_client=mock_project, model_deployment="gpt-4o")
+        results = await fe.evaluate([EvalItem(query="Hi", response="Hello", conversation=[])])
+
+        assert results.status == "completed"
+        mock_project.get_openai_client.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -520,21 +714,69 @@ class TestResolveDefaultEvaluators:
         assert Evaluators.TASK_ADHERENCE in result
         assert Evaluators.TOOL_CALL_ACCURACY not in result
 
-    def test_none_with_tool_agent_adds_tool_eval(self) -> None:
-        tool = FunctionTool(name="search", description="Search", func=lambda q: q)
-        agent = MagicMock()
-        agent.default_options = {"tools": [tool]}
-
-        result = _resolve_default_evaluators(None, agent=agent)
+    def test_none_with_tool_items_adds_tool_eval(self) -> None:
+        items = [
+            EvalItem(
+                query="search for stuff",
+                response="found it",
+                conversation=[],
+                tool_definitions=[{"name": "search"}],
+            ),
+        ]
+        result = _resolve_default_evaluators(None, items=items)
         assert Evaluators.TOOL_CALL_ACCURACY in result
 
-    def test_explicit_evaluators_ignore_agent_tools(self) -> None:
-        tool = FunctionTool(name="search", description="Search", func=lambda q: q)
-        agent = MagicMock()
-        agent.default_options = {"tools": [tool]}
-
-        result = _resolve_default_evaluators([Evaluators.RELEVANCE], agent=agent)
+    def test_explicit_evaluators_ignore_tool_items(self) -> None:
+        items = [
+            EvalItem(
+                query="search",
+                response="found",
+                conversation=[],
+                tool_definitions=[{"name": "search"}],
+            ),
+        ]
+        result = _resolve_default_evaluators([Evaluators.RELEVANCE], items=items)
         assert result == [Evaluators.RELEVANCE]
+
+
+# ---------------------------------------------------------------------------
+# _filter_tool_evaluators
+# ---------------------------------------------------------------------------
+
+
+class TestFilterToolEvaluators:
+    def test_keeps_tool_evaluators_when_items_have_tools(self) -> None:
+        items = [
+            EvalItem(query="q", response="r", conversation=[], tool_definitions=[{"name": "t"}]),
+        ]
+        result = _filter_tool_evaluators(
+            ["relevance", "tool_call_accuracy"],
+            items,
+        )
+        assert "relevance" in result
+        assert "tool_call_accuracy" in result
+
+    def test_removes_tool_evaluators_when_no_tools(self) -> None:
+        items = [
+            EvalItem(query="q", response="r", conversation=[]),
+        ]
+        result = _filter_tool_evaluators(
+            ["relevance", "tool_call_accuracy"],
+            items,
+        )
+        assert "relevance" in result
+        assert "tool_call_accuracy" not in result
+
+    def test_falls_back_to_defaults_when_all_filtered(self) -> None:
+        items = [
+            EvalItem(query="q", response="r", conversation=[]),
+        ]
+        result = _filter_tool_evaluators(
+            ["tool_call_accuracy", "tool_selection"],
+            items,
+        )
+        # Should fall back to defaults since all evaluators were tool evaluators
+        assert Evaluators.RELEVANCE in result
 
 
 # ---------------------------------------------------------------------------
@@ -544,7 +786,12 @@ class TestResolveDefaultEvaluators:
 
 class TestEvalResults:
     def test_all_passed_true(self) -> None:
-        r = EvalResults(eval_id="e", run_id="r", status="completed", result_counts={"passed": 3, "failed": 0, "errored": 0})
+        r = EvalResults(
+            eval_id="e",
+            run_id="r",
+            status="completed",
+            result_counts={"passed": 3, "failed": 0, "errored": 0},
+        )
         assert r.all_passed
         assert r.passed == 3
         assert r.failed == 0
@@ -552,28 +799,58 @@ class TestEvalResults:
         assert r.total == 3
 
     def test_all_passed_false_on_failure(self) -> None:
-        r = EvalResults(eval_id="e", run_id="r", status="completed", result_counts={"passed": 2, "failed": 1, "errored": 0})
+        r = EvalResults(
+            eval_id="e",
+            run_id="r",
+            status="completed",
+            result_counts={"passed": 2, "failed": 1, "errored": 0},
+        )
         assert not r.all_passed
         assert r.failed == 1
 
     def test_all_passed_false_on_error(self) -> None:
-        r = EvalResults(eval_id="e", run_id="r", status="completed", result_counts={"passed": 2, "failed": 0, "errored": 1})
+        r = EvalResults(
+            eval_id="e",
+            run_id="r",
+            status="completed",
+            result_counts={"passed": 2, "failed": 0, "errored": 1},
+        )
         assert not r.all_passed
 
     def test_all_passed_false_on_non_completed(self) -> None:
-        r = EvalResults(eval_id="e", run_id="r", status="timeout", result_counts={"passed": 2, "failed": 0, "errored": 0})
+        r = EvalResults(
+            eval_id="e",
+            run_id="r",
+            status="timeout",
+            result_counts={"passed": 2, "failed": 0, "errored": 0},
+        )
         assert not r.all_passed
 
     def test_all_passed_false_on_empty(self) -> None:
-        r = EvalResults(eval_id="e", run_id="r", status="completed", result_counts={"passed": 0, "failed": 0, "errored": 0})
+        r = EvalResults(
+            eval_id="e",
+            run_id="r",
+            status="completed",
+            result_counts={"passed": 0, "failed": 0, "errored": 0},
+        )
         assert not r.all_passed
 
     def test_assert_passed_succeeds(self) -> None:
-        r = EvalResults(eval_id="e", run_id="r", status="completed", result_counts={"passed": 1, "failed": 0, "errored": 0})
+        r = EvalResults(
+            eval_id="e",
+            run_id="r",
+            status="completed",
+            result_counts={"passed": 1, "failed": 0, "errored": 0},
+        )
         r.assert_passed()  # should not raise
 
     def test_assert_passed_raises(self) -> None:
-        r = EvalResults(eval_id="e", run_id="r", status="completed", result_counts={"passed": 1, "failed": 1, "errored": 0})
+        r = EvalResults(
+            eval_id="e",
+            run_id="r",
+            status="completed",
+            result_counts={"passed": 1, "failed": 1, "errored": 0},
+        )
         with pytest.raises(AssertionError, match="1 passed, 1 failed"):
             r.assert_passed()
 
@@ -621,45 +898,15 @@ class TestResolveOpenAIClient:
         with pytest.raises(ValueError, match="Provide either"):
             _resolve_openai_client()
 
-    @pytest.mark.asyncio
-    async def test_evaluate_dataset_with_project_client(self) -> None:
-        mock_oai = MagicMock()
-        mock_project = MagicMock()
-        mock_project.get_openai_client.return_value = mock_oai
-
-        mock_eval = MagicMock()
-        mock_eval.id = "eval_pc"
-        mock_oai.evals.create.return_value = mock_eval
-
-        mock_run = MagicMock()
-        mock_run.id = "run_pc"
-        mock_oai.evals.runs.create.return_value = mock_run
-
-        mock_completed = MagicMock()
-        mock_completed.status = "completed"
-        mock_completed.result_counts = {"passed": 1, "failed": 0}
-        mock_completed.report_url = None
-        mock_completed.per_testing_criteria_results = None
-        mock_oai.evals.runs.retrieve.return_value = mock_completed
-
-        results = await evaluate_dataset(
-            items=[{"query": "Hi", "response": "Hello"}],
-            project_client=mock_project,
-            model_deployment="gpt-4o",
-        )
-
-        assert results.status == "completed"
-        mock_project.get_openai_client.assert_called_once()
-
 
 # ---------------------------------------------------------------------------
-# evaluate_response
+# evaluate_response (core function, uses FoundryEvals as evaluator)
 # ---------------------------------------------------------------------------
 
 
 class TestEvaluateResponse:
     @pytest.mark.asyncio
-    async def test_single_response(self) -> None:
+    async def test_single_response_with_response_id(self) -> None:
         mock_oai = MagicMock()
         mock_project = MagicMock()
         mock_project.get_openai_client.return_value = mock_oai
@@ -686,8 +933,7 @@ class TestEvaluateResponse:
 
         results = await evaluate_response(
             response=response,
-            project_client=mock_project,
-            model_deployment="gpt-4o",
+            evaluators=FoundryEvals(project_client=mock_project, model_deployment="gpt-4o"),
         )
 
         assert results.status == "completed"
@@ -701,7 +947,7 @@ class TestEvaluateResponse:
         assert content[0]["item"]["resp_id"] == "resp_abc123"
 
     @pytest.mark.asyncio
-    async def test_multiple_responses(self) -> None:
+    async def test_multiple_responses_with_response_ids(self) -> None:
         mock_oai = MagicMock()
 
         mock_eval = MagicMock()
@@ -726,8 +972,7 @@ class TestEvaluateResponse:
 
         results = await evaluate_response(
             response=responses,
-            openai_client=mock_oai,
-            model_deployment="gpt-4o",
+            evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
         )
 
         assert results.passed == 2
@@ -743,13 +988,12 @@ class TestEvaluateResponse:
         with pytest.raises(ValueError, match="does not have a response_id"):
             await evaluate_response(
                 response=response,
-                openai_client=mock_oai,
-                model_deployment="gpt-4o",
+                evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
             )
 
     @pytest.mark.asyncio
     async def test_fallback_to_dataset_with_query(self) -> None:
-        """Non-Responses-API: falls back to evaluate_dataset path when query is provided."""
+        """Non-Responses-API: falls back to dataset path when query is provided."""
         mock_oai = MagicMock()
 
         mock_eval = MagicMock()
@@ -772,8 +1016,7 @@ class TestEvaluateResponse:
         results = await evaluate_response(
             response=response,
             query="What's the weather?",
-            openai_client=mock_oai,
-            model_deployment="gpt-4o",
+            evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
         )
 
         assert results.status == "completed"
@@ -819,8 +1062,7 @@ class TestEvaluateResponse:
             response=response,
             query="Do the thing",
             agent=mock_agent,
-            openai_client=mock_oai,
-            model_deployment="gpt-4o",
+            evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
         )
 
         assert results.status == "completed"
@@ -830,8 +1072,7 @@ class TestEvaluateResponse:
         content = ds["source"]["content"]
         item = content[0]["item"]
         assert "tool_definitions" in item
-        import json
-        tool_defs = json.loads(item["tool_definitions"])
+        tool_defs = item["tool_definitions"]
         assert any(t["name"] == "my_tool" for t in tool_defs)
 
     @pytest.mark.asyncio
@@ -862,8 +1103,7 @@ class TestEvaluateResponse:
         results = await evaluate_response(
             response=responses,
             query=["Question 1", "Question 2"],
-            openai_client=mock_oai,
-            model_deployment="gpt-4o",
+            evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
         )
 
         assert results.passed == 2
@@ -887,8 +1127,7 @@ class TestEvaluateResponse:
             await evaluate_response(
                 response=responses,
                 query=["Q1", "Q2", "Q3"],
-                openai_client=mock_oai,
-                model_deployment="gpt-4o",
+                evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
             )
 
     @pytest.mark.asyncio
@@ -918,30 +1157,13 @@ class TestEvaluateResponse:
 
         await evaluate_response(
             response=response,
-            openai_client=mock_oai,
-            model_deployment="gpt-4o",
+            evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
         )
 
         # Verify it used the Responses API path (azure_ai_responses), not jsonl
         run_call = mock_oai.evals.runs.create.call_args
         ds = run_call.kwargs["data_source"]
         assert ds["type"] == "azure_ai_responses"
-
-    @pytest.mark.asyncio
-    async def test_tool_evaluators_require_query_even_with_response_id(self) -> None:
-        """Tool evaluators need tool_definitions not available via response retrieval."""
-        response = AgentResponse(
-            messages=[Message("assistant", ["Answer"])],
-            response_id="resp_xyz",
-        )
-
-        with pytest.raises(ValueError, match="Tool evaluators.*require tool definitions"):
-            await evaluate_response(
-                response=response,
-                evaluators=[Evaluators.RELEVANCE, Evaluators.TOOL_CALL_ACCURACY],
-                openai_client=MagicMock(),
-                model_deployment="gpt-4o",
-            )
 
     @pytest.mark.asyncio
     async def test_tool_evaluators_with_query_and_agent_uses_dataset_path(self) -> None:
@@ -969,17 +1191,23 @@ class TestEvaluateResponse:
         )
 
         agent = MagicMock()
-        agent.default_options = {"tools": [
-            FunctionTool(name="get_weather", description="Get weather", func=lambda: None),
-        ]}
+        agent.default_options = {
+            "tools": [
+                FunctionTool(name="get_weather", description="Get weather", func=lambda: None),
+            ]
+        }
+
+        fe = FoundryEvals(
+            openai_client=mock_oai,
+            model_deployment="gpt-4o",
+            evaluators=[Evaluators.TOOL_CALL_ACCURACY],
+        )
 
         await evaluate_response(
             response=response,
             query="What's the weather?",
             agent=agent,
-            evaluators=[Evaluators.TOOL_CALL_ACCURACY],
-            openai_client=mock_oai,
-            model_deployment="gpt-4o",
+            evaluators=fe,
         )
 
         # Verify it used the dataset path (jsonl), not Responses API path
@@ -1005,15 +1233,21 @@ class TestEvalResultsSubResults:
 
     def test_all_passed_checks_sub_results(self) -> None:
         parent = EvalResults(
-            eval_id="e1", run_id="r1", status="completed",
+            eval_id="e1",
+            run_id="r1",
+            status="completed",
             result_counts={"passed": 2, "failed": 0},
             sub_results={
                 "agent-a": EvalResults(
-                    eval_id="e2", run_id="r2", status="completed",
+                    eval_id="e2",
+                    run_id="r2",
+                    status="completed",
                     result_counts={"passed": 1, "failed": 0},
                 ),
                 "agent-b": EvalResults(
-                    eval_id="e3", run_id="r3", status="completed",
+                    eval_id="e3",
+                    run_id="r3",
+                    status="completed",
                     result_counts={"passed": 1, "failed": 1},
                 ),
             },
@@ -1022,11 +1256,15 @@ class TestEvalResultsSubResults:
 
     def test_all_passed_with_all_sub_passing(self) -> None:
         parent = EvalResults(
-            eval_id="e1", run_id="r1", status="completed",
+            eval_id="e1",
+            run_id="r1",
+            status="completed",
             result_counts={"passed": 2, "failed": 0},
             sub_results={
                 "agent-a": EvalResults(
-                    eval_id="e2", run_id="r2", status="completed",
+                    eval_id="e2",
+                    run_id="r2",
+                    status="completed",
                     result_counts={"passed": 1, "failed": 0},
                 ),
             },
@@ -1035,15 +1273,21 @@ class TestEvalResultsSubResults:
 
     def test_assert_passed_includes_failed_agents(self) -> None:
         parent = EvalResults(
-            eval_id="e1", run_id="r1", status="completed",
+            eval_id="e1",
+            run_id="r1",
+            status="completed",
             result_counts={"passed": 2, "failed": 0},
             sub_results={
                 "good-agent": EvalResults(
-                    eval_id="e2", run_id="r2", status="completed",
+                    eval_id="e2",
+                    run_id="r2",
+                    status="completed",
                     result_counts={"passed": 1, "failed": 0},
                 ),
                 "bad-agent": EvalResults(
-                    eval_id="e3", run_id="r3", status="completed",
+                    eval_id="e3",
+                    run_id="r3",
+                    status="completed",
                     result_counts={"passed": 0, "failed": 1},
                 ),
             },
@@ -1136,6 +1380,7 @@ class TestExtractAgentEvalData:
 
         # Build a mock workflow with AgentExecutor
         from agent_framework import AgentExecutor
+
         mock_agent = MagicMock()
         mock_agent.default_options = {"tools": []}
         mock_executor = MagicMock(spec=AgentExecutor)
@@ -1167,7 +1412,7 @@ class TestExtractOverallQuery:
 
 
 # ---------------------------------------------------------------------------
-# evaluate_workflow
+# evaluate_workflow (core function, uses FoundryEvals as evaluator)
 # ---------------------------------------------------------------------------
 
 
@@ -1215,8 +1460,7 @@ class TestEvaluateWorkflow:
         results = await evaluate_workflow(
             workflow=mock_workflow,
             workflow_result=wf_result,
-            openai_client=mock_oai,
-            model_deployment="gpt-4o",
+            evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
             include_overall=False,
         )
 
@@ -1247,8 +1491,7 @@ class TestEvaluateWorkflow:
         results = await evaluate_workflow(
             workflow=mock_workflow,
             queries=["Test query"],
-            openai_client=mock_oai,
-            model_deployment="gpt-4o",
+            evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
             include_overall=False,
         )
 
@@ -1278,14 +1521,13 @@ class TestEvaluateWorkflow:
         results = await evaluate_workflow(
             workflow=mock_workflow,
             workflow_result=wf_result,
-            openai_client=mock_oai,
-            model_deployment="gpt-4o",
+            evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
         )
 
         # Should have per-agent sub_results AND overall
         assert "planner" in results.sub_results
         assert results.status == "completed"
-        # evaluate_dataset called twice: once for planner, once for overall
+        # FoundryEvals.evaluate called twice: once for planner, once for overall
         assert mock_oai.evals.create.call_count == 2
 
     @pytest.mark.asyncio
@@ -1296,8 +1538,7 @@ class TestEvaluateWorkflow:
         with pytest.raises(ValueError, match="Provide either"):
             await evaluate_workflow(
                 workflow=mock_workflow,
-                openai_client=mock_oai,
-                model_deployment="gpt-4o",
+                evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
             )
 
     @pytest.mark.asyncio
@@ -1319,11 +1560,122 @@ class TestEvaluateWorkflow:
         results = await evaluate_workflow(
             workflow=mock_workflow,
             workflow_result=wf_result,
-            openai_client=mock_oai,
-            model_deployment="gpt-4o",
+            evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
             include_overall=False,
         )
 
         assert "agent-a" in results.sub_results
         # Only one eval call (per-agent), no overall
         assert mock_oai.evals.create.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_overall_eval_excludes_tool_evaluators(self) -> None:
+        """Tool evaluators should not be passed to the overall workflow eval."""
+        mock_oai = self._mock_oai_client()
+
+        aer = _make_agent_exec_response("researcher", "Weather is sunny", ["What's the weather?"])
+
+        events = [
+            WorkflowEvent.executor_invoked("input-conversation", "What's the weather?"),
+            WorkflowEvent.executor_completed("input-conversation", None),
+            WorkflowEvent.executor_invoked("researcher", "What's the weather?"),
+            WorkflowEvent.executor_completed("researcher", [aer]),
+            WorkflowEvent.output("end", [Message("assistant", ["Weather is sunny"])]),
+        ]
+        wf_result = WorkflowRunResult(events, [])
+
+        mock_workflow = MagicMock()
+        mock_workflow.executors = {}
+
+        fe = FoundryEvals(
+            openai_client=mock_oai,
+            model_deployment="gpt-4o",
+            evaluators=[Evaluators.RELEVANCE, Evaluators.TOOL_CALL_ACCURACY],
+        )
+
+        await evaluate_workflow(
+            workflow=mock_workflow,
+            workflow_result=wf_result,
+            evaluators=fe,
+        )
+
+        # Should have 2 evals: one per-agent, one overall
+        assert mock_oai.evals.create.call_count == 2
+
+        # Check the overall eval's testing_criteria doesn't include tool_call_accuracy
+        overall_call = mock_oai.evals.create.call_args_list[-1]
+        overall_criteria = overall_call.kwargs["testing_criteria"]
+        evaluator_names = [c["evaluator_name"] for c in overall_criteria]
+        assert "builtin.tool_call_accuracy" not in evaluator_names
+        assert "builtin.relevance" in evaluator_names
+
+    @pytest.mark.asyncio
+    async def test_per_agent_excludes_tool_evaluators_when_no_tools(self) -> None:
+        """Sub-agents without tools should not get tool evaluators."""
+        mock_oai = self._mock_oai_client()
+
+        # researcher has tools, planner does not
+        aer1 = _make_agent_exec_response("researcher", "Weather is sunny", ["Check weather"])
+        aer2 = _make_agent_exec_response("planner", "Trip planned", ["Plan based on: sunny"])
+
+        events = [
+            WorkflowEvent.executor_invoked("researcher", "Check weather"),
+            WorkflowEvent.executor_completed("researcher", [aer1]),
+            WorkflowEvent.executor_invoked("planner", "Plan based on: sunny"),
+            WorkflowEvent.executor_completed("planner", [aer2]),
+        ]
+        wf_result = WorkflowRunResult(events, [])
+
+        from agent_framework import AgentExecutor
+
+        # researcher has tools
+        mock_researcher = MagicMock()
+        mock_researcher.default_options = {
+            "tools": [
+                FunctionTool(name="get_weather", description="Get weather", func=lambda: None),
+            ]
+        }
+        mock_researcher_executor = MagicMock(spec=AgentExecutor)
+        mock_researcher_executor.agent = mock_researcher
+
+        # planner has NO tools
+        mock_planner = MagicMock()
+        mock_planner.default_options = {"tools": []}
+        mock_planner_executor = MagicMock(spec=AgentExecutor)
+        mock_planner_executor.agent = mock_planner
+
+        mock_workflow = MagicMock()
+        mock_workflow.executors = {
+            "researcher": mock_researcher_executor,
+            "planner": mock_planner_executor,
+        }
+
+        fe = FoundryEvals(
+            openai_client=mock_oai,
+            model_deployment="gpt-4o",
+            evaluators=[Evaluators.RELEVANCE, Evaluators.TOOL_CALL_ACCURACY],
+        )
+
+        await evaluate_workflow(
+            workflow=mock_workflow,
+            workflow_result=wf_result,
+            evaluators=fe,
+            include_overall=False,
+        )
+
+        # Two sub-agent evals
+        assert mock_oai.evals.create.call_count == 2
+
+        # Find which call is for researcher vs planner by eval name
+        for call in mock_oai.evals.create.call_args_list:
+            criteria = call.kwargs["testing_criteria"]
+            eval_names = [c["evaluator_name"] for c in criteria]
+            name = call.kwargs["name"]
+            if "planner" in name:
+                assert "builtin.tool_call_accuracy" not in eval_names, (
+                    "planner has no tools — should not get tool_call_accuracy"
+                )
+            elif "researcher" in name:
+                assert "builtin.tool_call_accuracy" in eval_names, (
+                    "researcher has tools — should get tool_call_accuracy"
+                )

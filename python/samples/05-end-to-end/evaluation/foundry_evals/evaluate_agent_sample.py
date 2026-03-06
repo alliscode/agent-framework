@@ -1,12 +1,11 @@
 # Copyright (c) Microsoft. All rights reserved.
 
 import asyncio
-import json
 import os
 
-from agent_framework import Agent, Message
+from agent_framework import Agent, AgentEvalConverter, Message, evaluate_agent, evaluate_response
 from agent_framework.azure import AzureOpenAIResponsesClient
-from agent_framework_azure_ai import AgentEvalConverter, Evaluators, evaluate_agent, evaluate_dataset, evaluate_response
+from agent_framework_azure_ai import Evaluators, FoundryEvals
 from azure.ai.projects.aio import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
@@ -17,9 +16,9 @@ load_dotenv()
 This sample demonstrates evaluating an agent using Azure AI Foundry's built-in evaluators.
 
 It shows three patterns:
-1. evaluate_response() — Evaluate a response you already have. Works with any client.
+1. evaluate_response() — Evaluate a response you already have.
 2. evaluate_agent() — Run the agent against test queries and evaluate in one call.
-3. evaluate_dataset() — Full control. Run the agent yourself, convert, then evaluate.
+3. FoundryEvals.evaluate() — Full control with direct evaluator access.
 
 Prerequisites:
 - An Azure AI Foundry project with a deployed model
@@ -27,7 +26,7 @@ Prerequisites:
 
 Required components:
 - An Agent with tools (the agent to evaluate)
-- An AIProjectClient (shared between agent and evals)
+- A FoundryEvals instance (the evaluator)
 """
 
 
@@ -70,39 +69,39 @@ async def main():
         tools=[get_weather, get_flight_price],
     )
 
+    # 3. Create the evaluator — provider config goes here, once
+    evals = FoundryEvals(project_client=project_client, model_deployment=deployment)
+
     # =========================================================================
-    # Pattern 1a: evaluate_response() — Responses API (no tool evaluators)
+    # Pattern 1a: evaluate_response() — quality evaluators
     # =========================================================================
-    # For quality evaluators (relevance, coherence, etc.), Responses API
-    # responses need only the response — Foundry retrieves the conversation.
     print("=" * 60)
-    print("Pattern 1a: evaluate_response() — Responses API")
+    print("Pattern 1a: evaluate_response() — quality evaluators")
     print("=" * 60)
 
     response = await agent.run([Message("user", ["What's the weather like in Seattle?"])])
     print(f"Agent said: {response.text[:100]}...")
 
-    # Responses API: just pass the response — Foundry has the full conversation
+    # Quality evaluators: just pass the response — Foundry can retrieve the conversation
     results = await evaluate_response(
         response=response,
-        evaluators=[Evaluators.RELEVANCE, Evaluators.COHERENCE],
-        project_client=project_client,
-        model_deployment=deployment,
+        evaluators=evals.select(Evaluators.RELEVANCE, Evaluators.COHERENCE),
     )
 
     print(f"Status: {results.status}")
     print(f"Results: {results.passed}/{results.total} passed")
     print(f"Portal: {results.report_url}")
-    results.assert_passed()
+    if results.all_passed:
+        print("✓ All passed")
+    else:
+        print(f"✗ {results.failed} failed, {results.errored} errored")
 
     print()
     print("=" * 60)
-    print("Pattern 1b: evaluate_response() — With tool evaluators")
+    print("Pattern 1b: evaluate_response() — with tool evaluators")
     print("=" * 60)
 
-    # Tool evaluators (tool_call_accuracy, etc.) need tool definitions.
-    # Provide query= and agent= so the full conversation and tool schemas
-    # are included in the evaluation data.
+    # Tool evaluators need tool definitions — provide query= and agent=
     query = "How much does a flight from Seattle to Paris cost?"
     response = await agent.run([Message("user", [query])])
     print(f"Agent said: {response.text[:100]}...")
@@ -111,21 +110,20 @@ async def main():
         response=response,
         query=query,
         agent=agent,
-        evaluators=[Evaluators.RELEVANCE, Evaluators.TOOL_CALL_ACCURACY],
-        project_client=project_client,
-        model_deployment=deployment,
+        evaluators=evals.select(Evaluators.RELEVANCE, Evaluators.TOOL_CALL_ACCURACY),
     )
 
     print(f"Status: {results.status}")
     print(f"Results: {results.passed}/{results.total} passed")
     print(f"Portal: {results.report_url}")
-    results.assert_passed()
+    if results.all_passed:
+        print("✓ All passed")
+    else:
+        print(f"✗ {results.failed} failed, {results.errored} errored")
 
     # =========================================================================
-    # Pattern 2: evaluate_agent() — Batch test queries
+    # Pattern 2: evaluate_agent() — batch test queries
     # =========================================================================
-    # Runs the agent against each query, converts the output, and evaluates
-    # in a single call. Best for testing against a suite of queries.
     print()
     print("=" * 60)
     print("Pattern 2: evaluate_agent()")
@@ -138,25 +136,23 @@ async def main():
             "How much does a flight from Seattle to Paris cost?",
             "What should I pack for London?",
         ],
-        evaluators=[Evaluators.RELEVANCE, Evaluators.COHERENCE, Evaluators.TOOL_CALL_ACCURACY],
-        project_client=project_client,
-        model_deployment=deployment,
+        evaluators=evals,  # uses smart defaults (auto-adds tool_call_accuracy)
     )
 
     print(f"Status: {results.status}")
     print(f"Results: {results.passed}/{results.total} passed")
     print(f"Portal: {results.report_url}")
-    results.assert_passed()  # raises AssertionError if any failures
+    if results.all_passed:
+        print("✓ All passed")
+    else:
+        print(f"✗ {results.failed} failed, {results.errored} errored")
 
     # =========================================================================
-    # Pattern 3: evaluate_dataset() — Manual control
+    # Pattern 3: FoundryEvals.evaluate() — manual control
     # =========================================================================
-    # Run the agent yourself, convert with AgentEvalConverter, then evaluate.
-    # Useful when you want to inspect or modify the data before evaluation,
-    # or when you're collecting data from production runs.
     print()
     print("=" * 60)
-    print("Pattern 3: evaluate_dataset()")
+    print("Pattern 3: FoundryEvals.evaluate() — manual control")
     print("=" * 60)
 
     converter = AgentEvalConverter()
@@ -166,30 +162,21 @@ async def main():
     ]
 
     items = []
-    for query in queries:
-        # Run the agent
-        response = await agent.run([Message("user", [query])])
-        print(f"Query: {query}")
+    for q in queries:
+        response = await agent.run([Message("user", [q])])
+        print(f"Query: {q}")
         print(f"Response: {response.text[:100]}...")
 
-        # Convert to eval format — tools are extracted from agent automatically
-        item = converter.to_eval_item(query=query, response=response, agent=agent)
+        item = converter.to_eval_item(query=q, response=response, agent=agent)
         items.append(item)
 
-        # You can inspect the converted data before submitting
-        print(f"  Eval item keys: {list(item.keys())}")
-        if "tool_definitions" in item:
-            tool_defs = json.loads(item["tool_definitions"])
-            print(f"  Tools auto-extracted: {[t['name'] for t in tool_defs]}")
+        print(f"  Has tools: {item.tool_definitions is not None}")
+        if item.tool_definitions:
+            print(f"  Tools: {[t['name'] for t in item.tool_definitions]}")
 
-    # Submit all items for evaluation at once
-    results = await evaluate_dataset(
-        items=items,
-        evaluators=[Evaluators.RELEVANCE, Evaluators.TOOL_CALL_ACCURACY, Evaluators.TOOL_OUTPUT_UTILIZATION],
-        project_client=project_client,
-        model_deployment=deployment,
-        eval_name="Travel Assistant Dataset Eval",
-    )
+    # Submit directly to the evaluator
+    tool_evals = evals.select(Evaluators.RELEVANCE, Evaluators.TOOL_CALL_ACCURACY)
+    results = await tool_evals.evaluate(items, eval_name="Travel Assistant Eval")
 
     print(f"\nStatus: {results.status}")
     print(f"Results: {results.passed}/{results.total} passed")
@@ -198,47 +185,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-"""
-Sample output (with actual Azure AI Foundry project):
-
-============================================================
-Pattern 1a: evaluate_response() — Responses API
-============================================================
-Agent said: The weather in Seattle is currently 62°F, cloudy with a chance of rain...
-Status: completed
-Results: 1/1 passed
-Portal: https://ai.azure.com/...
-
-============================================================
-Pattern 1b: evaluate_response() — Any client
-============================================================
-Agent said: Flights from Seattle to Paris cost $450 round-trip...
-Status: completed
-Results: 1/1 passed
-Portal: https://ai.azure.com/...
-
-============================================================
-Pattern 2: evaluate_agent()
-============================================================
-Status: completed
-Results: 3/3 passed
-Portal: https://ai.azure.com/...
-
-============================================================
-Pattern 3: evaluate_dataset()
-============================================================
-Query: What's the weather in Paris?
-Response: The weather in Paris is currently 68°F, partly sunny...
-  Eval item keys: ['query', 'response', 'conversation', 'tool_definitions']
-  Tools auto-extracted: ['get_weather', 'get_flight_price']
-Query: Find me a flight from London to Seattle
-Response: Flights from London to Seattle cost $450 round-trip...
-  Eval item keys: ['query', 'response', 'conversation', 'tool_definitions']
-  Tools auto-extracted: ['get_weather', 'get_flight_price']
-
-Status: completed
-Results: 2/2 passed
-Portal: https://ai.azure.com/...
-"""

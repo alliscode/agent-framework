@@ -3,9 +3,9 @@
 import asyncio
 import os
 
-from agent_framework import Agent, Message
+from agent_framework import Agent, Message, evaluate_workflow
 from agent_framework.azure import AzureOpenAIResponsesClient
-from agent_framework_azure_ai import Evaluators, evaluate_workflow
+from agent_framework_azure_ai import Evaluators, FoundryEvals
 from agent_framework_orchestrations import SequentialBuilder
 from azure.ai.projects.aio import AIProjectClient
 from azure.identity import DefaultAzureCredential
@@ -60,6 +60,8 @@ async def main():
     )
 
     # 2. Create agents for a sequential workflow
+    # Use store=False so agents don't chain conversation state via previous_response_id.
+    # This allows the workflow to be run multiple times without stale state issues.
     researcher = Agent(
         client=client,
         name="researcher",
@@ -68,6 +70,7 @@ async def main():
             "and flight information for the destination the user asks about."
         ),
         tools=[get_weather, get_flight_price],
+        options={"store": False},
     )
 
     planner = Agent(
@@ -77,10 +80,14 @@ async def main():
             "You are a travel planner. Based on the research provided, "
             "create a concise travel recommendation with packing tips."
         ),
+        options={"store": False},
     )
 
     # 3. Build a sequential workflow: researcher → planner
     workflow = SequentialBuilder(participants=[researcher, planner]).build()
+
+    # 4. Create the evaluator — provider config goes here, once
+    evals = FoundryEvals(project_client=project_client, model_deployment=deployment)
 
     # =========================================================================
     # Pattern 1: Post-hoc — evaluate a workflow run you already did
@@ -94,9 +101,7 @@ async def main():
     eval_results = await evaluate_workflow(
         workflow=workflow,
         workflow_result=result,
-        evaluators=[Evaluators.RELEVANCE, Evaluators.COHERENCE, Evaluators.TOOL_CALL_ACCURACY],
-        project_client=project_client,
-        model_deployment=deployment,
+        evaluators=evals,
     )
 
     print(f"\nOverall: {eval_results.status}")
@@ -106,12 +111,13 @@ async def main():
     print("\nPer-agent breakdown:")
     for agent_name, agent_eval in eval_results.sub_results.items():
         print(f"  {agent_name}: {agent_eval.passed}/{agent_eval.total} passed")
-
-    return
+        if agent_eval.report_url:
+            print(f"    Portal: {agent_eval.report_url}")
 
     # =========================================================================
-    # Pattern 2: Run + evaluate — pass queries, workflow runs automatically
+    # Pattern 2: Run + evaluate with multiple queries
     # =========================================================================
+    # With store=False, the same workflow can be reused across multiple queries.
     print()
     print("=" * 60)
     print("Pattern 2: Run + evaluate with multiple queries")
@@ -120,22 +126,22 @@ async def main():
     eval_results = await evaluate_workflow(
         workflow=workflow,
         queries=[
-            "Plan a trip from Seattle to Paris",
             "Plan a trip from London to Tokyo",
+            "Plan a trip from New York to Rome",
         ],
-        evaluators=[Evaluators.RELEVANCE, Evaluators.TASK_ADHERENCE],
-        project_client=project_client,
-        model_deployment=deployment,
+        evaluators=evals.select(Evaluators.RELEVANCE, Evaluators.TASK_ADHERENCE),
     )
 
     print(f"\nOverall: {eval_results.status}")
     print(f"  Passed: {eval_results.passed}/{eval_results.total}")
+    if eval_results.report_url:
+        print(f"  Portal: {eval_results.report_url}")
 
     print("\nPer-agent breakdown:")
     for agent_name, agent_eval in eval_results.sub_results.items():
         print(f"  {agent_name}: {agent_eval.passed}/{agent_eval.total} passed")
-
-    eval_results.assert_passed()
+        if agent_eval.report_url:
+            print(f"    Portal: {agent_eval.report_url}")
 
 
 if __name__ == "__main__":
