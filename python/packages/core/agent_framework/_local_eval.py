@@ -181,6 +181,7 @@ class LocalEvaluator:
                 failed += 1
 
         return EvalResults(
+            provider=self.name,
             eval_id="local",
             run_id=eval_name,
             status="completed",

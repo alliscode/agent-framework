@@ -20,8 +20,8 @@ It shows two patterns:
 1. Post-hoc: Run the workflow, then evaluate the result you already have.
 2. Run + evaluate: Pass queries and let evaluate_workflow() run the workflow for you.
 
-Both patterns provide per-agent breakdown in results.sub_results, so you can
-identify which agent in the pipeline is underperforming.
+Both patterns return a list of results (one per provider), each with a per-agent
+breakdown in sub_results so you can identify which agent is underperforming.
 
 Prerequisites:
 - An Azure AI Foundry project with a deployed model
@@ -104,15 +104,16 @@ async def main():
         evaluators=evals,
     )
 
-    print(f"\nOverall: {eval_results.status}")
-    print(f"  Passed: {eval_results.passed}/{eval_results.total}")
-    print(f"  Portal: {eval_results.report_url}")
+    for r in eval_results:
+        print(f"\nOverall: {r.status}")
+        print(f"  Passed: {r.passed}/{r.total}")
+        print(f"  Portal: {r.report_url}")
 
-    print("\nPer-agent breakdown:")
-    for agent_name, agent_eval in eval_results.sub_results.items():
-        print(f"  {agent_name}: {agent_eval.passed}/{agent_eval.total} passed")
-        if agent_eval.report_url:
-            print(f"    Portal: {agent_eval.report_url}")
+        print("\nPer-agent breakdown:")
+        for agent_name, agent_eval in r.sub_results.items():
+            print(f"  {agent_name}: {agent_eval.passed}/{agent_eval.total} passed")
+            if agent_eval.report_url:
+                print(f"    Portal: {agent_eval.report_url}")
 
     # =========================================================================
     # Pattern 2: Run + evaluate with multiple queries
@@ -132,16 +133,17 @@ async def main():
         evaluators=evals.select(Evaluators.RELEVANCE, Evaluators.TASK_ADHERENCE),
     )
 
-    print(f"\nOverall: {eval_results.status}")
-    print(f"  Passed: {eval_results.passed}/{eval_results.total}")
-    if eval_results.report_url:
-        print(f"  Portal: {eval_results.report_url}")
+    for r in eval_results:
+        print(f"\nOverall: {r.status}")
+        print(f"  Passed: {r.passed}/{r.total}")
+        if r.report_url:
+            print(f"  Portal: {r.report_url}")
 
-    print("\nPer-agent breakdown:")
-    for agent_name, agent_eval in eval_results.sub_results.items():
-        print(f"  {agent_name}: {agent_eval.passed}/{agent_eval.total} passed")
-        if agent_eval.report_url:
-            print(f"    Portal: {agent_eval.report_url}")
+        print("\nPer-agent breakdown:")
+        for agent_name, agent_eval in r.sub_results.items():
+            print(f"  {agent_name}: {agent_eval.passed}/{agent_eval.total} passed")
+            if agent_eval.report_url:
+                print(f"    Portal: {agent_eval.report_url}")
 
 
 if __name__ == "__main__":

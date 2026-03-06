@@ -787,6 +787,7 @@ class TestFilterToolEvaluators:
 class TestEvalResults:
     def test_all_passed_true(self) -> None:
         r = EvalResults(
+            provider="test",
             eval_id="e",
             run_id="r",
             status="completed",
@@ -800,6 +801,7 @@ class TestEvalResults:
 
     def test_all_passed_false_on_failure(self) -> None:
         r = EvalResults(
+            provider="test",
             eval_id="e",
             run_id="r",
             status="completed",
@@ -810,6 +812,7 @@ class TestEvalResults:
 
     def test_all_passed_false_on_error(self) -> None:
         r = EvalResults(
+            provider="test",
             eval_id="e",
             run_id="r",
             status="completed",
@@ -819,6 +822,7 @@ class TestEvalResults:
 
     def test_all_passed_false_on_non_completed(self) -> None:
         r = EvalResults(
+            provider="test",
             eval_id="e",
             run_id="r",
             status="timeout",
@@ -828,6 +832,7 @@ class TestEvalResults:
 
     def test_all_passed_false_on_empty(self) -> None:
         r = EvalResults(
+            provider="test",
             eval_id="e",
             run_id="r",
             status="completed",
@@ -837,6 +842,7 @@ class TestEvalResults:
 
     def test_assert_passed_succeeds(self) -> None:
         r = EvalResults(
+            provider="test",
             eval_id="e",
             run_id="r",
             status="completed",
@@ -846,6 +852,7 @@ class TestEvalResults:
 
     def test_assert_passed_raises(self) -> None:
         r = EvalResults(
+            provider="test",
             eval_id="e",
             run_id="r",
             status="completed",
@@ -855,12 +862,12 @@ class TestEvalResults:
             r.assert_passed()
 
     def test_assert_passed_custom_message(self) -> None:
-        r = EvalResults(eval_id="e", run_id="r", status="failed")
+        r = EvalResults(provider="test", eval_id="e", run_id="r", status="failed")
         with pytest.raises(AssertionError, match="custom error"):
             r.assert_passed("custom error")
 
     def test_none_result_counts(self) -> None:
-        r = EvalResults(eval_id="e", run_id="r", status="completed")
+        r = EvalResults(provider="test", eval_id="e", run_id="r", status="completed")
         assert r.passed == 0
         assert r.failed == 0
         assert r.total == 0
@@ -936,8 +943,8 @@ class TestEvaluateResponse:
             evaluators=FoundryEvals(project_client=mock_project, model_deployment="gpt-4o"),
         )
 
-        assert results.status == "completed"
-        assert results.all_passed
+        assert results[0].status == "completed"
+        assert results[0].all_passed
 
         # Verify the response ID was passed through
         run_call = mock_oai.evals.runs.create.call_args
@@ -975,7 +982,7 @@ class TestEvaluateResponse:
             evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
         )
 
-        assert results.passed == 2
+        assert results[0].passed == 2
         run_call = mock_oai.evals.runs.create.call_args
         content = run_call.kwargs["data_source"]["item_generation_params"]["source"]["content"]
         assert len(content) == 2
@@ -1019,8 +1026,8 @@ class TestEvaluateResponse:
             evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
         )
 
-        assert results.status == "completed"
-        assert results.all_passed
+        assert results[0].status == "completed"
+        assert results[0].all_passed
 
         # Should use jsonl data source (dataset path), not azure_ai_responses
         run_call = mock_oai.evals.runs.create.call_args
@@ -1065,7 +1072,7 @@ class TestEvaluateResponse:
             evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
         )
 
-        assert results.status == "completed"
+        assert results[0].status == "completed"
 
         run_call = mock_oai.evals.runs.create.call_args
         ds = run_call.kwargs["data_source"]
@@ -1106,7 +1113,7 @@ class TestEvaluateResponse:
             evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
         )
 
-        assert results.passed == 2
+        assert results[0].passed == 2
         run_call = mock_oai.evals.runs.create.call_args
         content = run_call.kwargs["data_source"]["source"]["content"]
         assert len(content) == 2
@@ -1227,24 +1234,33 @@ class TestEvaluateResponse:
 
 class TestEvalResultsSubResults:
     def test_sub_results_default_empty(self) -> None:
-        r = EvalResults(eval_id="e1", run_id="r1", status="completed", result_counts={"passed": 1, "failed": 0})
+        r = EvalResults(
+            provider="test",
+            eval_id="e1",
+            run_id="r1",
+            status="completed",
+            result_counts={"passed": 1, "failed": 0},
+        )
         assert r.sub_results == {}
         assert r.all_passed
 
     def test_all_passed_checks_sub_results(self) -> None:
         parent = EvalResults(
+            provider="test",
             eval_id="e1",
             run_id="r1",
             status="completed",
             result_counts={"passed": 2, "failed": 0},
             sub_results={
                 "agent-a": EvalResults(
+                    provider="test",
                     eval_id="e2",
                     run_id="r2",
                     status="completed",
                     result_counts={"passed": 1, "failed": 0},
                 ),
                 "agent-b": EvalResults(
+                    provider="test",
                     eval_id="e3",
                     run_id="r3",
                     status="completed",
@@ -1256,12 +1272,14 @@ class TestEvalResultsSubResults:
 
     def test_all_passed_with_all_sub_passing(self) -> None:
         parent = EvalResults(
+            provider="test",
             eval_id="e1",
             run_id="r1",
             status="completed",
             result_counts={"passed": 2, "failed": 0},
             sub_results={
                 "agent-a": EvalResults(
+                    provider="test",
                     eval_id="e2",
                     run_id="r2",
                     status="completed",
@@ -1273,18 +1291,21 @@ class TestEvalResultsSubResults:
 
     def test_assert_passed_includes_failed_agents(self) -> None:
         parent = EvalResults(
+            provider="test",
             eval_id="e1",
             run_id="r1",
             status="completed",
             result_counts={"passed": 2, "failed": 0},
             sub_results={
                 "good-agent": EvalResults(
+                    provider="test",
                     eval_id="e2",
                     run_id="r2",
                     status="completed",
                     result_counts={"passed": 1, "failed": 0},
                 ),
                 "bad-agent": EvalResults(
+                    provider="test",
                     eval_id="e3",
                     run_id="r3",
                     status="completed",
@@ -1464,10 +1485,10 @@ class TestEvaluateWorkflow:
             include_overall=False,
         )
 
-        assert results.status == "completed"
-        assert "writer" in results.sub_results
-        assert "reviewer" in results.sub_results
-        assert len(results.sub_results) == 2
+        assert results[0].status == "completed"
+        assert "writer" in results[0].sub_results
+        assert "reviewer" in results[0].sub_results
+        assert len(results[0].sub_results) == 2
 
     @pytest.mark.asyncio
     async def test_with_queries_runs_workflow(self) -> None:
@@ -1496,7 +1517,7 @@ class TestEvaluateWorkflow:
         )
 
         mock_workflow.run.assert_called_once_with("Test query")
-        assert "agent" in results.sub_results
+        assert "agent" in results[0].sub_results
 
     @pytest.mark.asyncio
     async def test_overall_plus_per_agent(self) -> None:
@@ -1525,8 +1546,8 @@ class TestEvaluateWorkflow:
         )
 
         # Should have per-agent sub_results AND overall
-        assert "planner" in results.sub_results
-        assert results.status == "completed"
+        assert "planner" in results[0].sub_results
+        assert results[0].status == "completed"
         # FoundryEvals.evaluate called twice: once for planner, once for overall
         assert mock_oai.evals.create.call_count == 2
 
@@ -1564,7 +1585,7 @@ class TestEvaluateWorkflow:
             include_overall=False,
         )
 
-        assert "agent-a" in results.sub_results
+        assert "agent-a" in results[0].sub_results
         # Only one eval call (per-agent), no overall
         assert mock_oai.evals.create.call_count == 1
 

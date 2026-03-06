@@ -88,13 +88,14 @@ async def main():
         evaluators=evals.select(Evaluators.RELEVANCE, Evaluators.COHERENCE),
     )
 
-    print(f"Status: {results.status}")
-    print(f"Results: {results.passed}/{results.total} passed")
-    print(f"Portal: {results.report_url}")
-    if results.all_passed:
-        print("✓ All passed")
-    else:
-        print(f"✗ {results.failed} failed, {results.errored} errored")
+    for r in results:
+        print(f"Status: {r.status}")
+        print(f"Results: {r.passed}/{r.total} passed")
+        print(f"Portal: {r.report_url}")
+        if r.all_passed:
+            print("✓ All passed")
+        else:
+            print(f"✗ {r.failed} failed, {r.errored} errored")
 
     print()
     print("=" * 60)
@@ -113,13 +114,14 @@ async def main():
         evaluators=evals.select(Evaluators.RELEVANCE, Evaluators.TOOL_CALL_ACCURACY),
     )
 
-    print(f"Status: {results.status}")
-    print(f"Results: {results.passed}/{results.total} passed")
-    print(f"Portal: {results.report_url}")
-    if results.all_passed:
-        print("✓ All passed")
-    else:
-        print(f"✗ {results.failed} failed, {results.errored} errored")
+    for r in results:
+        print(f"Status: {r.status}")
+        print(f"Results: {r.passed}/{r.total} passed")
+        print(f"Portal: {r.report_url}")
+        if r.all_passed:
+            print("✓ All passed")
+        else:
+            print(f"✗ {r.failed} failed, {r.errored} errored")
 
     # =========================================================================
     # Pattern 2: evaluate_agent() — batch test queries
@@ -139,13 +141,14 @@ async def main():
         evaluators=evals,  # uses smart defaults (auto-adds tool_call_accuracy)
     )
 
-    print(f"Status: {results.status}")
-    print(f"Results: {results.passed}/{results.total} passed")
-    print(f"Portal: {results.report_url}")
-    if results.all_passed:
-        print("✓ All passed")
-    else:
-        print(f"✗ {results.failed} failed, {results.errored} errored")
+    for r in results:
+        print(f"Status: {r.status}")
+        print(f"Results: {r.passed}/{r.total} passed")
+        print(f"Portal: {r.report_url}")
+        if r.all_passed:
+            print("✓ All passed")
+        else:
+            print(f"✗ {r.failed} failed, {r.errored} errored")
 
     # =========================================================================
     # Pattern 3: FoundryEvals.evaluate() — manual control
