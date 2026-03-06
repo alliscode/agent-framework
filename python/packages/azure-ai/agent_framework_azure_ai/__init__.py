@@ -2,6 +2,17 @@
 
 import importlib.metadata
 
+# Re-export core eval types for convenience
+from agent_framework._eval import (
+    AgentEvalConverter,
+    EvalItem,
+    EvalResults,
+    Evaluator,
+    evaluate_agent,
+    evaluate_response,
+    evaluate_workflow,
+)
+
 from ._agent_provider import AzureAIAgentsProvider
 from ._chat_client import AzureAIAgentClient, AzureAIAgentOptions
 from ._client import AzureAIClient, AzureAIProjectAgentOptions, RawAzureAIClient
@@ -12,15 +23,10 @@ from ._embedding_client import (
     RawAzureAIInferenceEmbeddingClient,
 )
 from ._foundry_evals import (
-    AgentEvalConverter,
-    EvalResults,
     Evaluators,
-    evaluate_agent,
-    evaluate_dataset,
+    FoundryEvals,
     evaluate_foundry_target,
-    evaluate_response,
     evaluate_traces,
-    evaluate_workflow,
     setup_continuous_eval,
 )
 from ._foundry_memory_provider import FoundryMemoryProvider
@@ -44,14 +50,16 @@ __all__ = [
     "AzureAIProjectAgentOptions",
     "AzureAIProjectAgentProvider",
     "AzureAISettings",
+    "EvalItem",
     "EvalResults",
+    "Evaluator",
     "Evaluators",
+    "FoundryEvals",
     "FoundryMemoryProvider",
     "RawAzureAIClient",
     "RawAzureAIInferenceEmbeddingClient",
     "__version__",
     "evaluate_agent",
-    "evaluate_dataset",
     "evaluate_foundry_target",
     "evaluate_response",
     "evaluate_traces",

@@ -7,7 +7,7 @@ consulted: Pratyush Mishra, Shivam Shrivastava, Manni Arora (Centrica eval scena
 informed: Agent Framework team, Foundry Evals team
 ---
 
-# Azure AI Foundry Evals Integration
+# Agent Evaluation Architecture with Azure AI Foundry Integration
 
 ## Context and Problem Statement
 
@@ -20,131 +20,288 @@ However, using Foundry Evals with an agent-framework agent today requires signif
 3. Manually wire up the correct Foundry data source type (`azure_ai_traces`, `jsonl`, `azure_ai_target_completions`, etc.) depending on their scenario
 4. Handle App Insights trace ID queries, response ID collection, and eval polling
 
-This friction is especially painful for multi-agent orchestrations (e.g. classifier → workstream agents) where developers need to evaluate individual sub-agents, not just the workflow as a whole — yet all the sub-agent information is already present in the framework's OTel traces and tool registrations.
+Additionally, evaluation is a concern that extends beyond any single provider. Developers may want to use local evaluators (LLM-as-judge, regex, keyword matching), third-party evaluation libraries, or multiple providers in combination. The architecture must support this without creating a Foundry-specific lock-in at the API level.
 
-The goal is to make any agent-framework agent evaluable against Foundry Evals in 3-5 lines of code.
+The goal is: any agent-framework agent evaluable with any evaluation provider in 3-5 lines of code.
 
 ## Decision Drivers
 
 - **Zero-friction evaluation**: Developers should go from "I have an agent" to "I have eval results" with minimal code.
-- **Any agent, any provider**: The primary path must work with agents backed by any model provider — OpenAI, Anthropic, Ollama, local models — not just Foundry-registered agents.
-- **Agent discovery and tool reuse**: The framework already knows which agents exist and what tools they have. Evals should leverage this automatically, not require developers to re-declare tool definitions in eval config.
-- **Foundry-native results**: All paths produce results viewable in the Foundry portal. Results may also be surfaced in DevUI for the local dev inner loop.
-- **Progressive disclosure**: Simple scenarios (evaluate what happened) should be near-zero code. Advanced scenarios (red teaming, continuous monitoring) should build on the same primitives.
+- **Provider-agnostic API**: The core evaluation functions (`evaluate_agent`, `evaluate_response`, `evaluate_workflow`) must not be tied to any specific provider. Provider configuration should be separate from the evaluation call.
+- **Lowest concept count**: Introduce the fewest possible new concepts. The evaluator IS the provider — no separate "provider" abstraction.
+- **Agent discovery and tool reuse**: The framework already knows which agents exist and what tools they have. Evals should leverage this automatically.
+- **Foundry-native results**: When using Foundry, results should be viewable in the Foundry portal.
+- **Progressive disclosure**: Simple scenarios should be near-zero code. Advanced scenarios should build on the same primitives.
 - **Cross-language parity**: Design must be implementable in both Python and .NET.
 
 ## Considered Options
 
-1. **Thin helpers with message converter** — Build a type converter (`AgentEvalConverter`) and lightweight wrapper functions that bridge agent-framework types to Foundry Evals APIs.
-2. **Full eval framework** — Build comprehensive eval infrastructure including custom evaluator definitions, scoring profiles, dataset management, and reporting inside agent-framework.
+1. **Provider-specific functions** — Build Foundry-specific helper functions (`evaluate_agent()`, etc.) directly in the Azure package. All eval functions take Foundry connection parameters.
+2. **Evaluator protocol with core orchestration** — Define a provider-agnostic `Evaluator` protocol in core. Orchestration functions live in core. Providers implement the protocol.
+3. **Full eval framework** — Build comprehensive eval infrastructure including custom evaluator definitions, scoring profiles, and reporting inside agent-framework.
 
 ## Decision Outcome
 
-Chosen option: "Thin helpers with message converter", because it delivers the zero-friction developer experience without duplicating Foundry functionality, works with the framework's existing OTel instrumentation, and can be built incrementally starting with the highest-impact path.
+Chosen option: "Evaluator protocol with core orchestration", because it delivers the zero-friction developer experience, supports multiple providers without API changes, and keeps the concept count low (evaluator = provider).
+
+### Architecture: Core vs Provider Split
+
+The evaluation system is split across two layers:
+
+**Core (`agent_framework._eval`)**:
+- `EvalItem` — Provider-agnostic data format for evaluation items
+- `EvalResults` — Universal result type with pass/fail counts, portal links, sub_results
+- `Evaluator` — Protocol that evaluation providers implement
+- `AgentEvalConverter` — Converts agent-framework types to eval format
+- `evaluate_agent()`, `evaluate_response()`, `evaluate_workflow()` — Orchestration functions that extract data and delegate to evaluators
+
+**Azure AI Provider (`agent_framework_azure_ai._foundry_evals`)**:
+- `FoundryEvals` — `Evaluator` implementation backed by Azure AI Foundry
+- `Evaluators` — Constants for Foundry built-in evaluator names
+- `evaluate_traces()` — Foundry-specific: evaluate from stored response IDs or OTel traces
+- `evaluate_foundry_target()` — Foundry-specific: evaluate a registered agent or deployment
+- `setup_continuous_eval()` — Foundry-specific: continuous evaluation rules (not yet available)
+
+**Key insight**: The evaluator IS the provider. There is no separate "provider" concept. A `FoundryEvals` instance encapsulates all Foundry connection details (client, model deployment, evaluator selection). It is passed as the `evaluators` parameter to the core orchestration functions.
 
 ### Consequences
 
-- Good, because developers get a 3-5 line path from agent to eval results for any agent
-- Good, because no duplication of Foundry's evaluator logic, portal, or dashboards
-- Good, because the converter enables interop with any system that consumes the OpenAI agent message format
-- Good, because it leverages agent-framework's existing OTel instrumentation for the highest-impact path
-- Neutral, because it depends on the Foundry SDK (`azure-ai-projects` / `Azure.AI.Projects`) as a runtime dependency
-- Bad, because advanced Foundry features (scheduled evals, continuous eval, red teaming) are only available for Foundry-registered agents and cannot be extended to arbitrary agents through helpers alone
+- Good, because the same `evaluate_agent()` call works with Foundry, local, or third-party evaluators
+- Good, because provider config is set once on the evaluator, not repeated on every function call
+- Good, because mixing providers (e.g., Foundry quality + local keyword match) is natural
+- Good, because `AgentEvalConverter` and data extraction logic are reusable across providers
+- Neutral, because it requires core to define the `Evaluator` protocol (lightweight)
+- Bad, because advanced Foundry features (scheduled evals, continuous eval) remain Foundry-specific functions
 
 ## Pros and Cons of the Options
 
-### Full eval framework
+### Provider-specific functions (Option 1, previous approach)
 
-Build comprehensive eval infrastructure including custom evaluator definitions (scoring profiles, LLM-as-judge, code-based evaluators), dataset management, run scheduling, and reporting.
+All eval functions take `openai_client=`, `model_deployment=`, etc. directly.
 
-- Good, because it could provide evaluator features that Foundry doesn't support natively (e.g. custom scoring profiles)
-- Good, because it addresses feedback from customers who want end-to-end eval config without Foundry
-- Bad, because it duplicates functionality that Foundry already provides and will continue to improve
-- Bad, because it significantly expands agent-framework's scope and maintenance burden
-- Bad, because custom evaluator infrastructure would need to be built and maintained for both Python and .NET
-- Bad, because eval results would live in a separate system from Foundry portal, fragmenting the developer's view
+- Good, because simple implementation — no protocol/abstraction needed
+- Bad, because every function signature is Foundry-specific (`project_client`, `model_deployment`)
+- Bad, because switching providers requires rewriting all eval calls
+- Bad, because mixing providers (Foundry + local) in one eval run is impossible
 
-### Why not a `.WithEvaluation()` wrapper?
+### Full eval framework (Option 3)
 
-A decorator approach (similar to `OpenTelemetryAgent`) that automatically evaluates every `RunAsync` call was considered as an API shape for the chosen option. However, evaluation is typically a development/CI activity, not a per-request concern. Evaluating every run would be expensive (each eval is a Foundry API call with LLM-as-judge cost) and conflates the eval lifecycle (batch, scheduled, one-time) with the request lifecycle. Standalone helper functions better match how developers actually run evals.
+Build comprehensive eval infrastructure including custom evaluator definitions, dataset management, and reporting.
 
-## Integration Paths
+- Good, because it could provide evaluator features that Foundry doesn't support natively
+- Bad, because it duplicates Foundry functionality and significantly expands maintenance burden
+- Bad, because eval results would fragment across separate systems
 
-The chosen option provides four evaluation paths, matching the ways Foundry can ingest data:
+## Usage Examples
 
-### Path 1: Trace-Based Evaluation ⭐ Highest Impact
+### Basic: Evaluate an agent
 
-Evaluate any agent by pointing Foundry at OTel traces in App Insights. Works with any model provider. Zero changes to agent code.
+```python
+from agent_framework import evaluate_agent
+from agent_framework_azure_ai import FoundryEvals
+
+evals = FoundryEvals(project_client=client, model_deployment="gpt-4o")
+
+results = await evaluate_agent(
+    agent=my_agent,
+    queries=["What's the weather?"],
+    evaluators=evals,  # smart defaults: relevance, coherence, task_adherence
+                       # auto-adds tool_call_accuracy when agent has tools
+)
+results.assert_passed()
+```
+
+### Evaluate a response you already have
+
+```python
+from agent_framework import evaluate_response
+from agent_framework_azure_ai import FoundryEvals
+
+evals = FoundryEvals(project_client=client, model_deployment="gpt-4o")
+
+# Quality evaluators — Responses API fast path (no query needed)
+results = await evaluate_response(response=response, evaluators=evals)
+
+# Tool evaluators — provide query and agent for tool definitions
+results = await evaluate_response(
+    response=response,
+    query="What's the weather?",
+    agent=agent,
+    evaluators=evals,
+)
+```
+
+### Evaluate a multi-agent workflow
+
+```python
+from agent_framework import evaluate_workflow
+from agent_framework_azure_ai import FoundryEvals
+
+evals = FoundryEvals(project_client=client, model_deployment="gpt-4o")
+
+result = await workflow.run("Plan a trip to Paris")
+eval_results = await evaluate_workflow(
+    workflow=workflow,
+    workflow_result=result,
+    evaluators=evals,
+)
+
+for name, sub in eval_results.sub_results.items():
+    print(f"  {name}: {sub.passed}/{sub.total}")
+```
+
+### Select specific evaluators
+
+```python
+evals = FoundryEvals(project_client=client, model_deployment="gpt-4o")
+
+# Use select() to pick specific evaluators
+quality_only = evals.select("relevance", "coherence")
+results = await evaluate_agent(agent=agent, queries=queries, evaluators=quality_only)
+```
+
+### Mix multiple providers
+
+```python
+from agent_framework import evaluate_agent, LocalEvaluator, keyword_check, tool_called_check
+from agent_framework_azure_ai import FoundryEvals
+
+# Local checks — instant, no API calls
+local = LocalEvaluator(
+    keyword_check("weather"),
+    tool_called_check("get_weather"),
+)
+
+# Foundry — deep quality assessment via LLM-as-judge
+foundry = FoundryEvals(project_client=client, model_deployment="gpt-4o")
+
+# Both evaluate the same items; results are merged
+results = await evaluate_agent(
+    agent=agent,
+    queries=queries,
+    evaluators=[local, foundry],
+)
+```
+
+### Foundry-specific: Trace-based evaluation
 
 ```python
 from agent_framework_azure_ai import Evaluators, evaluate_traces
 
 results = await evaluate_traces(
     response_ids=[response.response_id],
-    evaluators=[Evaluators.INTENT_RESOLUTION, Evaluators.TASK_ADHERENCE],
-    openai_client=openai_client,
-    model_deployment="gpt-4o",
-)
-results.assert_passed()
-print(f"View results: {results.report_url}")
-```
-
-### Path 2: Foundry-Managed Evaluation
-
-For agents or models registered in Foundry. Foundry invokes the target, evaluates the output. Enables scheduled evals, red teaming, and CI gates.
-
-```python
-from agent_framework_azure_ai import Evaluators, evaluate_foundry_target
-
-results = await evaluate_foundry_target(
-    target={"type": "azure_ai_agent", "name": "my-agent"},
-    test_queries=["Book a flight to Paris"],
-    evaluators=[Evaluators.TASK_COMPLETION, Evaluators.TOOL_CALL_ACCURACY],
-    openai_client=openai_client,
+    evaluators=[Evaluators.RELEVANCE],
+    project_client=project_client,
     model_deployment="gpt-4o",
 )
 ```
 
-### Path 3: Dataset Evaluation
-
-Run your agent locally against test cases, convert the output to Foundry format, evaluate. The dev inner loop for agents with custom code.
+### Direct evaluator access
 
 ```python
-from agent_framework_azure_ai import evaluate_agent
+from agent_framework import AgentEvalConverter
+from agent_framework_azure_ai import FoundryEvals
 
-results = await evaluate_agent(
-    agent=my_agent,
-    queries=["What's the weather in Seattle?"],
-    # evaluators default to relevance, coherence, task_adherence;
-    # tool_call_accuracy is auto-added when the agent has tools
-    openai_client=openai_client,
-    model_deployment="gpt-4o",
-)
-results.assert_passed()  # CI gate — raises AssertionError on failure
-```
+evals = FoundryEvals(project_client=client, model_deployment="gpt-4o")
 
-### Path 4: Continuous Evaluation (Not Yet Available)
+converter = AgentEvalConverter()
+items = [converter.to_eval_item(query=q, response=r, agent=agent) for q, r in pairs]
 
-One-time setup of a Foundry evaluation rule. Every response is automatically evaluated. Requires Foundry-registered agent. This path depends on the Foundry evaluation rules API, which is not yet integrated.
-
-```python
-from agent_framework_azure_ai import setup_continuous_eval
-
-# Not yet available — raises NotImplementedError.
-# Use evaluate_traces() to evaluate responses in the meantime.
-await setup_continuous_eval(
-    agent_name="production-bot",
-    evaluators=[Evaluators.VIOLENCE, Evaluators.TASK_ADHERENCE],
-    openai_client=openai_client,
-    model_deployment="gpt-4o",
-)
+# Call the evaluator directly
+results = await evals.evaluate(items, eval_name="My Custom Eval")
 ```
 
 ## What To Build
 
-### Evaluators — Discoverable Constants
+### Core: Evaluator Protocol
 
-String constants for all Foundry built-in evaluators, enabling IDE autocomplete and typo prevention:
+A runtime-checkable protocol that any evaluation provider implements:
+
+```python
+@runtime_checkable
+class Evaluator(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    async def evaluate(
+        self, items: Sequence[EvalItem], *, eval_name: str = "Agent Framework Eval"
+    ) -> EvalResults: ...
+```
+
+The protocol is minimal — just `name` and `evaluate()`. Providers are free to add methods like `select()`, but the core only needs this interface.
+
+### Core: EvalItem
+
+Provider-agnostic data format for items to evaluate:
+
+```python
+@dataclass
+class EvalItem:
+    query: str
+    response: str
+    conversation: list[dict[str, Any]]         # OpenAI chat format
+    tool_definitions: list[dict[str, Any]] | None = None
+    context: str | None = None
+    response_id: str | None = None             # For Responses API providers
+```
+
+`EvalItem.to_dict()` serializes to flat dict with JSON-encoded strings for `conversation` and `tool_definitions`, suitable for JSONL data sources.
+
+### Core: AgentEvalConverter
+
+Converts agent-framework types to `EvalItem`. `to_eval_item()` returns `EvalItem` objects (not dicts), making the output strongly typed:
+
+| Agent Framework | Eval Format |
+|---|---|
+| `Content.function_call` | `tool_call` in OpenAI chat format |
+| `Content.function_result` | `tool_result` in OpenAI chat format |
+| `FunctionTool` | `{name, description, parameters}` schema |
+| `Message` history | `conversation` list + `query`/`response` extraction |
+
+### Core: EvalResults
+
+Rich result type with convenience properties for CI integration:
+
+```python
+results.all_passed          # bool: no failures or errors (recursive for workflow)
+results.passed              # int: passing count
+results.failed              # int: failure count
+results.total               # int: total = passed + failed + errored
+results.per_evaluator       # dict: per-evaluator breakdown
+results.error               # str | None: error details on failure
+results.sub_results         # dict: per-agent breakdown (workflow evals)
+results.assert_passed()     # raises AssertionError with details
+```
+
+### Core: Orchestration Functions
+
+Provider-agnostic functions that extract data and delegate to evaluators:
+
+| Function | What it does |
+|---|---|
+| `evaluate_agent()` | Runs agent against test queries, converts via `AgentEvalConverter`, passes `EvalItem`s to evaluator |
+| `evaluate_response()` | Converts response(s) to `EvalItem`s, passes to evaluator. Includes `response_id` for providers that support server-side retrieval |
+| `evaluate_workflow()` | Extracts per-agent data from `WorkflowRunResult`, evaluates each agent and overall output. Per-agent breakdown in `sub_results` |
+
+### Azure AI: FoundryEvals
+
+`Evaluator` implementation backed by Azure AI Foundry:
+
+```python
+class FoundryEvals:
+    def __init__(self, *, project_client=None, openai_client=None,
+                 model_deployment: str, evaluators=None, ...)
+    def select(self, *evaluators: str) -> FoundryEvals
+    async def evaluate(self, items, *, eval_name) -> EvalResults
+```
+
+**Smart auto-detection in `evaluate()`:**
+- Default evaluators: relevance, coherence, task_adherence
+- Auto-adds `tool_call_accuracy` when items have `tool_definitions`
+- Filters out tool evaluators for items without `tool_definitions`
+- Responses API fast path when all items have `response_id` and no tool evaluators
+
+### Azure AI: Evaluators Constants
 
 ```python
 from agent_framework_azure_ai import Evaluators
@@ -152,78 +309,34 @@ from agent_framework_azure_ai import Evaluators
 evaluators = [Evaluators.RELEVANCE, Evaluators.TOOL_CALL_ACCURACY]
 ```
 
-### AgentEvalConverter — Message Format Bridge
+Categories: Agent behavior, Tool usage, Quality, Safety.
 
-Converts agent-framework types into the OpenAI-style agent message schema that Foundry evaluators expect:
+### Azure AI: Foundry-Specific Functions
 
-| Agent Framework | Foundry Eval Format |
+| Function | What it does |
 |---|---|
-| `Content.function_call` | `tool_call` content type with `call_id` |
-| `Content.function_result` | `tool_result` content type |
-| `FunctionTool` | `{name, description, parameters}` schema |
-| `Message` history split | `query` (user input) + `response` (agent output) |
-
-The converter also extracts tool definitions directly from `agent.tools`, eliminating the need to re-declare them in eval configuration.
-
-### EvalResults — CI-Friendly Results
-
-Rich result type with convenience properties for CI integration:
-
-```python
-results = await evaluate_agent(...)
-assert results.all_passed          # bool: no failures or errors
-print(results.passed)              # int: passing count
-print(results.failed)              # int: failure count
-print(results.per_evaluator)       # dict: per-evaluator breakdown
-results.assert_passed()            # raises AssertionError with details
-
-# Workflow evals — per-agent breakdown
-for name, sub in results.sub_results.items():
-    print(f"{name}: {sub.passed}/{sub.total}")
-```
-
-### Wrapper Functions
-
-Thin async wrappers that handle Foundry API plumbing. All functions accept optional `evaluators` (defaults to relevance + coherence + task_adherence):
-
-| Function | Path | What it does |
-|---|---|---|
-| `evaluate_response()` | 3/1 | Evaluates response(s) from a completed `agent.run()`. Uses Responses API fast path if available, otherwise falls back to dataset eval with query + conversation |
-| `evaluate_agent()` | 3 | Runs agent, converts via `AgentEvalConverter`, submits as JSONL |
-| `evaluate_workflow()` | 3 | Evaluates a multi-agent workflow with per-agent breakdown in `sub_results` |
-| `evaluate_traces()` | 1 | Evaluates by response IDs or OTel trace IDs from App Insights |
-| `evaluate_foundry_target()` | 2 | Constructs target completions data source, submits eval |
-| `evaluate_dataset()` | 3 | Evaluates pre-collected data (for when developer runs agent separately) |
-| `setup_continuous_eval()` | 4 | Creates Foundry `EvaluationRule` (not yet available) |
+| `evaluate_traces()` | Evaluate from stored response IDs or OTel traces |
+| `evaluate_foundry_target()` | Evaluate a Foundry-registered agent or deployment |
+| `setup_continuous_eval()` | Create evaluation rules (not yet available) |
 
 ### Package Location
 
-All code in the existing Azure integration packages (`agent_framework_azure_ai` for Python, `Microsoft.Agents.AI.AzureAIFoundry` or similar for .NET), since every path requires the Foundry SDK.
+- Core types and orchestration: `agent_framework._eval` (Python), `Microsoft.Agents.AI.Core` (.NET)
+- Foundry provider: `agent_framework_azure_ai._foundry_evals` (Python), `Microsoft.Agents.AI.AzureAIFoundry` (.NET)
+- Azure-AI re-exports core types for convenience
 
-## Implementation Order
+## Known Limitations
 
-1. **`Evaluators` constants + `AgentEvalConverter`** — Core building blocks; constants for DX, converter for Path 3
-2. **`evaluate_agent()` / `evaluate_dataset()`** — Primary developer path; run agent + evaluate in one call
-3. **`evaluate_traces()`** — Highest-impact production path; works with any agent that has OTel
-4. **`evaluate_foundry_target()`** — Target completions for registered agents
-5. **`setup_continuous_eval()`** — Production monitoring (blocked on Foundry evaluation rules API)
-6. **Samples and documentation** — Getting started sample for each path
-
-## Known Gaps
-
-1. **`project_endpoint` convenience parameter**: The current API requires developers to create an `AIProjectClient` and `OpenAI` client externally. A future improvement would accept `project_endpoint: str` directly and handle client creation internally, reducing boilerplate. This is blocked on determining the right client lifecycle semantics.
-2. **`model_deployment` defaulting**: Currently required on every call. Could potentially be inferred from the Foundry project configuration.
+1. **Workflow re-run with Responses API**: When using `evaluate_workflow(queries=...)` with Responses API clients, agents must be configured with `options={"store": False}`. Without this, the `AgentExecutor` session retains `previous_response_id` from prior runs, and the Responses API rejects requests that chain across independent conversations.
+2. **Tool evaluators require query + agent**: Tool evaluators need tool definition schemas, which are not available through Responses API response retrieval. When using these evaluators with `evaluate_response()`, `query=` and `agent=` must be provided.
+3. **`model_deployment` always required**: Could potentially be inferred from the Foundry project configuration.
 
 ## Open Questions
 
-1. **Orchestration sub-agent evaluation**: ~~For multi-agent workflows, can Foundry trace-based eval be scoped to specific spans within a trace?~~ **Resolved**: `evaluate_workflow()` extracts per-agent query/response pairs from `WorkflowRunResult` events and evaluates each agent via dataset eval (Path 3). No OTEL/App Insights required. Results are returned with per-agent breakdown in `EvalResults.sub_results`. See [orchestration eval design](../foundry-orchestration-eval.md).
-2. **Red teaming non-registered agents**: Foundry red teaming requires invoking the target. A state-machine API where the framework owns the poll→run→submit loop could enable red teaming of any agent, but requires Foundry API support for callback-based flows. See [red team state machine proposal](../foundry-redteam-state-machine.md).
-3. **Auto-detection**: Should `evaluate_agent()` auto-detect Foundry-registered agents and route to `azure_ai_target_completions` instead of JSONL?
-4. **.NET parity timeline**: What is the priority for .NET implementation relative to Python?
+1. **Local evaluator implementations**: What built-in local evaluators should the core package provide (e.g., keyword match, regex, assertion-based)?
+2. **Red teaming non-registered agents**: Requires Foundry API support for callback-based flows.
+3. **.NET parity timeline**: What is the priority for .NET implementation?
 
 ## More Information
 
-- [Integration paths summary](../foundry-evals-paths.md) — Decision tree and quick reference table
-- [Red team state machine proposal](../foundry-redteam-state-machine.md) — Sequence diagram for red-teaming non-registered agents
-- [Orchestration eval design](../foundry-orchestration-eval.md) — Evaluating sub-agents in multi-agent workflows
 - [Foundry Evals documentation](https://learn.microsoft.com/azure/ai-foundry/concepts/evaluation-approach-gen-ai) — Azure AI Foundry evaluation overview
