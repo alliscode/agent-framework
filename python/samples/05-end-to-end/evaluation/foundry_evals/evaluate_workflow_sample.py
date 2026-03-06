@@ -118,14 +118,18 @@ async def main():
     # =========================================================================
     # Pattern 2: Run + evaluate with multiple queries
     # =========================================================================
-    # With store=False, the same workflow can be reused across multiple queries.
+    # Build a fresh workflow to avoid stale session state from Pattern 1.
+    # The Responses API tracks previous_response_id per session, so reusing
+    # a workflow after a run would reference stale tool calls.
+    workflow2 = SequentialBuilder(participants=[researcher, planner]).build()
+
     print()
     print("=" * 60)
     print("Pattern 2: Run + evaluate with multiple queries")
     print("=" * 60)
 
     eval_results = await evaluate_workflow(
-        workflow=workflow,
+        workflow=workflow2,
         queries=[
             "Plan a trip from London to Tokyo",
             "Plan a trip from New York to Rome",
