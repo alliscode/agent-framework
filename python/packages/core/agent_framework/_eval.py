@@ -94,9 +94,10 @@ class EvalItem:
 
 @dataclass
 class EvalResults:
-    """Results from an evaluation run.
+    """Results from an evaluation run by a single provider.
 
     Attributes:
+        provider: Name of the evaluation provider that produced these results.
         eval_id: The evaluation definition ID (provider-specific).
         run_id: The evaluation run ID (provider-specific).
         status: Run status — ``"completed"``, ``"failed"``, ``"canceled"``,
@@ -105,21 +106,22 @@ class EvalResults:
         report_url: URL to view results in the provider's portal.
         error: Error details when the run failed.
         per_evaluator: Per-evaluator result counts, keyed by evaluator name.
-        sub_results: Per-agent or per-component evaluation results, keyed by
-            executor/agent name. Populated by ``evaluate_workflow()``.
+        sub_results: Per-agent breakdown for workflow evaluations, keyed by
+            agent/executor name.
 
     Example::
 
-        results = await evaluate_agent(...)
-        assert results.all_passed
-        print(f"{results.passed}/{results.total} passed")
-        print(f"Portal: {results.report_url}")
+        results = await evaluate_agent(agent=my_agent, queries=["Hello"], evaluators=evals)
+        for r in results:
+            print(f"{r.provider}: {r.passed}/{r.total}")
 
         # Workflow eval — per-agent breakdown
-        for name, sub in results.sub_results.items():
-            print(f"{name}: {sub.passed}/{sub.total}")
+        for r in results:
+            for name, sub in r.sub_results.items():
+                print(f"  {name}: {sub.passed}/{sub.total}")
     """
 
+    provider: str
     eval_id: str
     run_id: str
     status: str
@@ -153,7 +155,7 @@ class EvalResults:
     def all_passed(self) -> bool:
         """Whether all results passed with no failures or errors.
 
-        For merged or workflow evals, checks that all sub-results passed.
+        For workflow evals with sub-agents, checks that all sub-results passed.
         Returns ``False`` if the run did not complete successfully.
         """
         if self.status not in ("completed",):
@@ -531,7 +533,7 @@ async def evaluate_agent(
     evaluators: Evaluator | Sequence[Evaluator],
     eval_name: str | None = None,
     context: str | None = None,
-) -> EvalResults:
+) -> list[EvalResults]:
     """Run an agent against test queries and evaluate the results.
 
     The simplest path for evaluating an agent during development. For each
@@ -541,13 +543,12 @@ async def evaluate_agent(
     Args:
         agent: An agent-framework agent instance.
         queries: Test queries to run the agent against.
-        evaluators: One or more ``Evaluator`` instances. When multiple are
-            provided, each evaluates the same items and results are merged.
+        evaluators: One or more ``Evaluator`` instances.
         eval_name: Display name (defaults to agent name).
         context: Optional context for groundedness evaluation.
 
     Returns:
-        ``EvalResults`` with status, result counts, and optional portal link.
+        A list of ``EvalResults``, one per evaluator provider.
 
     Example::
 
@@ -559,7 +560,8 @@ async def evaluate_agent(
             queries=["What's the weather?", "Book a flight to London"],
             evaluators=evals,
         )
-        results.assert_passed()
+        for r in results:
+            print(f"{r.provider}: {r.passed}/{r.total}")
     """
     converter = AgentEvalConverter()
     items: list[EvalItem] = []
@@ -586,7 +588,7 @@ async def evaluate_response(
     agent: Any | None = None,
     evaluators: Evaluator | Sequence[Evaluator],
     eval_name: str = "Agent Framework Response Eval",
-) -> EvalResults:
+) -> list[EvalResults]:
     """Evaluate one or more agent responses that have already been produced.
 
     The simplest post-hoc evaluation path — pass the response you got from
@@ -607,7 +609,7 @@ async def evaluate_response(
         eval_name: Display name for the evaluation.
 
     Returns:
-        ``EvalResults`` with status, result counts, and optional portal link.
+        A list of ``EvalResults``, one per evaluator provider.
 
     Raises:
         ValueError: If responses lack ``response_id`` and ``query`` is not
@@ -663,12 +665,12 @@ async def evaluate_workflow(
     eval_name: str | None = None,
     include_overall: bool = True,
     include_per_agent: bool = True,
-) -> EvalResults:
+) -> list[EvalResults]:
     """Evaluate a multi-agent workflow with per-agent breakdown.
 
     Evaluates each sub-agent individually and (optionally) the workflow's
-    overall output, returning a single ``EvalResults`` with per-agent
-    breakdowns in ``sub_results``.
+    overall output. Returns one ``EvalResults`` per evaluator provider, each
+    with per-agent breakdowns in ``sub_results``.
 
     **Two modes:**
 
@@ -687,7 +689,8 @@ async def evaluate_workflow(
         include_per_agent: Whether to evaluate each sub-agent individually.
 
     Returns:
-        ``EvalResults`` with per-agent breakdown in ``sub_results``.
+        A list of ``EvalResults``, one per evaluator provider, each with
+        per-agent breakdown in ``sub_results``.
 
     Example::
 
@@ -701,8 +704,10 @@ async def evaluate_workflow(
             workflow_result=result,
             evaluators=evals,
         )
-        for name, sub in eval_results.sub_results.items():
-            print(f"  {name}: {sub.passed}/{sub.total}")
+        for r in eval_results:
+            print(f"{r.provider}:")
+            for name, sub in r.sub_results.items():
+                print(f"  {name}: {sub.passed}/{sub.total}")
     """
     from ._workflows._workflow import WorkflowRunResult as WRR
 
@@ -711,6 +716,7 @@ async def evaluate_workflow(
 
     wf_name = eval_name or f"Workflow Eval: {workflow.__class__.__name__}"
     converter = AgentEvalConverter()
+    evaluator_list = [evaluators] if isinstance(evaluators, Evaluator) else list(evaluators)
 
     # Collect per-agent data and overall items
     all_agent_data: list[_AgentEvalData] = []
@@ -738,62 +744,65 @@ async def evaluate_workflow(
                 if overall_item:
                     overall_items.append(overall_item)
 
-    sub_results: dict[str, EvalResults] = {}
-
-    # Evaluate each agent individually
+    # Group agent data by executor ID
+    agents_by_id: dict[str, list[_AgentEvalData]] = {}
     if include_per_agent and all_agent_data:
-        agents_by_id: dict[str, list[_AgentEvalData]] = {}
         for ad in all_agent_data:
             agents_by_id.setdefault(ad.executor_id, []).append(ad)
 
-        for executor_id, agent_data_list in agents_by_id.items():
-            agent_items: list[EvalItem] = []
-            for ad in agent_data_list:
-                agent_items.append(
-                    converter.to_eval_item(
-                        query=ad.query,
-                        response=ad.response,
-                        agent=ad.agent,
-                    )
-                )
-            agent_eval = await _run_evaluators(
-                evaluators,
-                agent_items,
-                eval_name=f"{wf_name} — {executor_id}",
-            )
-            sub_results[executor_id] = agent_eval
+    # Build per-agent items once (shared across providers)
+    agent_items_by_id: dict[str, list[EvalItem]] = {}
+    for executor_id, agent_data_list in agents_by_id.items():
+        agent_items_by_id[executor_id] = [
+            converter.to_eval_item(query=ad.query, response=ad.response, agent=ad.agent) for ad in agent_data_list
+        ]
 
-    # Evaluate overall workflow output
-    overall_eval: EvalResults
-    if include_overall and overall_items:
-        overall_eval = await _run_evaluators(
-            evaluators,
-            overall_items,
-            eval_name=f"{wf_name} — overall",
-        )
-    elif sub_results:
-        # Aggregate from sub-results
-        total_passed = sum(s.passed for s in sub_results.values())
-        total_failed = sum(s.failed for s in sub_results.values())
-        total_errored = sum(s.errored for s in sub_results.values())
-        all_completed = all(s.status == "completed" for s in sub_results.values())
-        overall_eval = EvalResults(
-            eval_id="aggregate",
-            run_id="aggregate",
-            status="completed" if all_completed else "partial",
-            result_counts={
-                "passed": total_passed,
-                "failed": total_failed,
-                "errored": total_errored,
-            },
-        )
-    else:
+    if not agent_items_by_id and not overall_items:
         raise ValueError(
             "No agent executor data found in the workflow result. Ensure the workflow uses AgentExecutor-based agents."
         )
 
-    overall_eval.sub_results = sub_results
-    return overall_eval
+    # Run each provider, building per-agent sub_results for each
+    all_results: list[EvalResults] = []
+    for ev in evaluator_list:
+        suffix = f" ({ev.name})" if len(evaluator_list) > 1 else ""
+        sub_results: dict[str, EvalResults] = {}
+
+        # Per-agent evals
+        for executor_id, items in agent_items_by_id.items():
+            agent_result = await ev.evaluate(items, eval_name=f"{wf_name} — {executor_id}{suffix}")
+            sub_results[executor_id] = agent_result
+
+        # Overall eval
+        if include_overall and overall_items:
+            overall_result = await ev.evaluate(overall_items, eval_name=f"{wf_name} — overall{suffix}")
+        elif sub_results:
+            # Aggregate from sub-results
+            total_passed = sum(s.passed for s in sub_results.values())
+            total_failed = sum(s.failed for s in sub_results.values())
+            total_errored = sum(s.errored for s in sub_results.values())
+            all_completed = all(s.status == "completed" for s in sub_results.values())
+            overall_result = EvalResults(
+                provider=ev.name,
+                eval_id="aggregate",
+                run_id="aggregate",
+                status="completed" if all_completed else "partial",
+                result_counts={
+                    "passed": total_passed,
+                    "failed": total_failed,
+                    "errored": total_errored,
+                },
+            )
+        else:
+            raise ValueError(
+                "No agent executor data found in the workflow result. "
+                "Ensure the workflow uses AgentExecutor-based agents."
+            )
+
+        overall_result.sub_results = sub_results
+        all_results.append(overall_result)
+
+    return all_results
 
 
 # ---------------------------------------------------------------------------
@@ -844,43 +853,14 @@ async def _run_evaluators(
     items: Sequence[EvalItem],
     *,
     eval_name: str,
-) -> EvalResults:
-    """Run one or more evaluators and merge results."""
+) -> list[EvalResults]:
+    """Run one or more evaluators and return a result per provider."""
     evaluator_list = [evaluators] if isinstance(evaluators, Evaluator) else list(evaluators)
 
-    if len(evaluator_list) == 1:
-        return await evaluator_list[0].evaluate(items, eval_name=eval_name)
-
-    # Multiple evaluators — run each and store as sub_results keyed by name
-    sub_results: dict[str, EvalResults] = {}
+    results: list[EvalResults] = []
     for ev in evaluator_list:
-        result = await ev.evaluate(items, eval_name=f"{eval_name} ({ev.name})")
-        sub_results[ev.name] = result
+        suffix = f" ({ev.name})" if len(evaluator_list) > 1 else ""
+        result = await ev.evaluate(items, eval_name=f"{eval_name}{suffix}")
+        results.append(result)
 
-    return _merge_eval_results(sub_results)
-
-
-def _merge_eval_results(sub_results: dict[str, EvalResults]) -> EvalResults:
-    """Merge results from multiple evaluators into a single result.
-
-    Each evaluator's results are stored as ``sub_results`` keyed by evaluator
-    name. The top-level ``all_passed`` checks that every sub-result passed.
-    No counts are summed — each provider's counts stay in its own sub-result.
-    """
-    if not sub_results:
-        return EvalResults(eval_id="empty", run_id="empty", status="completed")
-
-    results = list(sub_results.values())
-    all_completed = all(r.status == "completed" for r in results)
-    errors = [r.error for r in results if r.error]
-
-    merged = EvalResults(
-        eval_id="merged",
-        run_id="merged",
-        status="completed" if all_completed else "partial",
-        # No top-level counts — they live in sub_results
-        result_counts={"passed": 0, "failed": 0, "errored": 0},
-        error="; ".join(errors) if errors else None,
-    )
-    merged.sub_results = dict(sub_results)
-    return merged
+    return results

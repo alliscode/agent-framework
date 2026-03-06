@@ -287,6 +287,7 @@ async def _poll_eval_run(
     run_id: str,
     poll_interval: float = 5.0,
     timeout: float = 600.0,
+    provider: str = "Azure AI Foundry",
 ) -> EvalResults:
     """Poll an eval run until completion or timeout."""
     loop = asyncio.get_event_loop()
@@ -304,6 +305,7 @@ async def _poll_eval_run(
                 if error_msg and not isinstance(error_msg, str):
                     error_msg = str(error_msg)
             return EvalResults(
+                provider=provider,
                 eval_id=eval_id,
                 run_id=run_id,
                 status=run.status,
@@ -314,7 +316,7 @@ async def _poll_eval_run(
             )
         remaining = deadline - loop.time()
         if remaining <= 0:
-            return EvalResults(eval_id=eval_id, run_id=run_id, status="timeout")
+            return EvalResults(provider=provider, eval_id=eval_id, run_id=run_id, status="timeout")
         logger.debug("Eval run %s status: %s (%.0fs remaining)", run_id, run.status, remaining)
         await asyncio.sleep(min(poll_interval, remaining))
 
@@ -520,6 +522,7 @@ class FoundryEvals:
             run.id,
             self._poll_interval,
             self._timeout,
+            provider=self.name,
         )
 
     async def _evaluate_via_dataset(
@@ -569,6 +572,7 @@ class FoundryEvals:
             run.id,
             self._poll_interval,
             self._timeout,
+            provider=self.name,
         )
 
 

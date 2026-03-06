@@ -85,14 +85,15 @@ async def main():
         evaluators=local,
     )
 
-    print(f"Status: {results.status}")
-    print(f"Results: {results.passed}/{results.total} passed")
-    for check_name, counts in results.per_evaluator.items():
-        print(f"  {check_name}: {counts['passed']} passed, {counts['failed']} failed")
-    if results.all_passed:
-        print("✓ All local checks passed!")
-    else:
-        print(f"✗ Failures: {results.error}")
+    for r in results:
+        print(f"Status: {r.status}")
+        print(f"Results: {r.passed}/{r.total} passed")
+        for check_name, counts in r.per_evaluator.items():
+            print(f"  {check_name}: {counts['passed']} passed, {counts['failed']} failed")
+        if r.all_passed:
+            print("✓ All local checks passed!")
+        else:
+            print(f"✗ Failures: {r.error}")
 
     # =========================================================================
     # Pattern 2: Foundry evaluation only (cloud-based quality assessment)
@@ -110,13 +111,14 @@ async def main():
         evaluators=foundry,
     )
 
-    print(f"Status: {results.status}")
-    print(f"Results: {results.passed}/{results.total} passed")
-    print(f"Portal: {results.report_url}")
-    if results.all_passed:
-        print("✓ All passed")
-    else:
-        print(f"✗ {results.failed} failed, {results.errored} errored")
+    for r in results:
+        print(f"Status: {r.status}")
+        print(f"Results: {r.passed}/{r.total} passed")
+        print(f"Portal: {r.report_url}")
+        if r.all_passed:
+            print("✓ All passed")
+        else:
+            print(f"✗ {r.failed} failed, {r.errored} errored")
 
     # =========================================================================
     # Pattern 3: Mixed — local + Foundry in one call
@@ -135,7 +137,7 @@ async def main():
     # Foundry: deep quality assessment
     foundry = FoundryEvals(project_client=project_client, model_deployment=deployment)
 
-    # Pass both as a list — each evaluates the same items, results are merged
+    # Pass both as a list — returns one EvalResults per provider
     results = await evaluate_agent(
         agent=agent,
         queries=[
@@ -145,18 +147,18 @@ async def main():
         evaluators=[local, foundry],
     )
 
-    print(f"Status: {results.status}")
-    for provider_name, sub in results.sub_results.items():
-        status = "✓" if sub.all_passed else "✗"
-        print(f"  {status} {provider_name}: {sub.passed}/{sub.total} passed")
-        for check_name, counts in sub.per_evaluator.items():
+    for r in results:
+        status = "✓" if r.all_passed else "✗"
+        print(f"  {status} {r.provider}: {r.passed}/{r.total} passed")
+        for check_name, counts in r.per_evaluator.items():
             print(f"      {check_name}: {counts['passed']}/{counts['passed'] + counts['failed']}")
-        if sub.report_url:
-            print(f"      Portal: {sub.report_url}")
-    if results.all_passed:
+        if r.report_url:
+            print(f"      Portal: {r.report_url}")
+
+    if all(r.all_passed for r in results):
         print("✓ All checks passed (local + Foundry)!")
     else:
-        failed = [n for n, s in results.sub_results.items() if not s.all_passed]
+        failed = [r.provider for r in results if not r.all_passed]
         print(f"✗ Failed providers: {', '.join(failed)}")
 
 
