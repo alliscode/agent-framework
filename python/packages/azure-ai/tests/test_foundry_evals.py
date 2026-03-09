@@ -1700,3 +1700,223 @@ class TestEvaluateWorkflow:
                 assert "builtin.tool_call_accuracy" in eval_names, (
                     "researcher has tools — should get tool_call_accuracy"
                 )
+
+
+# ---------------------------------------------------------------------------
+# EvalItemResult and EvalScoreResult
+# ---------------------------------------------------------------------------
+
+
+class TestEvalItemResult:
+    def test_status_properties(self) -> None:
+        from agent_framework._eval import EvalItemResult
+
+        passed = EvalItemResult(item_id="1", status="pass")
+        assert passed.is_passed
+        assert not passed.is_failed
+        assert not passed.is_error
+
+        failed = EvalItemResult(item_id="2", status="fail")
+        assert not failed.is_passed
+        assert failed.is_failed
+        assert not failed.is_error
+
+        errored = EvalItemResult(item_id="3", status="error")
+        assert not errored.is_passed
+        assert not errored.is_failed
+        assert errored.is_error
+
+        errored2 = EvalItemResult(item_id="4", status="errored")
+        assert errored2.is_error
+
+    def test_with_scores(self) -> None:
+        from agent_framework._eval import EvalItemResult, EvalScoreResult
+
+        scores = [
+            EvalScoreResult(name="relevance", score=0.9, passed=True),
+            EvalScoreResult(name="coherence", score=0.3, passed=False),
+        ]
+        item = EvalItemResult(item_id="1", status="fail", scores=scores)
+        assert len(item.scores) == 2
+        assert item.scores[0].passed is True
+        assert item.scores[1].passed is False
+
+    def test_with_error(self) -> None:
+        from agent_framework._eval import EvalItemResult
+
+        item = EvalItemResult(
+            item_id="1",
+            status="error",
+            error_code="QueryExtractionError",
+            error_message="Query list cannot be empty",
+        )
+        assert item.is_error
+        assert item.error_code == "QueryExtractionError"
+
+    def test_with_token_usage(self) -> None:
+        from agent_framework._eval import EvalItemResult
+
+        item = EvalItemResult(
+            item_id="1",
+            status="pass",
+            token_usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+        )
+        assert item.token_usage is not None
+        assert item.token_usage["total_tokens"] == 150
+
+
+class TestEvalResultsWithItems:
+    def test_item_filter_properties(self) -> None:
+        from agent_framework._eval import EvalItemResult
+
+        results = EvalResults(
+            provider="test",
+            eval_id="e1",
+            run_id="r1",
+            status="completed",
+            result_counts={"passed": 2, "failed": 1, "errored": 1},
+            items=[
+                EvalItemResult(item_id="1", status="pass"),
+                EvalItemResult(item_id="2", status="pass"),
+                EvalItemResult(item_id="3", status="fail"),
+                EvalItemResult(item_id="4", status="error", error_code="QueryExtractionError"),
+            ],
+        )
+        assert len(results.passed_items) == 2
+        assert len(results.failed_items) == 1
+        assert len(results.errored_items) == 1
+        assert results.errored_items[0].error_code == "QueryExtractionError"
+
+    def test_assert_passed_includes_errored_items(self) -> None:
+        from agent_framework._eval import EvalItemResult
+
+        results = EvalResults(
+            provider="test",
+            eval_id="e1",
+            run_id="r1",
+            status="completed",
+            result_counts={"passed": 0, "failed": 0, "errored": 2},
+            items=[
+                EvalItemResult(item_id="i1", status="error", error_code="QueryExtractionError"),
+                EvalItemResult(item_id="i2", status="error", error_code="TimeoutError"),
+            ],
+        )
+        with pytest.raises(AssertionError, match="Errored items: i1: QueryExtractionError"):
+            results.assert_passed()
+
+
+# ---------------------------------------------------------------------------
+# _fetch_output_items
+# ---------------------------------------------------------------------------
+
+
+class TestFetchOutputItems:
+    @pytest.mark.asyncio
+    async def test_fetches_and_converts_output_items(self) -> None:
+        from agent_framework_azure_ai._foundry_evals import _fetch_output_items
+
+        # Build mock output items matching the OpenAI SDK schema
+        mock_result = MagicMock()
+        mock_result.name = "relevance"
+        mock_result.score = 0.85
+        mock_result.passed = True
+        mock_result.sample = None
+
+        mock_usage = MagicMock()
+        mock_usage.prompt_tokens = 100
+        mock_usage.completion_tokens = 50
+        mock_usage.total_tokens = 150
+        mock_usage.cached_tokens = 0
+
+        mock_input = MagicMock()
+        mock_input.role = "user"
+        mock_input.content = "What is the weather?"
+
+        mock_output = MagicMock()
+        mock_output.role = "assistant"
+        mock_output.content = "It is sunny."
+
+        mock_error = MagicMock()
+        mock_error.code = ""
+        mock_error.message = ""
+
+        mock_sample = MagicMock()
+        mock_sample.error = mock_error
+        mock_sample.usage = mock_usage
+        mock_sample.input = [mock_input]
+        mock_sample.output = [mock_output]
+
+        mock_oi = MagicMock()
+        mock_oi.id = "oi_abc123"
+        mock_oi.status = "pass"
+        mock_oi.results = [mock_result]
+        mock_oi.sample = mock_sample
+        mock_oi.datasource_item = {"resp_id": "resp_xyz"}
+
+        mock_client = MagicMock()
+        mock_page = MagicMock()
+        mock_page.__iter__ = MagicMock(return_value=iter([mock_oi]))
+        mock_client.evals.runs.output_items.list = MagicMock(return_value=mock_page)
+
+        items = await _fetch_output_items(mock_client, "eval_1", "run_1")
+
+        assert len(items) == 1
+        item = items[0]
+        assert item.item_id == "oi_abc123"
+        assert item.status == "pass"
+        assert item.is_passed
+        assert len(item.scores) == 1
+        assert item.scores[0].name == "relevance"
+        assert item.scores[0].score == 0.85
+        assert item.scores[0].passed is True
+        assert item.response_id == "resp_xyz"
+        assert item.input_text == "What is the weather?"
+        assert item.output_text == "It is sunny."
+        assert item.token_usage is not None
+        assert item.token_usage["total_tokens"] == 150
+        assert item.error_code is None
+
+    @pytest.mark.asyncio
+    async def test_handles_errored_item(self) -> None:
+        from agent_framework_azure_ai._foundry_evals import _fetch_output_items
+
+        mock_error = MagicMock()
+        mock_error.code = "QueryExtractionError"
+        mock_error.message = "Query list cannot be empty"
+
+        mock_sample = MagicMock()
+        mock_sample.error = mock_error
+        mock_sample.usage = None
+        mock_sample.input = []
+        mock_sample.output = []
+
+        mock_oi = MagicMock()
+        mock_oi.id = "oi_err1"
+        mock_oi.status = "error"
+        mock_oi.results = []
+        mock_oi.sample = mock_sample
+        mock_oi.datasource_item = {}
+
+        mock_client = MagicMock()
+        mock_page = MagicMock()
+        mock_page.__iter__ = MagicMock(return_value=iter([mock_oi]))
+        mock_client.evals.runs.output_items.list = MagicMock(return_value=mock_page)
+
+        items = await _fetch_output_items(mock_client, "eval_1", "run_1")
+
+        assert len(items) == 1
+        item = items[0]
+        assert item.is_error
+        assert item.error_code == "QueryExtractionError"
+        assert item.error_message == "Query list cannot be empty"
+        assert len(item.scores) == 0
+
+    @pytest.mark.asyncio
+    async def test_handles_api_failure_gracefully(self) -> None:
+        from agent_framework_azure_ai._foundry_evals import _fetch_output_items
+
+        mock_client = MagicMock()
+        mock_client.evals.runs.output_items.list = MagicMock(side_effect=Exception("API error"))
+
+        items = await _fetch_output_items(mock_client, "eval_1", "run_1")
+        assert items == []
