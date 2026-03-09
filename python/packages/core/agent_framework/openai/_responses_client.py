@@ -1030,13 +1030,18 @@ class RawOpenAIResponsesClient(  # type: ignore[misc]
                 # OpenAI Responses API requires IDs to start with `fc_`
                 if not fc_id.startswith("fc_"):
                     fc_id = f"fc_{fc_id}"
+                status = (
+                    content.additional_properties.get("status")
+                    if content.additional_properties
+                    else None
+                ) or "completed"
                 return {
                     "call_id": content.call_id,
                     "id": fc_id,
                     "type": "function_call",
                     "name": content.name,
                     "arguments": content.arguments,
-                    "status": None,
+                    "status": status,
                 }
             case "function_result":
                 # call_id for the result needs to be the same as the call_id for the function call
@@ -1262,12 +1267,17 @@ class RawOpenAIResponsesClient(  # type: ignore[misc]
                         )
                     )
                 case "function_call":  # ResponseOutputFunctionCall
+                    fc_props: dict[str, Any] = {}
+                    if hasattr(item, "id"):
+                        fc_props["fc_id"] = item.id
+                    if hasattr(item, "status") and item.status:
+                        fc_props["status"] = item.status
                     contents.append(
                         Content.from_function_call(
                             call_id=item.call_id if hasattr(item, "call_id") and item.call_id else "",
                             name=item.name if hasattr(item, "name") else "",
                             arguments=item.arguments if hasattr(item, "arguments") else "",
-                            additional_properties={"fc_id": item.id} if hasattr(item, "id") else {},
+                            additional_properties=fc_props,
                             raw_representation=item,
                         )
                     )
@@ -1331,7 +1341,10 @@ class RawOpenAIResponsesClient(  # type: ignore[misc]
                     logger.debug("Unparsed output of type: %s: %s", item.type, item)
         response_message = Message(role="assistant", contents=contents)
         args: dict[str, Any] = {
-            "response_id": response.id,
+            # Only expose response_id when the response was stored server-side.
+            # With store=False the API still returns an id, but it's not retrievable,
+            # so downstream consumers (e.g. evals) should not attempt to use it.
+            "response_id": response.id if options.get("store") is not False else None,
             "created_at": datetime.fromtimestamp(response.created_at, tz=timezone.utc).strftime(
                 "%Y-%m-%dT%H:%M:%S.%fZ"
             ),
@@ -1518,16 +1531,16 @@ class RawOpenAIResponsesClient(  # type: ignore[misc]
                 )
                 metadata.update(self._get_metadata_from_response(event))
             case "response.created":
-                response_id = event.response.id
+                response_id = event.response.id if options.get("store") is not False else None
                 conversation_id = self._get_conversation_id(event.response, options.get("store"))
                 if event.response.status and event.response.status in ("in_progress", "queued"):
                     continuation_token = OpenAIContinuationToken(response_id=event.response.id)
             case "response.in_progress":
-                response_id = event.response.id
+                response_id = event.response.id if options.get("store") is not False else None
                 conversation_id = self._get_conversation_id(event.response, options.get("store"))
                 continuation_token = OpenAIContinuationToken(response_id=event.response.id)
             case "response.completed":
-                response_id = event.response.id
+                response_id = event.response.id if options.get("store") is not False else None
                 conversation_id = self._get_conversation_id(event.response, options.get("store"))
                 model = event.response.model
                 if event.response.usage:

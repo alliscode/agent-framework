@@ -70,7 +70,7 @@ async def main():
             "and flight information for the destination the user asks about."
         ),
         tools=[get_weather, get_flight_price],
-        options={"store": False},
+        default_options={"store": False},
     )
 
     planner = Agent(
@@ -80,7 +80,7 @@ async def main():
             "You are a travel planner. Based on the research provided, "
             "create a concise travel recommendation with packing tips."
         ),
-        options={"store": False},
+        default_options={"store": False}
     )
 
     # 3. Build a sequential workflow: researcher → planner

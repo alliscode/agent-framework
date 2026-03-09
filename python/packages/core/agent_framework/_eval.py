@@ -93,6 +93,74 @@ class EvalItem:
 
 
 @dataclass
+class EvalScoreResult:
+    """Result from a single evaluator on a single item.
+
+    Attributes:
+        name: Evaluator name (e.g. ``"relevance"``).
+        score: Numeric score from the evaluator.
+        passed: Whether the item passed this evaluator's threshold.
+        sample: Optional raw evaluator output (rationale, metadata).
+    """
+
+    name: str
+    score: float
+    passed: bool | None = None
+    sample: dict[str, Any] | None = None
+
+
+@dataclass
+class EvalItemResult:
+    """Per-item result from an evaluation run.
+
+    Every competitor framework surfaces per-item detail. This type bridges
+    the gap between run-level summary and the portal, giving programmatic
+    access to individual pass/fail/error status, evaluator scores with
+    rationale, token usage, and error categorization.
+
+    Attributes:
+        item_id: Provider-assigned item identifier.
+        status: ``"pass"``, ``"fail"``, or ``"error"``.
+        scores: Per-evaluator results for this item.
+        error_code: Error category when ``status == "error"``
+            (e.g. ``"QueryExtractionError"``).
+        error_message: Human-readable error detail.
+        response_id: Responses API response ID, if applicable.
+        input_text: The query/input that was evaluated.
+        output_text: The response/output that was evaluated.
+        token_usage: Token counts (``prompt_tokens``,
+            ``completion_tokens``, ``total_tokens``).
+        metadata: Additional provider-specific data.
+    """
+
+    item_id: str
+    status: str
+    scores: list[EvalScoreResult] = field(default_factory=list)
+    error_code: str | None = None
+    error_message: str | None = None
+    response_id: str | None = None
+    input_text: str | None = None
+    output_text: str | None = None
+    token_usage: dict[str, int] | None = None
+    metadata: dict[str, Any] | None = None
+
+    @property
+    def is_error(self) -> bool:
+        """Whether this item errored (infrastructure failure, not quality)."""
+        return self.status in ("error", "errored")
+
+    @property
+    def is_passed(self) -> bool:
+        """Whether this item passed all evaluators."""
+        return self.status == "pass"
+
+    @property
+    def is_failed(self) -> bool:
+        """Whether this item failed at least one evaluator."""
+        return self.status == "fail"
+
+
+@dataclass
 class EvalResults:
     """Results from an evaluation run by a single provider.
 
@@ -100,12 +168,16 @@ class EvalResults:
         provider: Name of the evaluation provider that produced these results.
         eval_id: The evaluation definition ID (provider-specific).
         run_id: The evaluation run ID (provider-specific).
-        status: Run status — ``"completed"``, ``"failed"``, ``"canceled"``,
+        status: Run status - ``"completed"``, ``"failed"``, ``"canceled"``,
             or ``"timeout"`` if polling exceeded the deadline.
         result_counts: Pass/fail/error counts, populated when completed.
         report_url: URL to view results in the provider's portal.
         error: Error details when the run failed.
         per_evaluator: Per-evaluator result counts, keyed by evaluator name.
+        items: Per-item results with individual pass/fail/error status,
+            evaluator scores, error details, and token usage. Populated
+            when the provider supports per-item retrieval (e.g. Foundry
+            ``output_items`` API).
         sub_results: Per-agent breakdown for workflow evaluations, keyed by
             agent/executor name.
 
@@ -115,7 +187,15 @@ class EvalResults:
         for r in results:
             print(f"{r.provider}: {r.passed}/{r.total}")
 
-        # Workflow eval — per-agent breakdown
+            # Per-item detail
+            for item in r.items:
+                print(f"  {item.item_id}: {item.status}")
+                for score in item.scores:
+                    print(f"    {score.name}: {score.score} ({'pass' if score.passed else 'fail'})")
+                if item.is_error:
+                    print(f"    Error: {item.error_code} - {item.error_message}")
+
+        # Workflow eval - per-agent breakdown
         for r in results:
             for name, sub in r.sub_results.items():
                 print(f"  {name}: {sub.passed}/{sub.total}")
@@ -129,6 +209,7 @@ class EvalResults:
     report_url: str | None = None
     error: str | None = None
     per_evaluator: dict[str, dict[str, int]] = field(default_factory=dict)
+    items: list[EvalItemResult] = field(default_factory=list)
     sub_results: dict[str, "EvalResults"] = field(default_factory=dict)
 
     @property
@@ -152,6 +233,21 @@ class EvalResults:
         return self.passed + self.failed + self.errored
 
     @property
+    def passed_items(self) -> list[EvalItemResult]:
+        """Items that passed all evaluators."""
+        return [i for i in self.items if i.is_passed]
+
+    @property
+    def failed_items(self) -> list[EvalItemResult]:
+        """Items that failed at least one evaluator."""
+        return [i for i in self.items if i.is_failed]
+
+    @property
+    def errored_items(self) -> list[EvalItemResult]:
+        """Items that errored (infrastructure failures, not quality)."""
+        return [i for i in self.items if i.is_error]
+
+    @property
     def all_passed(self) -> bool:
         """Whether all results passed with no failures or errors.
 
@@ -162,7 +258,7 @@ class EvalResults:
             return False
         if self.sub_results:
             return all(sub.all_passed for sub in self.sub_results.values())
-        # Leaf result — check own counts
+        # Leaf result - check own counts
         return self.failed == 0 and self.errored == 0 and self.total > 0
 
     def assert_passed(self, msg: str | None = None) -> None:
@@ -180,6 +276,9 @@ class EvalResults:
                 detail += f" See {self.report_url} for details."
             if self.error:
                 detail += f" Error: {self.error}"
+            if self.errored_items:
+                errors = [f"{i.item_id}: {i.error_code or 'unknown'}" for i in self.errored_items[:3]]
+                detail += f" Errored items: {'; '.join(errors)}."
             if self.sub_results:
                 failed = [name for name, sub in self.sub_results.items() if not sub.all_passed]
                 if failed:
@@ -750,12 +849,19 @@ async def evaluate_workflow(
         for ad in all_agent_data:
             agents_by_id.setdefault(ad.executor_id, []).append(ad)
 
-    # Build per-agent items once (shared across providers)
+    # Build per-agent items once (shared across providers).
+    # Clear response_id so per-agent evals always use the dataset path.
+    # The Responses API retrieval path doesn't work for agents whose input
+    # is another agent's full conversation (the evaluator can't extract a
+    # clean user query from the stored response).
     agent_items_by_id: dict[str, list[EvalItem]] = {}
     for executor_id, agent_data_list in agents_by_id.items():
-        agent_items_by_id[executor_id] = [
+        items = [
             converter.to_eval_item(query=ad.query, response=ad.response, agent=ad.agent) for ad in agent_data_list
         ]
+        for item in items:
+            item.response_id = None
+        agent_items_by_id[executor_id] = items
 
     if not agent_items_by_id and not overall_items:
         raise ValueError(

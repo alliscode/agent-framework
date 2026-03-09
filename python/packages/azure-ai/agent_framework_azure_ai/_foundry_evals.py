@@ -27,7 +27,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Sequence
 
-from agent_framework._eval import EvalItem, EvalResults
+from agent_framework._eval import EvalItem, EvalItemResult, EvalResults, EvalScoreResult
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI, OpenAI
@@ -288,6 +288,8 @@ async def _poll_eval_run(
     poll_interval: float = 5.0,
     timeout: float = 600.0,
     provider: str = "Azure AI Foundry",
+    *,
+    fetch_output_items: bool = True,
 ) -> EvalResults:
     """Poll an eval run until completion or timeout."""
     loop = asyncio.get_event_loop()
@@ -304,6 +306,11 @@ async def _poll_eval_run(
                 )
                 if error_msg and not isinstance(error_msg, str):
                     error_msg = str(error_msg)
+
+            items: list[EvalItemResult] = []
+            if fetch_output_items and run.status == "completed":
+                items = await _fetch_output_items(client, eval_id, run_id)
+
             return EvalResults(
                 provider=provider,
                 eval_id=eval_id,
@@ -313,6 +320,7 @@ async def _poll_eval_run(
                 report_url=getattr(run, "report_url", None),
                 error=error_msg,
                 per_evaluator=_extract_per_evaluator(run),
+                items=items,
             )
         remaining = deadline - loop.time()
         if remaining <= 0:
@@ -350,6 +358,111 @@ def _extract_per_evaluator(run: Any) -> dict[str, dict[str, int]]:
     except (TypeError, AttributeError):
         pass
     return per_eval
+
+
+async def _fetch_output_items(
+    client: OpenAI | AsyncOpenAI,
+    eval_id: str,
+    run_id: str,
+) -> list[EvalItemResult]:
+    """Fetch per-item results from the output_items API.
+
+    Converts the provider-specific ``OutputItemListResponse`` objects into
+    provider-agnostic ``EvalItemResult`` instances with per-evaluator scores,
+    error categorization, and token usage.
+    """
+    items: list[EvalItemResult] = []
+    try:
+        output_items_page = await _call_client(
+            client.evals.runs.output_items.list,
+            run_id=run_id,
+            eval_id=eval_id,
+        )
+
+        for oi in output_items_page:
+            item_id = getattr(oi, "id", "") or ""
+            status = getattr(oi, "status", "unknown") or "unknown"
+
+            # Extract per-evaluator scores
+            scores: list[EvalScoreResult] = []
+            for r in getattr(oi, "results", []) or []:
+                scores.append(
+                    EvalScoreResult(
+                        name=getattr(r, "name", "unknown"),
+                        score=getattr(r, "score", 0.0),
+                        passed=getattr(r, "passed", None),
+                        sample=getattr(r, "sample", None),
+                    )
+                )
+
+            # Extract error info from sample
+            error_code: str | None = None
+            error_message: str | None = None
+            token_usage: dict[str, int] | None = None
+            input_text: str | None = None
+            output_text: str | None = None
+            response_id: str | None = None
+
+            sample = getattr(oi, "sample", None)
+            if sample is not None:
+                error = getattr(sample, "error", None)
+                if error is not None:
+                    code = getattr(error, "code", None)
+                    msg = getattr(error, "message", None)
+                    if code or msg:
+                        error_code = code or None
+                        error_message = msg or None
+
+                usage = getattr(sample, "usage", None)
+                if usage is not None:
+                    total = getattr(usage, "total_tokens", 0)
+                    if total:
+                        token_usage = {
+                            "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                            "completion_tokens": getattr(usage, "completion_tokens", 0),
+                            "total_tokens": total,
+                            "cached_tokens": getattr(usage, "cached_tokens", 0),
+                        }
+
+                # Extract input/output text
+                sample_input = getattr(sample, "input", None)
+                if sample_input:
+                    parts = [getattr(si, "content", "") for si in sample_input if getattr(si, "role", "") == "user"]
+                    if parts:
+                        input_text = " ".join(parts)
+
+                sample_output = getattr(sample, "output", None)
+                if sample_output:
+                    parts = [
+                        getattr(so, "content", "") or ""
+                        for so in sample_output
+                        if getattr(so, "role", "") == "assistant"
+                    ]
+                    if parts:
+                        output_text = " ".join(parts)
+
+            # Extract response_id from datasource_item
+            ds_item = getattr(oi, "datasource_item", None)
+            if ds_item and isinstance(ds_item, dict):
+                response_id = ds_item.get("resp_id") or ds_item.get("response_id")
+
+            items.append(
+                EvalItemResult(
+                    item_id=item_id,
+                    status=status,
+                    scores=scores,
+                    error_code=error_code,
+                    error_message=error_message,
+                    response_id=response_id,
+                    input_text=input_text,
+                    output_text=output_text,
+                    token_usage=token_usage,
+                )
+            )
+    except Exception:
+        logger.debug("Could not fetch output_items for run %s", run_id, exc_info=True)
+
+    return items
 
 
 def _resolve_openai_client(
