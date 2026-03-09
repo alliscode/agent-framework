@@ -52,6 +52,7 @@ class EvalItem:
         conversation: Full conversation as typed content messages.
         tool_definitions: Tool definitions if the agent has tools.
         context: Optional grounding context document.
+        expected: Optional expected output for ground-truth comparison.
         response_id: Responses API response ID (for providers that support
             server-side retrieval).
     """
@@ -61,6 +62,7 @@ class EvalItem:
     conversation: list[dict[str, Any]]
     tool_definitions: list[dict[str, Any]] | None = None
     context: str | None = None
+    expected: str | None = None
     response_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:

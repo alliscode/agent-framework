@@ -43,6 +43,8 @@ from ._eval import (
 from ._local_eval import (
     CheckResult,
     LocalEvaluator,
+    async_function_evaluator,
+    function_evaluator,
     keyword_check,
     tool_called_check,
 )
@@ -337,6 +339,7 @@ __all__ = [
     "__version__",
     "add_usage_details",
     "agent_middleware",
+    "async_function_evaluator",
     "chat_middleware",
     "create_edge_runner",
     "detect_media_type_from_base64",
@@ -344,6 +347,7 @@ __all__ = [
     "evaluate_response",
     "evaluate_workflow",
     "executor",
+    "function_evaluator",
     "function_middleware",
     "handler",
     "keyword_check",
