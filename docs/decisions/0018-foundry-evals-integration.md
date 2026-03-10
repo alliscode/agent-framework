@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 contact: bentho
 date: 2026-02-27
 deciders: bentho, markwallace-microsoft, westey-m
@@ -48,21 +48,39 @@ Chosen option: "Evaluator protocol with core orchestration", because it delivers
 
 The evaluation system is split across two layers:
 
-**Core (`agent_framework._eval`)**:
-- `EvalItem` — Provider-agnostic data format for evaluation items
-- `EvalResults` — Universal result type with pass/fail counts, portal links, sub_results
+**Core (`agent_framework._eval`, `agent_framework._local_eval`)**:
+
+*Data types:*
+- `EvalItem` — Provider-agnostic data format for evaluation items (includes `expected` for ground-truth comparison)
+- `EvalResults` — Universal result type with pass/fail counts, portal links, per-item detail, sub_results
+- `EvalItemResult` / `EvalScoreResult` — Per-item results with individual scores, error details, token usage
+
+*Evaluator protocol:*
 - `Evaluator` — Protocol that evaluation providers implement
-- `AgentEvalConverter` — Converts agent-framework types to eval format
-- `evaluate_agent()`, `evaluate_response()`, `evaluate_workflow()` — Orchestration functions that extract data and delegate to evaluators
+- `LocalEvaluator` — Built-in `Evaluator` implementation that runs checks locally without API calls
+
+*Orchestration functions:*
+- `evaluate_agent()`, `evaluate_response()`, `evaluate_workflow()` — Extract data from agents/workflows and delegate to evaluators
+- `AgentEvalConverter` — Converts agent-framework types (`Message`, `Content`, `FunctionTool`) to eval format
+
+*Built-in checks (for use with `LocalEvaluator`):*
+- `keyword_check(*keywords)` — Response must contain specified keywords
+- `tool_called_check(*tool_names)` — Agent must have called specified tools
+
+*Custom function evaluators:*
+- `@function_evaluator` — Decorator to wrap a sync function as an eval check with signature-based parameter injection
+- `@async_function_evaluator` — Same, for async functions (e.g., LLM-as-judge)
 
 **Azure AI Provider (`agent_framework_azure_ai._foundry_evals`)**:
-- `FoundryEvals` — `Evaluator` implementation backed by Azure AI Foundry
-- `Evaluators` — Constants for Foundry built-in evaluator names
-- `evaluate_traces()` — Foundry-specific: evaluate from stored response IDs or OTel traces
-- `evaluate_foundry_target()` — Foundry-specific: evaluate a registered agent or deployment
-- `setup_continuous_eval()` — Foundry-specific: continuous evaluation rules (not yet available)
 
-**Key insight**: The evaluator IS the provider. There is no separate "provider" concept. A `FoundryEvals` instance encapsulates all Foundry connection details (client, model deployment, evaluator selection). It is passed as the `evaluators` parameter to the core orchestration functions.
+*Evaluator implementation:*
+- `FoundryEvals` — `Evaluator` implementation backed by Azure AI Foundry (smart defaults, auto-detection, portal links)
+- `Evaluators` — Constants for Foundry built-in evaluator names (agent behavior, tool usage, quality, safety)
+
+*Foundry-specific functions:*
+- `evaluate_traces()` — Evaluate from stored response IDs or OTel traces
+- `evaluate_foundry_target()` — Evaluate a Foundry-registered agent or deployment
+- `setup_continuous_eval()` — Continuous evaluation rules (not yet available)
 
 ### Consequences
 
@@ -108,7 +126,8 @@ results = await evaluate_agent(
     evaluators=evals,  # smart defaults: relevance, coherence, task_adherence
                        # auto-adds tool_call_accuracy when agent has tools
 )
-results.assert_passed()
+for r in results:
+    r.assert_passed()
 ```
 
 ### Evaluate a response you already have
@@ -146,8 +165,11 @@ eval_results = await evaluate_workflow(
     evaluators=evals,
 )
 
-for name, sub in eval_results.sub_results.items():
-    print(f"  {name}: {sub.passed}/{sub.total}")
+for r in eval_results:
+    print(f"{r.provider}:")
+    print(f"  overall: {r.passed}/{r.total}")
+    for name, sub in r.sub_results.items():
+        print(f"    {name}: {sub.passed}/{sub.total}")
 ```
 
 ### Select specific evaluators
@@ -163,11 +185,17 @@ results = await evaluate_agent(agent=agent, queries=queries, evaluators=quality_
 ### Mix multiple providers
 
 ```python
-from agent_framework import evaluate_agent, LocalEvaluator, keyword_check, tool_called_check
+from agent_framework import evaluate_agent, LocalEvaluator, function_evaluator, keyword_check, tool_called_check
 from agent_framework_azure_ai import FoundryEvals
+
+# Custom function evaluator — just name your parameters
+@function_evaluator
+def is_helpful(response: str) -> bool:
+    return len(response.split()) > 10
 
 # Local checks — instant, no API calls
 local = LocalEvaluator(
+    is_helpful,
     keyword_check("weather"),
     tool_called_check("get_weather"),
 )
@@ -175,7 +203,7 @@ local = LocalEvaluator(
 # Foundry — deep quality assessment via LLM-as-judge
 foundry = FoundryEvals(project_client=client, model_deployment="gpt-4o")
 
-# Both evaluate the same items; results are merged
+# Both evaluate the same items; one EvalResults per provider
 results = await evaluate_agent(
     agent=agent,
     queries=queries,
@@ -242,6 +270,7 @@ class EvalItem:
     conversation: list[dict[str, Any]]         # OpenAI chat format
     tool_definitions: list[dict[str, Any]] | None = None
     context: str | None = None
+    expected: str | None = None                # Ground-truth for comparison
     response_id: str | None = None             # For Responses API providers
 ```
 
@@ -268,9 +297,16 @@ results.passed              # int: passing count
 results.failed              # int: failure count
 results.total               # int: total = passed + failed + errored
 results.per_evaluator       # dict: per-evaluator breakdown
+results.items               # list[EvalItemResult]: per-item scores and errors
 results.error               # str | None: error details on failure
 results.sub_results         # dict: per-agent breakdown (workflow evals)
+results.report_url          # str | None: portal link (Foundry)
 results.assert_passed()     # raises AssertionError with details
+
+# Per-item filtering
+results.passed_items        # list[EvalItemResult]: items that passed
+results.failed_items        # list[EvalItemResult]: items that failed
+results.errored_items       # list[EvalItemResult]: items that errored
 ```
 
 ### Core: Orchestration Functions
@@ -319,23 +355,67 @@ Categories: Agent behavior, Tool usage, Quality, Safety.
 | `evaluate_foundry_target()` | Evaluate a Foundry-registered agent or deployment |
 | `setup_continuous_eval()` | Create evaluation rules (not yet available) |
 
+### Core: LocalEvaluator and Function Evaluators
+
+`LocalEvaluator` implements the `Evaluator` protocol for fast, API-free evaluation. It runs check functions locally — useful for inner-loop development, CI smoke tests, and combining with cloud-based evaluators.
+
+Built-in checks:
+- `keyword_check(*keywords)` — response must contain specified keywords
+- `tool_called_check(*tool_names)` — agent must have called specified tools
+
+Custom function evaluators use `@function_evaluator` to wrap plain Python functions. The function's **parameter names** determine what data it receives from the `EvalItem`:
+
+```python
+from agent_framework import function_evaluator, LocalEvaluator
+
+# Tier 1: Simple check — just query + response
+@function_evaluator
+def is_concise(response: str) -> bool:
+    return len(response.split()) < 500
+
+# Tier 2: Ground truth — compare against expected output
+@function_evaluator
+def mentions_city(response: str, expected: str) -> bool:
+    return expected.lower() in response.lower()
+
+# Tier 3: Full context — inspect conversation and tools
+@function_evaluator
+def used_tools(conversation: list, tool_definitions: list) -> float:
+    # ... scoring logic
+    return score
+
+local = LocalEvaluator(is_concise, mentions_city, used_tools)
+```
+
+Supported parameters: `query`, `response`, `expected`, `conversation`, `tool_definitions`, `context`.
+Return types: `bool`, `float` (≥0.5 = pass), `dict` with `score` or `passed` key, or `CheckResult`.
+
+Async functions use `@async_function_evaluator` for evaluators that need I/O (e.g., LLM-as-judge).
+
 ### Package Location
 
-- Core types and orchestration: `agent_framework._eval` (Python), `Microsoft.Agents.AI.Core` (.NET)
+- Core types and orchestration: `agent_framework._eval`, `agent_framework._local_eval` (Python), `Microsoft.Agents.AI.Core` (.NET)
 - Foundry provider: `agent_framework_azure_ai._foundry_evals` (Python), `Microsoft.Agents.AI.AzureAIFoundry` (.NET)
 - Azure-AI re-exports core types for convenience
 
 ## Known Limitations
 
-1. **Workflow re-run with Responses API**: When using `evaluate_workflow(queries=...)` with Responses API clients, agents must be configured with `options={"store": False}`. Without this, the `AgentExecutor` session retains `previous_response_id` from prior runs, and the Responses API rejects requests that chain across independent conversations.
+1. **Per-agent workflow evals use dataset path**: Workflow sub-agent evaluations always clear `response_id` to force the dataset evaluation path. The Responses API retrieval path doesn't work for agents whose input is another agent's full conversation (the evaluator can't extract a clean user query from the stored response).
 2. **Tool evaluators require query + agent**: Tool evaluators need tool definition schemas, which are not available through Responses API response retrieval. When using these evaluators with `evaluate_response()`, `query=` and `agent=` must be provided.
 3. **`model_deployment` always required**: Could potentially be inferred from the Foundry project configuration.
 
+## Resolved Issues
+
+1. **`options=` vs `default_options=` silent failure** (fixed): `Agent.__init__` now accepts `options=` as an alias for `default_options=`, preventing the common mistake of `Agent(options={"store": False})` silently dropping into `additional_properties`.
+2. **`function_call` status serialization** (fixed): `_parse_response_from_openai` now preserves `status` in `additional_properties`, and serialization reads it back with a fallback to `"completed"`.
+3. **Stale session state** (fixed): `AgentExecutor.reset()` clears `service_session_id`. Workflows call `executor.reset()` on all executors during `reset_for_new_run`.
+4. **`response_id` gated on store** (fixed): `response_id` is only set on `ChatResponse` when `store` is not `False`. This prevents evals from attempting the Responses API path for non-stored responses (which would 404).
+
 ## Open Questions
 
-1. **Local evaluator implementations**: What built-in local evaluators should the core package provide (e.g., keyword match, regex, assertion-based)?
-2. **Red teaming non-registered agents**: Requires Foundry API support for callback-based flows.
-3. **.NET parity timeline**: What is the priority for .NET implementation?
+1. **Red teaming non-registered agents**: Requires Foundry API support for callback-based flows.
+2. **.NET parity timeline**: What is the priority for .NET implementation?
+3. **Datasets with expected outputs**: A dataset abstraction for pre-populating `expected` values across eval runs is a natural next step but not yet designed.
 
 ## More Information
 
