@@ -30,7 +30,6 @@ from ._clients import (
     SupportsWebSearchTool,
 )
 from ._eval import (
-    AgentEvalConverter,
     EvalItem,
     EvalItemResult,
     EvalResults,
@@ -214,7 +213,6 @@ __all__ = [
     "USER_AGENT_TELEMETRY_DISABLED_ENV_VAR",
     "Agent",
     "AgentContext",
-    "AgentEvalConverter",
     "AgentExecutor",
     "AgentExecutorRequest",
     "AgentExecutorResponse",

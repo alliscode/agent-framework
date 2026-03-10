@@ -1767,7 +1767,7 @@ class TestEvalItemResult:
 
 
 class TestEvalResultsWithItems:
-    def test_item_filter_properties(self) -> None:
+    def test_item_status_properties(self) -> None:
         from agent_framework._eval import EvalItemResult
 
         results = EvalResults(
@@ -1783,10 +1783,9 @@ class TestEvalResultsWithItems:
                 EvalItemResult(item_id="4", status="error", error_code="QueryExtractionError"),
             ],
         )
-        assert len(results.passed_items) == 2
-        assert len(results.failed_items) == 1
-        assert len(results.errored_items) == 1
-        assert results.errored_items[0].error_code == "QueryExtractionError"
+        assert sum(1 for i in results.items if i.is_passed) == 2
+        assert sum(1 for i in results.items if i.is_failed) == 1
+        assert sum(1 for i in results.items if i.is_error) == 1
 
     def test_assert_passed_includes_errored_items(self) -> None:
         from agent_framework._eval import EvalItemResult

@@ -4,7 +4,6 @@ import importlib.metadata
 
 # Re-export core eval types for convenience
 from agent_framework._eval import (
-    AgentEvalConverter,
     EvalItem,
     EvalItemResult,
     EvalResults,
@@ -41,7 +40,6 @@ except importlib.metadata.PackageNotFoundError:
     __version__ = "0.0.0"  # Fallback for development mode
 
 __all__ = [
-    "AgentEvalConverter",
     "AzureAIAgentClient",
     "AzureAIAgentOptions",
     "AzureAIAgentsProvider",

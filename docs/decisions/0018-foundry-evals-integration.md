@@ -61,7 +61,7 @@ The evaluation system is split across two layers:
 
 *Orchestration functions:*
 - `evaluate_agent()`, `evaluate_workflow()` — Extract data from agents/workflows and delegate to evaluators
-- `AgentEvalConverter` — Converts agent-framework types (`Message`, `Content`, `FunctionTool`) to eval format
+- Internal `AgentEvalConverter` — Converts agent-framework types (`Message`, `Content`, `FunctionTool`) to eval format
 
 *Built-in checks (for use with `LocalEvaluator`):*
 - `keyword_check(*keywords)` — Response must contain specified keywords
@@ -86,7 +86,7 @@ The evaluation system is split across two layers:
 - Good, because the same `evaluate_agent()` call works with Foundry, local, or third-party evaluators
 - Good, because provider config is set once on the evaluator, not repeated on every function call
 - Good, because mixing providers (e.g., Foundry quality + local keyword match) is natural
-- Good, because `AgentEvalConverter` and data extraction logic are reusable across providers
+- Good, because data extraction logic is reusable across providers
 - Neutral, because it requires core to define the `Evaluator` protocol (lightweight)
 - Bad, because advanced Foundry features (scheduled evals, continuous eval) remain Foundry-specific functions
 
@@ -224,13 +224,12 @@ results = await evaluate_traces(
 ### Direct evaluator access
 
 ```python
-from agent_framework import AgentEvalConverter
+from agent_framework import EvalItem
 from agent_framework_azure_ai import FoundryEvals
 
 evals = FoundryEvals(project_client=client, model_deployment="gpt-4o")
 
-converter = AgentEvalConverter()
-items = [converter.to_eval_item(query=q, response=r, agent=agent) for q, r in pairs]
+items = [EvalItem(query=q, response=r, conversation=[]) for q, r in pairs]
 
 # Call the evaluator directly
 results = await evals.evaluate(items, eval_name="My Custom Eval")
@@ -273,9 +272,9 @@ class EvalItem:
 
 `EvalItem.to_dict()` serializes to flat dict with JSON-encoded strings for `conversation` and `tool_definitions`, suitable for JSONL data sources.
 
-### Core: AgentEvalConverter
+### Internal: AgentEvalConverter
 
-Converts agent-framework types to `EvalItem`. `to_eval_item()` returns `EvalItem` objects (not dicts), making the output strongly typed:
+Internal class that converts agent-framework types to `EvalItem`. Used by `evaluate_agent()` and `evaluate_workflow()` — not part of the public API:
 
 | Agent Framework | Eval Format |
 |---|---|
@@ -299,11 +298,6 @@ results.error               # str | None: error details on failure
 results.sub_results         # dict: per-agent breakdown (workflow evals)
 results.report_url          # str | None: portal link (Foundry)
 results.assert_passed()     # raises AssertionError with details
-
-# Per-item filtering
-results.passed_items        # list[EvalItemResult]: items that passed
-results.failed_items        # list[EvalItemResult]: items that failed
-results.errored_items       # list[EvalItemResult]: items that errored
 ```
 
 ### Core: Orchestration Functions
@@ -312,7 +306,7 @@ Provider-agnostic functions that extract data and delegate to evaluators:
 
 | Function | What it does |
 |---|---|
-| `evaluate_agent()` | Runs agent against test queries (or evaluates pre-existing `responses=`), converts via `AgentEvalConverter`, passes `EvalItem`s to evaluator |
+| `evaluate_agent()` | Runs agent against test queries (or evaluates pre-existing `responses=`), converts to `EvalItem`s, passes to evaluator |
 | `evaluate_workflow()` | Extracts per-agent data from `WorkflowRunResult`, evaluates each agent and overall output. Per-agent breakdown in `sub_results` |
 
 ### Azure AI: FoundryEvals
@@ -522,19 +516,20 @@ public static class AgentEvaluationExtensions
         ChatConfiguration? chatConfiguration = null,
         CancellationToken cancellationToken = default);
 
+    // Evaluate pre-existing responses (without re-running the agent)
+    public static Task<AgentEvaluationResults> EvaluateAsync(
+        this AIAgent agent,
+        AgentResponse responses,
+        IEvaluator evaluator,
+        IEnumerable<string>? queries = null,
+        ChatConfiguration? chatConfiguration = null,
+        CancellationToken cancellationToken = default);
+
     // Evaluate with multiple evaluators (one result per evaluator)
     public static Task<IReadOnlyList<AgentEvaluationResults>> EvaluateAsync(
         this AIAgent agent,
         IEnumerable<string> queries,
         IEnumerable<IEvaluator> evaluators,
-        ChatConfiguration? chatConfiguration = null,
-        CancellationToken cancellationToken = default);
-
-    // Evaluate a completed response
-    public static Task<AgentEvaluationResults> EvaluateAsync(
-        this AgentResponse response,
-        string query,
-        IEvaluator evaluator,
         ChatConfiguration? chatConfiguration = null,
         CancellationToken cancellationToken = default);
 
@@ -566,6 +561,13 @@ var results = await agent.EvaluateAsync(
 
 // Foundry cloud
 var results = await agent.EvaluateAsync(
+    queries: ["What's the weather?"],
+    evaluator: new FoundryEvaluator(projectClient, "gpt-4o"));
+
+// Evaluate existing response (without re-running the agent)
+var response = await agent.RunAsync("What's the weather?");
+var results = await agent.EvaluateAsync(
+    responses: response,
     queries: ["What's the weather?"],
     evaluator: new FoundryEvaluator(projectClient, "gpt-4o"));
 
@@ -639,8 +641,8 @@ public record EvalItem(
 | `@function_evaluator` | `FunctionEvaluator.Create()` overloads |
 | `keyword_check()` / `tool_called_check()` | `EvalChecks.KeywordCheck()` / `EvalChecks.ToolCalledCheck()` |
 | `FoundryEvals` | `FoundryEvaluator` (implements `IEvaluator`) |
-| `evaluate_agent()` | `agent.EvaluateAsync()` extension method |
-| `evaluate_agent(responses=)` | `response.EvaluateAsync()` extension method |
+| `evaluate_agent()` | `agent.EvaluateAsync(queries, evaluator)` extension method |
+| `evaluate_agent(responses=)` | `agent.EvaluateAsync(responses, evaluator)` extension method |
 | `evaluate_workflow()` | `run.EvaluateAsync()` extension method |
 | `AgentEvalConverter` | Internal to extension methods |
 

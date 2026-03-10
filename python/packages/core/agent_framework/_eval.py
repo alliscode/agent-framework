@@ -235,21 +235,6 @@ class EvalResults:
         return self.passed + self.failed + self.errored
 
     @property
-    def passed_items(self) -> list[EvalItemResult]:
-        """Items that passed all evaluators."""
-        return [i for i in self.items if i.is_passed]
-
-    @property
-    def failed_items(self) -> list[EvalItemResult]:
-        """Items that failed at least one evaluator."""
-        return [i for i in self.items if i.is_failed]
-
-    @property
-    def errored_items(self) -> list[EvalItemResult]:
-        """Items that errored (infrastructure failures, not quality)."""
-        return [i for i in self.items if i.is_error]
-
-    @property
     def all_passed(self) -> bool:
         """Whether all results passed with no failures or errors.
 
@@ -278,8 +263,9 @@ class EvalResults:
                 detail += f" See {self.report_url} for details."
             if self.error:
                 detail += f" Error: {self.error}"
-            if self.errored_items:
-                errors = [f"{i.item_id}: {i.error_code or 'unknown'}" for i in self.errored_items[:3]]
+            errored = [i for i in self.items if i.is_error]
+            if errored:
+                errors = [f"{i.item_id}: {i.error_code or 'unknown'}" for i in errored[:3]]
                 detail += f" Errored items: {'; '.join(errors)}."
             if self.sub_results:
                 failed = [name for name, sub in self.sub_results.items() if not sub.all_passed]
