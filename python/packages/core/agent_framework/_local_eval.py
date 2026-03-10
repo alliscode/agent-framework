@@ -236,8 +236,9 @@ def function_evaluator(
 ) -> EvalCheck | Callable[[Callable[..., Any]], EvalCheck]:
     """Wrap a plain function as an ``EvalCheck`` for use with ``LocalEvaluator``.
 
-    The function's parameter names determine what data it receives from the
-    ``EvalItem``.  Any combination of the following parameter names is valid:
+    Works with both sync and async functions.  The function's parameter names
+    determine what data it receives from the ``EvalItem``.  Any combination of
+    the following parameter names is valid:
 
     * ``query`` — the user query (str)
     * ``response`` — the agent response (str)
@@ -264,8 +265,14 @@ def function_evaluator(
         # Direct wrapping
         check = function_evaluator(my_scorer, name="my_scorer")
 
+        # Async function — handled automatically
+        @function_evaluator
+        async def llm_judge(query: str, response: str) -> float:
+            result = await my_llm_client.score(query, response)
+            return result.score
+
         # Use with LocalEvaluator
-        local = LocalEvaluator(mentions_weather, is_not_too_long, check)
+        local = LocalEvaluator(mentions_weather, is_not_too_long, check, llm_judge)
 
     Args:
         fn: The function to wrap.  If omitted, returns a decorator.
@@ -276,20 +283,27 @@ def function_evaluator(
         check_name = name or getattr(func, "__name__", "function_evaluator")
         is_async = inspect.iscoroutinefunction(func)
 
-        def _check(item: EvalItem) -> CheckResult:
-            kwargs = _resolve_function_args(func, item)
-            result = func(**kwargs)
-            if is_async:
-                raise TypeError(
-                    f"Function evaluator '{check_name}' is async. "
-                    "Use @async_function_evaluator instead."
-                )
-            return _coerce_result(result, check_name)
+        if is_async:
 
-        # Preserve metadata for introspection
-        _check.__name__ = check_name  # type: ignore[attr-defined]
-        _check.__doc__ = func.__doc__
-        return _check
+            async def _async_check(item: EvalItem) -> CheckResult:
+                kwargs = _resolve_function_args(func, item)
+                result = await func(**kwargs)
+                return _coerce_result(result, check_name)
+
+            _async_check.__name__ = check_name  # type: ignore[attr-defined]
+            _async_check.__doc__ = func.__doc__
+            _async_check._is_async_check = True  # type: ignore[attr-defined]
+            return _async_check
+        else:
+
+            def _check(item: EvalItem) -> CheckResult:
+                kwargs = _resolve_function_args(func, item)
+                result = func(**kwargs)
+                return _coerce_result(result, check_name)
+
+            _check.__name__ = check_name  # type: ignore[attr-defined]
+            _check.__doc__ = func.__doc__
+            return _check
 
     # Support @function_evaluator (no parens) and @function_evaluator(name="x")
     if fn is not None:
@@ -302,32 +316,8 @@ def async_function_evaluator(
     *,
     name: str | None = None,
 ) -> EvalCheck | Callable[[Callable[..., Any]], EvalCheck]:
-    """Like :func:`function_evaluator` but for ``async`` functions.
-
-    Usage is identical — just use ``async def`` for your evaluator::
-
-        @async_function_evaluator
-        async def llm_judge(query: str, response: str) -> float:
-            result = await my_llm_client.score(query, response)
-            return result.score
-    """
-
-    def _wrap(func: Callable[..., Any]) -> AsyncEvalCheck:
-        check_name = name or getattr(func, "__name__", "async_function_evaluator")
-
-        async def _check(item: EvalItem) -> CheckResult:
-            kwargs = _resolve_function_args(func, item)
-            result = await func(**kwargs)
-            return _coerce_result(result, check_name)
-
-        _check.__name__ = check_name  # type: ignore[attr-defined]
-        _check.__doc__ = func.__doc__
-        _check._is_async_check = True  # type: ignore[attr-defined]
-        return _check
-
-    if fn is not None:
-        return _wrap(fn)
-    return _wrap
+    """Deprecated: use :func:`function_evaluator` which handles async automatically."""
+    return function_evaluator(fn, name=name)
 
 
 class LocalEvaluator:

@@ -68,8 +68,7 @@ The evaluation system is split across two layers:
 - `tool_called_check(*tool_names)` — Agent must have called specified tools
 
 *Custom function evaluators:*
-- `@function_evaluator` — Decorator to wrap a sync function as an eval check with signature-based parameter injection
-- `@async_function_evaluator` — Same, for async functions (e.g., LLM-as-judge)
+- `@function_evaluator` — Decorator to wrap a sync or async function as an eval check with signature-based parameter injection
 
 **Azure AI Provider (`agent_framework_azure_ai._foundry_evals`)**:
 
@@ -390,7 +389,7 @@ local = LocalEvaluator(is_concise, mentions_city, used_tools)
 Supported parameters: `query`, `response`, `expected`, `conversation`, `tool_definitions`, `context`.
 Return types: `bool`, `float` (≥0.5 = pass), `dict` with `score` or `passed` key, or `CheckResult`.
 
-Async functions use `@async_function_evaluator` for evaluators that need I/O (e.g., LLM-as-judge).
+Async functions are handled automatically — `@function_evaluator` detects `async def` and produces the right wrapper.
 
 ### Package Location
 

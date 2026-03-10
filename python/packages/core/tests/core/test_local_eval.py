@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from agent_framework._eval import EvalItem
@@ -304,14 +306,18 @@ class TestErrorHandling:
         result = optional_unknown(_make_item())
         assert result.passed is True
 
-    def test_async_function_in_sync_wrapper_is_rejected(self):
-        """Using an async function with @function_evaluator should raise."""
+    @pytest.mark.asyncio
+    async def test_async_function_works_with_function_evaluator(self):
+        """Using an async function with @function_evaluator should work."""
         @function_evaluator
         async def async_fn(response: str) -> bool:
             return True
 
-        with pytest.raises(TypeError, match="async"):
-            async_fn(_make_item())
+        result = async_fn(_make_item())
+        # Should return an awaitable
+        assert inspect.isawaitable(result)
+        check_result = await result
+        assert check_result.passed is True
 
 
 # ---------------------------------------------------------------------------
