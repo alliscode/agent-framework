@@ -66,7 +66,7 @@ public sealed class EvaluationTests
     // ---------------------------------------------------------------
 
     [Fact]
-    public async Task LocalEvaluator_WithPassingCheck_ReturnsPassedResult()
+    public async Task LocalEvaluator_WithPassingCheck_ReturnsPassedResultAsync()
     {
         // Arrange
         var evaluator = new LocalEvaluator(
@@ -86,7 +86,7 @@ public sealed class EvaluationTests
     }
 
     [Fact]
-    public async Task LocalEvaluator_WithFailingCheck_ReturnsFailedResult()
+    public async Task LocalEvaluator_WithFailingCheck_ReturnsFailedResultAsync()
     {
         // Arrange
         var evaluator = new LocalEvaluator(
@@ -105,7 +105,7 @@ public sealed class EvaluationTests
     }
 
     [Fact]
-    public async Task LocalEvaluator_WithMultipleChecks_AllChecksRun()
+    public async Task LocalEvaluator_WithMultipleChecks_AllChecksRunAsync()
     {
         // Arrange
         var evaluator = new LocalEvaluator(
@@ -127,7 +127,7 @@ public sealed class EvaluationTests
     }
 
     [Fact]
-    public async Task LocalEvaluator_WithMultipleItems_EvaluatesAll()
+    public async Task LocalEvaluator_WithMultipleItems_EvaluatesAllAsync()
     {
         // Arrange
         var evaluator = new LocalEvaluator(
@@ -153,7 +153,7 @@ public sealed class EvaluationTests
     // ---------------------------------------------------------------
 
     [Fact]
-    public async Task FunctionEvaluator_ResponseOnly_PassesResponse()
+    public async Task FunctionEvaluator_ResponseOnly_PassesResponseAsync()
     {
         // Arrange
         var check = FunctionEvaluator.Create("length_check",
@@ -170,7 +170,7 @@ public sealed class EvaluationTests
     }
 
     [Fact]
-    public async Task FunctionEvaluator_WithExpected_PassesExpected()
+    public async Task FunctionEvaluator_WithExpected_PassesExpectedAsync()
     {
         // Arrange
         var check = FunctionEvaluator.Create("contains_expected",
@@ -190,7 +190,7 @@ public sealed class EvaluationTests
     }
 
     [Fact]
-    public async Task FunctionEvaluator_FullItem_AccessesAllFields()
+    public async Task FunctionEvaluator_FullItem_AccessesAllFieldsAsync()
     {
         // Arrange
         var check = FunctionEvaluator.Create("full_check",
@@ -208,7 +208,7 @@ public sealed class EvaluationTests
     }
 
     [Fact]
-    public async Task FunctionEvaluator_WithCheckResult_ReturnsCustomReason()
+    public async Task FunctionEvaluator_WithCheckResult_ReturnsCustomReasonAsync()
     {
         // Arrange
         var check = FunctionEvaluator.Create("custom_check",
@@ -231,7 +231,7 @@ public sealed class EvaluationTests
     // ---------------------------------------------------------------
 
     [Fact]
-    public async Task KeywordCheck_AllKeywordsPresent_Passes()
+    public async Task KeywordCheck_AllKeywordsPresent_PassesAsync()
     {
         // Arrange
         var evaluator = new LocalEvaluator(
@@ -247,7 +247,7 @@ public sealed class EvaluationTests
     }
 
     [Fact]
-    public async Task KeywordCheck_MissingKeyword_Fails()
+    public async Task KeywordCheck_MissingKeyword_FailsAsync()
     {
         // Arrange
         var evaluator = new LocalEvaluator(
@@ -263,7 +263,7 @@ public sealed class EvaluationTests
     }
 
     [Fact]
-    public async Task KeywordCheck_CaseInsensitiveByDefault_Passes()
+    public async Task KeywordCheck_CaseInsensitiveByDefault_PassesAsync()
     {
         // Arrange
         var evaluator = new LocalEvaluator(
@@ -279,7 +279,7 @@ public sealed class EvaluationTests
     }
 
     [Fact]
-    public async Task KeywordCheck_CaseSensitive_FailsOnWrongCase()
+    public async Task KeywordCheck_CaseSensitive_FailsOnWrongCaseAsync()
     {
         // Arrange
         var evaluator = new LocalEvaluator(
@@ -295,7 +295,7 @@ public sealed class EvaluationTests
     }
 
     [Fact]
-    public async Task ToolCalledCheck_ToolPresent_Passes()
+    public async Task ToolCalledCheck_ToolPresent_PassesAsync()
     {
         // Arrange
         var conversation = new List<ChatMessage>
@@ -324,7 +324,7 @@ public sealed class EvaluationTests
     }
 
     [Fact]
-    public async Task ToolCalledCheck_ToolMissing_Fails()
+    public async Task ToolCalledCheck_ToolMissing_FailsAsync()
     {
         // Arrange
         var evaluator = new LocalEvaluator(
@@ -501,7 +501,7 @@ public sealed class EvaluationTests
     // ---------------------------------------------------------------
 
     [Fact]
-    public async Task LocalEvaluator_MixedChecks_ReportsCorrectCounts()
+    public async Task LocalEvaluator_MixedChecks_ReportsCorrectCountsAsync()
     {
         // Arrange
         var evaluator = new LocalEvaluator(

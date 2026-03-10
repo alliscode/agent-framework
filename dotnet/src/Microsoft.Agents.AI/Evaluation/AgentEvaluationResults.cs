@@ -21,8 +21,8 @@ public sealed class AgentEvaluationResults
     /// <param name="items">Per-item MEAI evaluation results.</param>
     public AgentEvaluationResults(string provider, IEnumerable<EvaluationResult> items)
     {
-        Provider = provider;
-        _items = new List<EvaluationResult>(items);
+        this.Provider = provider;
+        this._items = new List<EvaluationResult>(items);
     }
 
     /// <summary>Gets the evaluation provider name.</summary>
@@ -32,31 +32,31 @@ public sealed class AgentEvaluationResults
     public Uri? ReportUrl { get; set; }
 
     /// <summary>Gets the per-item MEAI evaluation results.</summary>
-    public IReadOnlyList<EvaluationResult> Items => _items;
+    public IReadOnlyList<EvaluationResult> Items => this._items;
 
     /// <summary>Gets per-agent results for workflow evaluations.</summary>
     public IReadOnlyDictionary<string, AgentEvaluationResults>? SubResults { get; set; }
 
     /// <summary>Gets the number of items that passed.</summary>
-    public int Passed => _items.Count(ItemPassed);
+    public int Passed => this._items.Count(ItemPassed);
 
     /// <summary>Gets the number of items that failed.</summary>
-    public int Failed => _items.Count(i => !ItemPassed(i));
+    public int Failed => this._items.Count(i => !ItemPassed(i));
 
     /// <summary>Gets the total number of items evaluated.</summary>
-    public int Total => _items.Count;
+    public int Total => this._items.Count;
 
     /// <summary>Gets whether all items passed.</summary>
     public bool AllPassed
     {
         get
         {
-            if (SubResults is not null)
+            if (this.SubResults is not null)
             {
-                return SubResults.Values.All(s => s.AllPassed);
+                return this.SubResults.Values.All(s => s.AllPassed);
             }
 
-            return Total > 0 && Failed == 0;
+            return this.Total > 0 && this.Failed == 0;
         }
     }
 
@@ -67,17 +67,17 @@ public sealed class AgentEvaluationResults
     /// <exception cref="InvalidOperationException">Thrown when any items failed.</exception>
     public void AssertAllPassed(string? message = null)
     {
-        if (!AllPassed)
+        if (!this.AllPassed)
         {
-            var detail = message ?? $"{Provider}: {Passed} passed, {Failed} failed out of {Total}.";
-            if (ReportUrl is not null)
+            var detail = message ?? $"{this.Provider}: {this.Passed} passed, {this.Failed} failed out of {this.Total}.";
+            if (this.ReportUrl is not null)
             {
-                detail += $" See {ReportUrl} for details.";
+                detail += $" See {this.ReportUrl} for details.";
             }
 
-            if (SubResults is not null)
+            if (this.SubResults is not null)
             {
-                var failedAgents = SubResults
+                var failedAgents = this.SubResults
                     .Where(kvp => !kvp.Value.AllPassed)
                     .Select(kvp => kvp.Key);
                 detail += $" Failed agents: {string.Join(", ", failedAgents)}.";

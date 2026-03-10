@@ -20,7 +20,7 @@ public sealed class LocalEvaluator : IAgentEvaluator
     /// <param name="checks">The check functions to run on each item.</param>
     public LocalEvaluator(params EvalCheck[] checks)
     {
-        _checks = checks;
+        this._checks = checks;
     }
 
     /// <inheritdoc />
@@ -40,7 +40,7 @@ public sealed class LocalEvaluator : IAgentEvaluator
 
             var evalResult = new EvaluationResult();
 
-            foreach (var check in _checks)
+            foreach (var check in this._checks)
             {
                 var checkResult = check(item);
                 evalResult.Metrics[checkResult.CheckName] = new BooleanMetric(
@@ -61,6 +61,6 @@ public sealed class LocalEvaluator : IAgentEvaluator
             results.Add(evalResult);
         }
 
-        return Task.FromResult(new AgentEvaluationResults(Name, results));
+        return Task.FromResult(new AgentEvaluationResults(this.Name, results));
     }
 }

@@ -25,12 +25,12 @@ public sealed class MeaiEvaluatorAdapter : IAgentEvaluator
     /// <param name="chatConfiguration">Chat configuration for the evaluator (includes the judge model).</param>
     public MeaiEvaluatorAdapter(IEvaluator evaluator, ChatConfiguration chatConfiguration)
     {
-        _evaluator = evaluator;
-        _chatConfiguration = chatConfiguration;
+        this._evaluator = evaluator;
+        this._chatConfiguration = chatConfiguration;
     }
 
     /// <inheritdoc />
-    public string Name => _evaluator.GetType().Name;
+    public string Name => this._evaluator.GetType().Name;
 
     /// <inheritdoc />
     public async Task<AgentEvaluationResults> EvaluateAsync(
@@ -48,15 +48,15 @@ public sealed class MeaiEvaluatorAdapter : IAgentEvaluator
             var chatResponse = item.RawResponse
                 ?? new ChatResponse(new ChatMessage(ChatRole.Assistant, item.Response));
 
-            var result = await _evaluator.EvaluateAsync(
+            var result = await this._evaluator.EvaluateAsync(
                 messages,
                 chatResponse,
-                _chatConfiguration,
+                this._chatConfiguration,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 
             results.Add(result);
         }
 
-        return new AgentEvaluationResults(Name, results);
+        return new AgentEvaluationResults(this.Name, results);
     }
 }

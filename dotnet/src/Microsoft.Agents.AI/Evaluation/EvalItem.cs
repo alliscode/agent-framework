@@ -19,9 +19,9 @@ public sealed class EvalItem
     /// <param name="conversation">The full conversation as <see cref="ChatMessage"/> list.</param>
     public EvalItem(string query, string response, IReadOnlyList<ChatMessage> conversation)
     {
-        Query = query;
-        Response = response;
-        Conversation = conversation;
+        this.Query = query;
+        this.Response = response;
+        this.Conversation = conversation;
     }
 
     /// <summary>Gets the user query.</summary>

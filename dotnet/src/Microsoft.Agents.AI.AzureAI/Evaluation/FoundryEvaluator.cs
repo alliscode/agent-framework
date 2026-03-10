@@ -31,8 +31,8 @@ public sealed class FoundryEvaluator : IAgentEvaluator
     /// </param>
     public FoundryEvaluator(ChatConfiguration chatConfiguration, params string[] evaluators)
     {
-        _chatConfiguration = chatConfiguration;
-        _evaluatorNames = evaluators.Length > 0
+        this._chatConfiguration = chatConfiguration;
+        this._evaluatorNames = evaluators.Length > 0
             ? evaluators
             : [Evaluators.Relevance, Evaluators.Coherence];
     }
@@ -46,7 +46,7 @@ public sealed class FoundryEvaluator : IAgentEvaluator
         string evalName = "Foundry Eval",
         CancellationToken cancellationToken = default)
     {
-        var meaiEvaluators = BuildEvaluators(_evaluatorNames);
+        var meaiEvaluators = BuildEvaluators(this._evaluatorNames);
         var composite = new CompositeEvaluator(meaiEvaluators.ToArray());
 
         var results = new List<EvaluationResult>(items.Count);
@@ -69,14 +69,14 @@ public sealed class FoundryEvaluator : IAgentEvaluator
             var result = await composite.EvaluateAsync(
                 messages,
                 chatResponse,
-                _chatConfiguration,
+                this._chatConfiguration,
                 additionalContext: additionalContext.Count > 0 ? additionalContext : null,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 
             results.Add(result);
         }
 
-        return new AgentEvaluationResults(Name, results);
+        return new AgentEvaluationResults(this.Name, results);
     }
 
     private static List<IEvaluator> BuildEvaluators(string[] names)
@@ -87,9 +87,9 @@ public sealed class FoundryEvaluator : IAgentEvaluator
         {
             var evaluator = name switch
             {
-                Evaluators.Relevance => (IEvaluator)new RelevanceEvaluator(),
-                Evaluators.Coherence => (IEvaluator)new CoherenceEvaluator(),
-                Evaluators.Groundedness => (IEvaluator)new GroundednessEvaluator(),
+                Evaluators.Relevance => new RelevanceEvaluator(),
+                Evaluators.Coherence => new CoherenceEvaluator(),
+                Evaluators.Groundedness => new GroundednessEvaluator(),
                 Evaluators.Fluency => (IEvaluator)new FluencyEvaluator(),
 
                 // Safety evaluators
