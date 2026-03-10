@@ -32,15 +32,15 @@ var toolCheck = EvalChecks.ToolCalledCheck("tool_name");
 // Local evaluator runs checks without API calls
 var local = new LocalEvaluator(check, keyword, toolCheck);
 
-// MEAI adapter wraps standard MEAI evaluators
-var meai = new MeaiEvaluatorAdapter(new RelevanceEvaluator(), chatConfig);
+// MEAI evaluators work directly — no adapter needed
+var results = await agent.EvaluateAsync(queries, new RelevanceEvaluator(), chatConfig);
 
 // Foundry evaluator uses Azure AI Foundry cloud evaluation
 var foundry = new FoundryEvaluator(chatConfig, Evaluators.Relevance, Evaluators.Coherence);
 
 // Evaluate an agent
-AgentEvaluationResults results = await agent.EvaluateAsync(queries, local);
-results.AssertAllPassed();
+AgentEvaluationResults localResults = await agent.EvaluateAsync(queries, local);
+localResults.AssertAllPassed();
 ```
 
 ## Running

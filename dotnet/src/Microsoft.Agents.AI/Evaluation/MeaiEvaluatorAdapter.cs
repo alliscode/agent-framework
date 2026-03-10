@@ -13,7 +13,7 @@ namespace Microsoft.Agents.AI;
 /// Adapter that wraps an MEAI <see cref="IEvaluator"/> into an <see cref="IAgentEvaluator"/>.
 /// Runs the MEAI evaluator per-item and aggregates results.
 /// </summary>
-public sealed class MeaiEvaluatorAdapter : IAgentEvaluator
+internal sealed class MeaiEvaluatorAdapter : IAgentEvaluator
 {
     private readonly IEvaluator _evaluator;
     private readonly ChatConfiguration _chatConfiguration;

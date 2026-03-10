@@ -108,15 +108,13 @@ try
     Console.WriteLine("SECTION 3: MEAI Quality Evaluators");
     Console.WriteLine(new string('-', 60));
 
-    var meaiEvaluator = new MeaiEvaluatorAdapter(
+    // Pass MEAI evaluators directly — no adapter needed
+    AgentEvaluationResults meaiResults = await agent.EvaluateAsync(
+        queries,
         new CompositeEvaluator(
             new RelevanceEvaluator(),
             new CoherenceEvaluator()),
         chatConfiguration);
-
-    AgentEvaluationResults meaiResults = await agent.EvaluateAsync(
-        queries,
-        meaiEvaluator);
 
     PrintResults("MEAI Quality", meaiResults);
 
