@@ -7,4 +7,4 @@ namespace Microsoft.Agents.AI;
 /// </summary>
 /// <param name="item">The evaluation item.</param>
 /// <returns>The check result.</returns>
-public delegate CheckResult EvalCheck(EvalItem item);
+public delegate EvalCheckResult EvalCheck(EvalItem item);

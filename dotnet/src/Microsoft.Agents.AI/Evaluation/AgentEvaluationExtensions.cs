@@ -6,7 +6,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.AI.Evaluation;
 
 namespace Microsoft.Agents.AI;
 

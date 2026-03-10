@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
 // This sample demonstrates all evaluation patterns available in Agent Framework for .NET.
 // It covers:
@@ -195,7 +195,7 @@ try
         new LocalEvaluator(
             EvalChecks.KeywordCheck("weather"),
             FunctionEvaluator.Create("response_quality",
-                (EvalItem item) => new CheckResult(
+                (EvalItem item) => new EvalCheckResult(
                     item.Response.Length > 20,
                     item.Response.Length > 20
                         ? "Response is detailed enough"

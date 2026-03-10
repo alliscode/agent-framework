@@ -19,7 +19,7 @@ public static class FunctionEvaluator
         return (EvalItem item) =>
         {
             var passed = check(item.Response);
-            return new CheckResult(passed, passed ? "Passed" : "Failed", name);
+            return new EvalCheckResult(passed, passed ? "Passed" : "Failed", name);
         };
     }
 
@@ -33,7 +33,7 @@ public static class FunctionEvaluator
         return (EvalItem item) =>
         {
             var passed = check(item.Response, item.Expected);
-            return new CheckResult(passed, passed ? "Passed" : "Failed", name);
+            return new EvalCheckResult(passed, passed ? "Passed" : "Failed", name);
         };
     }
 
@@ -47,17 +47,17 @@ public static class FunctionEvaluator
         return (EvalItem item) =>
         {
             var passed = check(item);
-            return new CheckResult(passed, passed ? "Passed" : "Failed", name);
+            return new EvalCheckResult(passed, passed ? "Passed" : "Failed", name);
         };
     }
 
     /// <summary>
     /// Creates a check from a function that takes the full <see cref="EvalItem"/>
-    /// and returns a <see cref="CheckResult"/>.
+    /// and returns a <see cref="EvalCheckResult"/>.
     /// </summary>
     /// <param name="name">Check name (used as fallback if the result has no name).</param>
     /// <param name="check">Function that returns a full check result.</param>
-    public static EvalCheck Create(string name, Func<EvalItem, CheckResult> check)
+    public static EvalCheck Create(string name, Func<EvalItem, EvalCheckResult> check)
     {
         return (EvalItem item) =>
         {

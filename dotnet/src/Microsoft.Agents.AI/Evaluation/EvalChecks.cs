@@ -45,7 +45,7 @@ public static class EvalChecks
                 ? $"All keywords found: {string.Join(", ", keywords)}"
                 : $"Missing keywords: {string.Join(", ", missing)}";
 
-            return new CheckResult(passed, reason, "keyword_check");
+            return new EvalCheckResult(passed, reason, "keyword_check");
         };
     }
 
@@ -80,7 +80,7 @@ public static class EvalChecks
                 ? $"All tools called: {string.Join(", ", toolNames)}"
                 : $"Missing tool calls: {string.Join(", ", missing)}";
 
-            return new CheckResult(passed, reason, "tool_called_check");
+            return new EvalCheckResult(passed, reason, "tool_called_check");
         };
     }
 }

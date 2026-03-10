@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.AI.Evaluation;
-using Xunit;
 
 namespace Microsoft.Agents.AI.UnitTests;
 
@@ -212,7 +211,7 @@ public sealed class EvaluationTests
     {
         // Arrange
         var check = FunctionEvaluator.Create("custom_check",
-            (EvalItem item) => new CheckResult(true, "Custom reason", "custom_check"));
+            (EvalItem item) => new EvalCheckResult(true, "Custom reason", "custom_check"));
 
         var evaluator = new LocalEvaluator(check);
         var items = new List<EvalItem> { CreateItem() };

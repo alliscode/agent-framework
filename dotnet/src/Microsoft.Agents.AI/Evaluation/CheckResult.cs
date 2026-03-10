@@ -8,4 +8,4 @@ namespace Microsoft.Agents.AI;
 /// <param name="Passed">Whether the check passed.</param>
 /// <param name="Reason">Human-readable explanation.</param>
 /// <param name="CheckName">Name of the check that produced this result.</param>
-public sealed record CheckResult(bool Passed, string Reason, string CheckName);
+public sealed record EvalCheckResult(bool Passed, string Reason, string CheckName);
