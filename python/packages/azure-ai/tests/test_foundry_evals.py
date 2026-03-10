@@ -450,12 +450,13 @@ class TestFoundryEvals:
         fe = FoundryEvals(openai_client=MagicMock(), model_deployment="gpt-4o")
         assert fe.name == "Azure AI Foundry"
 
-    def test_select_returns_new_instance(self) -> None:
-        fe = FoundryEvals(openai_client=MagicMock(), model_deployment="gpt-4o")
-        selected = fe.select("relevance", "coherence")
-        assert isinstance(selected, FoundryEvals)
-        assert selected is not fe
-        assert selected._evaluators == ["relevance", "coherence"]
+    def test_evaluators_passed_in_constructor(self) -> None:
+        fe = FoundryEvals(
+            openai_client=MagicMock(),
+            model_deployment="gpt-4o",
+            evaluators=["relevance", "coherence"],
+        )
+        assert fe._evaluators == ["relevance", "coherence"]
 
     @pytest.mark.asyncio
     async def test_evaluate_calls_evals_api(self) -> None:

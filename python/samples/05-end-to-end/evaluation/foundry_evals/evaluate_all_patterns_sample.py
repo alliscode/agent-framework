@@ -293,9 +293,14 @@ async def demo_foundry_response(project_client, deployment):
     print(f"  Agent said: {response.text[:80]}...")
 
     # Then evaluate the response
+    quality_evals = FoundryEvals(
+        project_client=project_client,
+        model_deployment=deployment,
+        evaluators=[Evaluators.RELEVANCE, Evaluators.COHERENCE],
+    )
     results = await evaluate_response(
         response=response,
-        evaluators=evals.select(Evaluators.RELEVANCE, Evaluators.COHERENCE),
+        evaluators=quality_evals,
     )
 
     for r in results:
@@ -330,17 +335,21 @@ async def demo_foundry_select(project_client, deployment):
     print("═" * 60)
 
     agent = create_agent(project_client, deployment)
-    evals = FoundryEvals(project_client=project_client, model_deployment=deployment)
 
     # Pick exactly which evaluators to run
-    results = await evaluate_agent(
-        agent=agent,
-        queries=["What's the weather in Seattle?"],
-        evaluators=evals.select(
+    evals = FoundryEvals(
+        project_client=project_client,
+        model_deployment=deployment,
+        evaluators=[
             Evaluators.RELEVANCE,
             Evaluators.TASK_ADHERENCE,
             Evaluators.TOOL_CALL_ACCURACY,
-        ),
+        ],
+    )
+    results = await evaluate_agent(
+        agent=agent,
+        queries=["What's the weather in Seattle?"],
+        evaluators=evals,
     )
 
     for r in results:

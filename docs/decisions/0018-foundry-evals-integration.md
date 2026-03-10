@@ -174,11 +174,12 @@ for r in eval_results:
 ### Select specific evaluators
 
 ```python
-evals = FoundryEvals(project_client=client, model_deployment="gpt-4o")
-
-# Use select() to pick specific evaluators
-quality_only = evals.select("relevance", "coherence")
-results = await evaluate_agent(agent=agent, queries=queries, evaluators=quality_only)
+evals = FoundryEvals(
+    project_client=client,
+    model_deployment="gpt-4o",
+    evaluators=["relevance", "coherence"],
+)
+results = await evaluate_agent(agent=agent, queries=queries, evaluators=evals)
 ```
 
 ### Mix multiple providers
@@ -255,7 +256,7 @@ class Evaluator(Protocol):
     ) -> EvalResults: ...
 ```
 
-The protocol is minimal — just `name` and `evaluate()`. Providers are free to add methods like `select()`, but the core only needs this interface.
+The protocol is minimal — just `name` and `evaluate()`.
 
 ### Core: EvalItem
 
@@ -326,7 +327,6 @@ Provider-agnostic functions that extract data and delegate to evaluators:
 class FoundryEvals:
     def __init__(self, *, project_client=None, openai_client=None,
                  model_deployment: str, evaluators=None, ...)
-    def select(self, *evaluators: str) -> FoundryEvals
     async def evaluate(self, items, *, eval_name) -> EvalResults
 ```
 

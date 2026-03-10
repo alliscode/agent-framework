@@ -501,7 +501,7 @@ class FoundryEvals:
 
     By default, runs ``relevance``, ``coherence``, and ``task_adherence``.
     Automatically adds ``tool_call_accuracy`` when items contain tool
-    definitions. Override with ``evaluators=`` or ``select()``.
+    definitions. Override with ``evaluators=``.
 
     **Responses API optimization:**
 
@@ -539,22 +539,6 @@ class FoundryEvals:
     def name(self) -> str:
         """Human-readable name of this evaluator."""
         return "Azure AI Foundry"
-
-    def select(self, *evaluators: str) -> FoundryEvals:
-        """Return a new ``FoundryEvals`` with specific evaluators selected.
-
-        Example::
-
-            evals = FoundryEvals(project_client=client, model_deployment="gpt-4o")
-            quality_only = evals.select("relevance", "coherence")
-        """
-        return FoundryEvals(
-            openai_client=self._client,
-            model_deployment=self._model_deployment,
-            evaluators=list(evaluators),
-            poll_interval=self._poll_interval,
-            timeout=self._timeout,
-        )
 
     async def evaluate(
         self,
