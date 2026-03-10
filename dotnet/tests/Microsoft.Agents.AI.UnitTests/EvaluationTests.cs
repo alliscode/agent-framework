@@ -1,0 +1,525 @@
+﻿// Copyright (c) Microsoft. All rights reserved.
+
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.AI.Evaluation;
+using Xunit;
+
+namespace Microsoft.Agents.AI.UnitTests;
+
+/// <summary>
+/// Tests for the evaluation types: <see cref="LocalEvaluator"/>, <see cref="FunctionEvaluator"/>,
+/// <see cref="EvalChecks"/>, and <see cref="AgentEvaluationResults"/>.
+/// </summary>
+public sealed class EvaluationTests
+{
+    private static EvalItem CreateItem(
+        string query = "What is the weather?",
+        string response = "The weather in Seattle is sunny and 72°F.",
+        IReadOnlyList<ChatMessage>? conversation = null)
+    {
+        conversation ??= new List<ChatMessage>
+        {
+            new(ChatRole.User, query),
+            new(ChatRole.Assistant, response),
+        };
+
+        return new EvalItem(query, response, conversation);
+    }
+
+    // ---------------------------------------------------------------
+    // EvalItem tests
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public void EvalItem_Constructor_SetsProperties()
+    {
+        // Arrange & Act
+        var item = CreateItem();
+
+        // Assert
+        Assert.Equal("What is the weather?", item.Query);
+        Assert.Equal("The weather in Seattle is sunny and 72°F.", item.Response);
+        Assert.Equal(2, item.Conversation.Count);
+        Assert.Null(item.Expected);
+        Assert.Null(item.Context);
+        Assert.Null(item.Tools);
+    }
+
+    [Fact]
+    public void EvalItem_OptionalProperties_CanBeSet()
+    {
+        // Arrange & Act
+        var item = CreateItem();
+        item.Expected = "sunny";
+        item.Context = "Weather data for Seattle";
+
+        // Assert
+        Assert.Equal("sunny", item.Expected);
+        Assert.Equal("Weather data for Seattle", item.Context);
+    }
+
+    // ---------------------------------------------------------------
+    // LocalEvaluator tests
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public async Task LocalEvaluator_WithPassingCheck_ReturnsPassedResult()
+    {
+        // Arrange
+        var evaluator = new LocalEvaluator(
+            FunctionEvaluator.Create("always_pass", (string _) => true));
+
+        var items = new List<EvalItem> { CreateItem() };
+
+        // Act
+        var results = await evaluator.EvaluateAsync(items);
+
+        // Assert
+        Assert.Equal("LocalEvaluator", results.Provider);
+        Assert.Equal(1, results.Total);
+        Assert.Equal(1, results.Passed);
+        Assert.Equal(0, results.Failed);
+        Assert.True(results.AllPassed);
+    }
+
+    [Fact]
+    public async Task LocalEvaluator_WithFailingCheck_ReturnsFailedResult()
+    {
+        // Arrange
+        var evaluator = new LocalEvaluator(
+            FunctionEvaluator.Create("always_fail", (string _) => false));
+
+        var items = new List<EvalItem> { CreateItem() };
+
+        // Act
+        var results = await evaluator.EvaluateAsync(items);
+
+        // Assert
+        Assert.Equal(1, results.Total);
+        Assert.Equal(0, results.Passed);
+        Assert.Equal(1, results.Failed);
+        Assert.False(results.AllPassed);
+    }
+
+    [Fact]
+    public async Task LocalEvaluator_WithMultipleChecks_AllChecksRun()
+    {
+        // Arrange
+        var evaluator = new LocalEvaluator(
+            FunctionEvaluator.Create("check1", (string _) => true),
+            FunctionEvaluator.Create("check2", (string _) => true));
+
+        var items = new List<EvalItem> { CreateItem() };
+
+        // Act
+        var results = await evaluator.EvaluateAsync(items);
+
+        // Assert
+        Assert.Equal(1, results.Total);
+        Assert.True(results.AllPassed);
+        var itemResult = results.Items[0];
+        Assert.Equal(2, itemResult.Metrics.Count);
+        Assert.True(itemResult.Metrics.ContainsKey("check1"));
+        Assert.True(itemResult.Metrics.ContainsKey("check2"));
+    }
+
+    [Fact]
+    public async Task LocalEvaluator_WithMultipleItems_EvaluatesAll()
+    {
+        // Arrange
+        var evaluator = new LocalEvaluator(
+            EvalChecks.KeywordCheck("weather"));
+
+        var items = new List<EvalItem>
+        {
+            CreateItem(response: "The weather is sunny."),
+            CreateItem(response: "I don't know about that topic."),
+        };
+
+        // Act
+        var results = await evaluator.EvaluateAsync(items);
+
+        // Assert
+        Assert.Equal(2, results.Total);
+        Assert.Equal(1, results.Passed);
+        Assert.Equal(1, results.Failed);
+    }
+
+    // ---------------------------------------------------------------
+    // FunctionEvaluator tests
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public async Task FunctionEvaluator_ResponseOnly_PassesResponse()
+    {
+        // Arrange
+        var check = FunctionEvaluator.Create("length_check",
+            (string response) => response.Length > 10);
+
+        var evaluator = new LocalEvaluator(check);
+        var items = new List<EvalItem> { CreateItem() };
+
+        // Act
+        var results = await evaluator.EvaluateAsync(items);
+
+        // Assert
+        Assert.True(results.AllPassed);
+    }
+
+    [Fact]
+    public async Task FunctionEvaluator_WithExpected_PassesExpected()
+    {
+        // Arrange
+        var check = FunctionEvaluator.Create("contains_expected",
+            (string response, string? expected) =>
+                expected != null && response.Contains(expected, StringComparison.OrdinalIgnoreCase));
+
+        var evaluator = new LocalEvaluator(check);
+        var item = CreateItem();
+        item.Expected = "sunny";
+        var items = new List<EvalItem> { item };
+
+        // Act
+        var results = await evaluator.EvaluateAsync(items);
+
+        // Assert
+        Assert.True(results.AllPassed);
+    }
+
+    [Fact]
+    public async Task FunctionEvaluator_FullItem_AccessesAllFields()
+    {
+        // Arrange
+        var check = FunctionEvaluator.Create("full_check",
+            (EvalItem item) => item.Query.Contains("weather", StringComparison.OrdinalIgnoreCase)
+                && item.Response.Length > 0);
+
+        var evaluator = new LocalEvaluator(check);
+        var items = new List<EvalItem> { CreateItem() };
+
+        // Act
+        var results = await evaluator.EvaluateAsync(items);
+
+        // Assert
+        Assert.True(results.AllPassed);
+    }
+
+    [Fact]
+    public async Task FunctionEvaluator_WithCheckResult_ReturnsCustomReason()
+    {
+        // Arrange
+        var check = FunctionEvaluator.Create("custom_check",
+            (EvalItem item) => new CheckResult(true, "Custom reason", "custom_check"));
+
+        var evaluator = new LocalEvaluator(check);
+        var items = new List<EvalItem> { CreateItem() };
+
+        // Act
+        var results = await evaluator.EvaluateAsync(items);
+
+        // Assert
+        Assert.True(results.AllPassed);
+        var metric = results.Items[0].Get<BooleanMetric>("custom_check");
+        Assert.Equal("Custom reason", metric.Reason);
+    }
+
+    // ---------------------------------------------------------------
+    // EvalChecks tests
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public async Task KeywordCheck_AllKeywordsPresent_Passes()
+    {
+        // Arrange
+        var evaluator = new LocalEvaluator(
+            EvalChecks.KeywordCheck("weather", "sunny"));
+
+        var items = new List<EvalItem> { CreateItem() };
+
+        // Act
+        var results = await evaluator.EvaluateAsync(items);
+
+        // Assert
+        Assert.True(results.AllPassed);
+    }
+
+    [Fact]
+    public async Task KeywordCheck_MissingKeyword_Fails()
+    {
+        // Arrange
+        var evaluator = new LocalEvaluator(
+            EvalChecks.KeywordCheck("snow"));
+
+        var items = new List<EvalItem> { CreateItem() };
+
+        // Act
+        var results = await evaluator.EvaluateAsync(items);
+
+        // Assert
+        Assert.False(results.AllPassed);
+    }
+
+    [Fact]
+    public async Task KeywordCheck_CaseInsensitiveByDefault_Passes()
+    {
+        // Arrange
+        var evaluator = new LocalEvaluator(
+            EvalChecks.KeywordCheck("WEATHER", "SUNNY"));
+
+        var items = new List<EvalItem> { CreateItem() };
+
+        // Act
+        var results = await evaluator.EvaluateAsync(items);
+
+        // Assert
+        Assert.True(results.AllPassed);
+    }
+
+    [Fact]
+    public async Task KeywordCheck_CaseSensitive_FailsOnWrongCase()
+    {
+        // Arrange
+        var evaluator = new LocalEvaluator(
+            EvalChecks.KeywordCheck(caseSensitive: true, "WEATHER"));
+
+        var items = new List<EvalItem> { CreateItem() };
+
+        // Act
+        var results = await evaluator.EvaluateAsync(items);
+
+        // Assert
+        Assert.False(results.AllPassed);
+    }
+
+    [Fact]
+    public async Task ToolCalledCheck_ToolPresent_Passes()
+    {
+        // Arrange
+        var conversation = new List<ChatMessage>
+        {
+            new(ChatRole.User, "What is the weather?"),
+            new(ChatRole.Assistant, new List<AIContent>
+            {
+                new FunctionCallContent("call1", "get_weather", new Dictionary<string, object?> { ["city"] = "Seattle" }),
+            }),
+            new(ChatRole.Tool, new List<AIContent>
+            {
+                new FunctionResultContent("call1", "72°F and sunny"),
+            }),
+            new(ChatRole.Assistant, "The weather is sunny and 72°F."),
+        };
+
+        var item = CreateItem(conversation: conversation);
+        var evaluator = new LocalEvaluator(
+            EvalChecks.ToolCalledCheck("get_weather"));
+
+        // Act
+        var results = await evaluator.EvaluateAsync(new List<EvalItem> { item });
+
+        // Assert
+        Assert.True(results.AllPassed);
+    }
+
+    [Fact]
+    public async Task ToolCalledCheck_ToolMissing_Fails()
+    {
+        // Arrange
+        var evaluator = new LocalEvaluator(
+            EvalChecks.ToolCalledCheck("get_weather"));
+
+        var items = new List<EvalItem> { CreateItem() };
+
+        // Act
+        var results = await evaluator.EvaluateAsync(items);
+
+        // Assert
+        Assert.False(results.AllPassed);
+    }
+
+    // ---------------------------------------------------------------
+    // AgentEvaluationResults tests
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public void AgentEvaluationResults_AllPassed_WhenAllMetricsGood()
+    {
+        // Arrange
+        var evalResult = new EvaluationResult();
+        evalResult.Metrics["check"] = new BooleanMetric("check", true)
+        {
+            Interpretation = new EvaluationMetricInterpretation
+            {
+                Rating = EvaluationRating.Good,
+                Failed = false,
+            },
+        };
+
+        // Act
+        var results = new AgentEvaluationResults("test", new[] { evalResult });
+
+        // Assert
+        Assert.True(results.AllPassed);
+        Assert.Equal(1, results.Passed);
+        Assert.Equal(0, results.Failed);
+    }
+
+    [Fact]
+    public void AgentEvaluationResults_NotAllPassed_WhenMetricFailed()
+    {
+        // Arrange
+        var evalResult = new EvaluationResult();
+        evalResult.Metrics["check"] = new BooleanMetric("check", false)
+        {
+            Interpretation = new EvaluationMetricInterpretation
+            {
+                Rating = EvaluationRating.Unacceptable,
+                Failed = true,
+            },
+        };
+
+        // Act
+        var results = new AgentEvaluationResults("test", new[] { evalResult });
+
+        // Assert
+        Assert.False(results.AllPassed);
+        Assert.Equal(0, results.Passed);
+        Assert.Equal(1, results.Failed);
+    }
+
+    [Fact]
+    public void AssertAllPassed_ThrowsOnFailure()
+    {
+        // Arrange
+        var evalResult = new EvaluationResult();
+        evalResult.Metrics["check"] = new BooleanMetric("check", false)
+        {
+            Interpretation = new EvaluationMetricInterpretation
+            {
+                Rating = EvaluationRating.Unacceptable,
+                Failed = true,
+            },
+        };
+
+        var results = new AgentEvaluationResults("test", new[] { evalResult });
+
+        // Act & Assert
+        var ex = Assert.Throws<InvalidOperationException>(() => results.AssertAllPassed());
+        Assert.Contains("0 passed", ex.Message);
+        Assert.Contains("1 failed", ex.Message);
+    }
+
+    [Fact]
+    public void AssertAllPassed_DoesNotThrowOnSuccess()
+    {
+        // Arrange
+        var evalResult = new EvaluationResult();
+        evalResult.Metrics["check"] = new BooleanMetric("check", true)
+        {
+            Interpretation = new EvaluationMetricInterpretation
+            {
+                Rating = EvaluationRating.Good,
+                Failed = false,
+            },
+        };
+
+        var results = new AgentEvaluationResults("test", new[] { evalResult });
+
+        // Act & Assert (no exception)
+        results.AssertAllPassed();
+    }
+
+    [Fact]
+    public void AgentEvaluationResults_NumericMetric_HighScorePasses()
+    {
+        // Arrange
+        var evalResult = new EvaluationResult();
+        evalResult.Metrics["relevance"] = new NumericMetric("relevance", 4.5);
+
+        // Act
+        var results = new AgentEvaluationResults("test", new[] { evalResult });
+
+        // Assert
+        Assert.True(results.AllPassed);
+    }
+
+    [Fact]
+    public void AgentEvaluationResults_NumericMetric_LowScoreFails()
+    {
+        // Arrange
+        var evalResult = new EvaluationResult();
+        evalResult.Metrics["relevance"] = new NumericMetric("relevance", 2.0);
+
+        // Act
+        var results = new AgentEvaluationResults("test", new[] { evalResult });
+
+        // Assert
+        Assert.False(results.AllPassed);
+    }
+
+    [Fact]
+    public void AgentEvaluationResults_SubResults_AllPassedChecksChildren()
+    {
+        // Arrange
+        var passResult = new EvaluationResult();
+        passResult.Metrics["check"] = new BooleanMetric("check", true)
+        {
+            Interpretation = new EvaluationMetricInterpretation
+            {
+                Rating = EvaluationRating.Good,
+                Failed = false,
+            },
+        };
+
+        var failResult = new EvaluationResult();
+        failResult.Metrics["check"] = new BooleanMetric("check", false)
+        {
+            Interpretation = new EvaluationMetricInterpretation
+            {
+                Rating = EvaluationRating.Unacceptable,
+                Failed = true,
+            },
+        };
+
+        var results = new AgentEvaluationResults("test", Array.Empty<EvaluationResult>())
+        {
+            SubResults = new Dictionary<string, AgentEvaluationResults>
+            {
+                ["agent1"] = new("test", new[] { passResult }),
+                ["agent2"] = new("test", new[] { failResult }),
+            },
+        };
+
+        // Assert
+        Assert.False(results.AllPassed);
+    }
+
+    // ---------------------------------------------------------------
+    // Mixed evaluator tests
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public async Task LocalEvaluator_MixedChecks_ReportsCorrectCounts()
+    {
+        // Arrange
+        var evaluator = new LocalEvaluator(
+            EvalChecks.KeywordCheck("weather"),
+            EvalChecks.KeywordCheck("snow"),
+            FunctionEvaluator.Create("is_long", (string r) => r.Length > 5));
+
+        var items = new List<EvalItem> { CreateItem() };
+
+        // Act
+        var results = await evaluator.EvaluateAsync(items);
+
+        // Assert
+        Assert.Equal(1, results.Total);
+
+        // One item with 3 checks: "weather" passes, "snow" fails, "is_long" passes
+        // The item has one failed metric so it should count as failed
+        Assert.Equal(0, results.Passed);
+        Assert.Equal(1, results.Failed);
+    }
+}
