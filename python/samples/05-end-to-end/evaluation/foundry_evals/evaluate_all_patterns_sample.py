@@ -18,10 +18,9 @@ Microsoft Agent Framework. Run the sections that match your needs.
                     │                                      │
                     └──────────────────────────────────────┘
 
-Each evaluator plugs into the same three entry points:
+Each evaluator plugs into the same two entry points:
 
-    evaluate_agent()     — run agent + evaluate in one call
-    evaluate_response()  — evaluate a response you already have
+    evaluate_agent()     — run agent + evaluate, or evaluate existing responses
     evaluate_workflow()  — evaluate multi-agent workflows with per-agent breakdown
 """
 
@@ -33,7 +32,6 @@ from agent_framework import (
     LocalEvaluator,
     Message,
     evaluate_agent,
-    evaluate_response,
     evaluate_workflow,
     function_evaluator,
     keyword_check,
@@ -292,14 +290,16 @@ async def demo_foundry_response(project_client, deployment):
     response = await agent.run([Message("user", ["What's the weather in Seattle?"])])
     print(f"  Agent said: {response.text[:80]}...")
 
-    # Then evaluate the response
+    # Then evaluate the response (without re-running the agent)
     quality_evals = FoundryEvals(
         project_client=project_client,
         model_deployment=deployment,
         evaluators=[Evaluators.RELEVANCE, Evaluators.COHERENCE],
     )
-    results = await evaluate_response(
-        response=response,
+    results = await evaluate_agent(
+        agent=agent,
+        responses=response,
+        queries=["What's the weather in Seattle?"],
         evaluators=quality_evals,
     )
 

@@ -27,7 +27,7 @@ The goal is: any agent-framework agent evaluable with any evaluation provider in
 ## Decision Drivers
 
 - **Zero-friction evaluation**: Developers should go from "I have an agent" to "I have eval results" with minimal code.
-- **Provider-agnostic API**: The core evaluation functions (`evaluate_agent`, `evaluate_response`, `evaluate_workflow`) must not be tied to any specific provider. Provider configuration should be separate from the evaluation call.
+- **Provider-agnostic API**: The core evaluation functions (`evaluate_agent`, `evaluate_workflow`) must not be tied to any specific provider. Provider configuration should be separate from the evaluation call.
 - **Lowest concept count**: Introduce the fewest possible new concepts. The evaluator IS the provider — no separate "provider" abstraction.
 - **Agent discovery and tool reuse**: The framework already knows which agents exist and what tools they have. Evals should leverage this automatically.
 - **Foundry-native results**: When using Foundry, results should be viewable in the Foundry portal.
@@ -60,7 +60,7 @@ The evaluation system is split across two layers:
 - `LocalEvaluator` — Built-in `Evaluator` implementation that runs checks locally without API calls
 
 *Orchestration functions:*
-- `evaluate_agent()`, `evaluate_response()`, `evaluate_workflow()` — Extract data from agents/workflows and delegate to evaluators
+- `evaluate_agent()`, `evaluate_workflow()` — Extract data from agents/workflows and delegate to evaluators
 - `AgentEvalConverter` — Converts agent-framework types (`Message`, `Content`, `FunctionTool`) to eval format
 
 *Built-in checks (for use with `LocalEvaluator`):*
@@ -132,19 +132,16 @@ for r in results:
 ### Evaluate a response you already have
 
 ```python
-from agent_framework import evaluate_response
+from agent_framework import evaluate_agent
 from agent_framework_azure_ai import FoundryEvals
 
 evals = FoundryEvals(project_client=client, model_deployment="gpt-4o")
 
-# Quality evaluators — Responses API fast path (no query needed)
-results = await evaluate_response(response=response, evaluators=evals)
-
-# Tool evaluators — provide query and agent for tool definitions
-results = await evaluate_response(
-    response=response,
-    query="What's the weather?",
+# Pass responses= to evaluate without re-running the agent
+results = await evaluate_agent(
     agent=agent,
+    responses=response,
+    queries=["What's the weather?"],
     evaluators=evals,
 )
 ```
@@ -315,8 +312,7 @@ Provider-agnostic functions that extract data and delegate to evaluators:
 
 | Function | What it does |
 |---|---|
-| `evaluate_agent()` | Runs agent against test queries, converts via `AgentEvalConverter`, passes `EvalItem`s to evaluator |
-| `evaluate_response()` | Converts response(s) to `EvalItem`s, passes to evaluator. Includes `response_id` for providers that support server-side retrieval |
+| `evaluate_agent()` | Runs agent against test queries (or evaluates pre-existing `responses=`), converts via `AgentEvalConverter`, passes `EvalItem`s to evaluator |
 | `evaluate_workflow()` | Extracts per-agent data from `WorkflowRunResult`, evaluates each agent and overall output. Per-agent breakdown in `sub_results` |
 
 ### Azure AI: FoundryEvals
@@ -400,7 +396,7 @@ Async functions are handled automatically — `@function_evaluator` detects `asy
 ## Known Limitations
 
 1. **Per-agent workflow evals use dataset path**: Workflow sub-agent evaluations always clear `response_id` to force the dataset evaluation path. The Responses API retrieval path doesn't work for agents whose input is another agent's full conversation (the evaluator can't extract a clean user query from the stored response).
-2. **Tool evaluators require query + agent**: Tool evaluators need tool definition schemas, which are not available through Responses API response retrieval. When using these evaluators with `evaluate_response()`, `query=` and `agent=` must be provided.
+2. **Tool evaluators require query + agent**: Tool evaluators need tool definition schemas, which are not available through Responses API response retrieval. When using these evaluators with `evaluate_agent(responses=...)`, provide `queries=` and pass an agent with tool definitions.
 3. **`model_deployment` always required**: Could potentially be inferred from the Foundry project configuration.
 
 ## Resolved Issues
@@ -644,7 +640,7 @@ public record EvalItem(
 | `keyword_check()` / `tool_called_check()` | `EvalChecks.KeywordCheck()` / `EvalChecks.ToolCalledCheck()` |
 | `FoundryEvals` | `FoundryEvaluator` (implements `IEvaluator`) |
 | `evaluate_agent()` | `agent.EvaluateAsync()` extension method |
-| `evaluate_response()` | `response.EvaluateAsync()` extension method |
+| `evaluate_agent(responses=)` | `response.EvaluateAsync()` extension method |
 | `evaluate_workflow()` | `run.EvaluateAsync()` extension method |
 | `AgentEvalConverter` | Internal to extension methods |
 

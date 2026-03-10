@@ -486,7 +486,7 @@ class FoundryEvals:
     """Evaluation provider backed by Azure AI Foundry.
 
     Implements the ``Evaluator`` protocol so it can be passed to the
-    provider-agnostic ``evaluate_agent()``, ``evaluate_response()``, and
+    provider-agnostic ``evaluate_agent()`` and
     ``evaluate_workflow()`` functions from ``agent_framework``.
 
     The simplest usage::

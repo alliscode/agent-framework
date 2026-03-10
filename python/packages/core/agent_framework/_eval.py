@@ -627,10 +627,17 @@ def _extract_overall_query(workflow_result: WorkflowRunResult) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+class _MinimalAgent:
+    """Stub agent used when evaluate_response is called without an agent."""
+
+    name = "unknown"
+
+
 async def evaluate_agent(
     *,
     agent: Any,
-    queries: Sequence[str],
+    queries: Sequence[str] | None = None,
+    responses: AgentResponse[Any] | Sequence[AgentResponse[Any]] | None = None,
     evaluators: Evaluator | Sequence[Evaluator],
     eval_name: str | None = None,
     context: str | None = None,
@@ -641,9 +648,19 @@ async def evaluate_agent(
     query, runs the agent, converts the interaction to eval format, and
     submits to the evaluator(s).
 
+    If ``responses`` is provided, skips running the agent and evaluates those
+    responses directly — but still extracts tool definitions from the agent.
+    In this mode ``queries`` is optional: if omitted, the evaluator will use
+    the response's ``response_id`` (requires a provider that supports
+    server-side retrieval).
+
     Args:
         agent: An agent-framework agent instance.
-        queries: Test queries to run the agent against.
+        queries: Test queries to run the agent against. Required when
+            ``responses`` is not provided.
+        responses: Pre-existing ``AgentResponse``(s) to evaluate without
+            running the agent.  When provided, ``queries`` are used only to
+            populate the eval item's ``query`` field (not to invoke the agent).
         evaluators: One or more ``Evaluator`` instances.
         eval_name: Display name (defaults to agent name).
         context: Optional context for groundedness evaluation.
@@ -651,32 +668,75 @@ async def evaluate_agent(
     Returns:
         A list of ``EvalResults``, one per evaluator provider.
 
-    Example::
+    Raises:
+        ValueError: If neither ``queries`` nor ``responses`` is provided.
 
-        from agent_framework_azure_ai import FoundryEvals
+    Example — run and evaluate::
 
-        evals = FoundryEvals(project_client=client, model_deployment="gpt-4o")
         results = await evaluate_agent(
             agent=my_agent,
-            queries=["What's the weather?", "Book a flight to London"],
+            queries=["What's the weather?"],
             evaluators=evals,
         )
-        for r in results:
-            print(f"{r.provider}: {r.passed}/{r.total}")
+
+    Example — evaluate existing responses::
+
+        response = await agent.run([Message("user", ["What's the weather?"])])
+        results = await evaluate_agent(
+            agent=agent,
+            responses=response,
+            queries=["What's the weather?"],
+            evaluators=evals,
+        )
     """
     converter = AgentEvalConverter()
     items: list[EvalItem] = []
 
-    for query in queries:
-        response = await agent.run([Message("user", [query])])
-        items.append(
-            converter.to_eval_item(
-                query=query,
-                response=response,
-                agent=agent,
-                context=context,
+    if responses is not None:
+        # Evaluate pre-existing responses (don't run the agent)
+        resp_list = [responses] if isinstance(responses, AgentResponse) else list(responses)
+
+        if queries is not None:
+            query_list = list(queries)
+            if len(query_list) != len(resp_list):
+                raise ValueError(
+                    f"Got {len(query_list)} queries but {len(resp_list)} responses."
+                )
+            for q, r in zip(query_list, resp_list):
+                items.append(
+                    converter.to_eval_item(
+                        query=q, response=r, agent=agent, context=context,
+                    )
+                )
+        else:
+            # No queries — build minimal items with response_id
+            for r in resp_list:
+                response_id = getattr(r, "response_id", None)
+                if response_id is None:
+                    raise ValueError(
+                        "Response does not have a response_id. Provide "
+                        "'queries' so the conversation can be reconstructed "
+                        "for evaluation."
+                    )
+                items.append(
+                    EvalItem(
+                        query="",
+                        response=r.text or "",
+                        conversation=[],
+                        response_id=response_id,
+                    )
+                )
+    elif queries is not None:
+        # Run the agent against test queries
+        for query in queries:
+            response = await agent.run([Message("user", [query])])
+            items.append(
+                converter.to_eval_item(
+                    query=query, response=response, agent=agent, context=context,
+                )
             )
-        )
+    else:
+        raise ValueError("Provide either 'queries' or 'responses' (or both).")
 
     name = eval_name or f"Eval: {getattr(agent, 'name', None) or getattr(agent, 'id', 'agent')}"
     return await _run_evaluators(evaluators, items, eval_name=name)
@@ -690,71 +750,28 @@ async def evaluate_response(
     evaluators: Evaluator | Sequence[Evaluator],
     eval_name: str = "Agent Framework Response Eval",
 ) -> list[EvalResults]:
-    """Evaluate one or more agent responses that have already been produced.
+    """Deprecated: use ``evaluate_agent(responses=...)`` instead.
 
-    The simplest post-hoc evaluation path — pass the response you got from
-    ``agent.run()`` and get a full evaluation.
-
-    Some evaluators (e.g., Foundry with Responses API) can retrieve full
-    conversation data from the ``response_id`` without needing ``query``.
-    Others require ``query`` to reconstruct the conversation. When in doubt,
-    provide ``query``.
-
-    Args:
-        response: One or more ``AgentResponse`` objects from ``agent.run()``.
-        query: The user query or input messages. Required when the response
-            does not have a ``response_id``, or when using tool evaluators.
-            For multiple responses, pass a list of queries in the same order.
-        agent: Optional agent instance for tool definition extraction.
-        evaluators: One or more ``Evaluator`` instances.
-        eval_name: Display name for the evaluation.
-
-    Returns:
-        A list of ``EvalResults``, one per evaluator provider.
-
-    Raises:
-        ValueError: If responses lack ``response_id`` and ``query`` is not
-            provided.
-
-    Example::
-
-        from agent_framework_azure_ai import FoundryEvals
-
-        evals = FoundryEvals(project_client=client, model_deployment="gpt-4o")
-
-        response = await agent.run([Message("user", ["What's the weather?"])])
-        results = await evaluate_response(
-            response=response,
-            evaluators=evals,
-        )
+    Evaluate one or more agent responses that have already been produced.
+    This is a thin wrapper that delegates to ``evaluate_agent``.
     """
-    responses = [response] if isinstance(response, AgentResponse) else list(response)
-
-    # If we have queries, build full EvalItems
+    # Normalize queries for evaluate_agent (it expects Sequence[str] | None)
+    queries_norm: Sequence[str] | None = None
     if query is not None:
-        queries = _normalize_queries(query, len(responses))
-        items = [AgentEvalConverter.to_eval_item(query=q, response=r, agent=agent) for q, r in zip(queries, responses)]
-    else:
-        # Build minimal items with response_id for providers that support it
-        items = []
-        for r in responses:
-            response_id = getattr(r, "response_id", None)
-            if response_id is None:
-                raise ValueError(
-                    "Response does not have a response_id. Provide 'query' "
-                    "(the input messages) so the conversation can be "
-                    "reconstructed for evaluation."
-                )
-            items.append(
-                EvalItem(
-                    query="",
-                    response=r.text or "",
-                    conversation=[],
-                    response_id=response_id,
-                )
-            )
+        responses_list = [response] if isinstance(response, AgentResponse) else list(response)
+        queries_norm = list(_normalize_queries(query, len(responses_list)))
 
-    return await _run_evaluators(evaluators, items, eval_name=eval_name)
+    # Build a dummy agent if none provided (evaluate_agent requires agent=)
+    if agent is None:
+        agent = _MinimalAgent()
+
+    return await evaluate_agent(
+        agent=agent,
+        responses=response,
+        queries=queries_norm,
+        evaluators=evaluators,
+        eval_name=eval_name,
+    )
 
 
 async def evaluate_workflow(
