@@ -394,9 +394,9 @@ Async functions use `@async_function_evaluator` for evaluators that need I/O (e.
 
 ### Package Location
 
-- Core types and orchestration: `agent_framework._eval`, `agent_framework._local_eval` (Python), `Microsoft.Agents.AI.Core` (.NET)
-- Foundry provider: `agent_framework_azure_ai._foundry_evals` (Python), `Microsoft.Agents.AI.AzureAIFoundry` (.NET)
-- Azure-AI re-exports core types for convenience
+- Core types and orchestration: `agent_framework._eval`, `agent_framework._local_eval` (Python), `Microsoft.Agents.AI` (.NET)
+- Foundry provider: `agent_framework_azure_ai._foundry_evals` (Python), `Microsoft.Agents.AI.AzureAI` (.NET)
+- Azure-AI re-exports core types for convenience (Python)
 
 ## Known Limitations
 
@@ -414,8 +414,240 @@ Async functions use `@async_function_evaluator` for evaluators that need I/O (e.
 ## Open Questions
 
 1. **Red teaming non-registered agents**: Requires Foundry API support for callback-based flows.
-2. **.NET parity timeline**: What is the priority for .NET implementation?
-3. **Datasets with expected outputs**: A dataset abstraction for pre-populating `expected` values across eval runs is a natural next step but not yet designed.
+2. **Datasets with expected outputs**: A dataset abstraction for pre-populating `expected` values across eval runs is a natural next step but not yet designed.
+
+## .NET Implementation Design
+
+### Key Difference: MEAI Ecosystem
+
+Unlike Python, the .NET ecosystem already has `Microsoft.Extensions.AI.Evaluation` (v10.3.0) providing:
+
+- `IEvaluator` — per-item evaluation of `(messages, chatResponse) → EvaluationResult`
+- `CompositeEvaluator` — combines multiple evaluators
+- Quality evaluators — `RelevanceEvaluator`, `CoherenceEvaluator`, `GroundednessEvaluator`
+- Safety evaluators — `ContentHarmEvaluator`, `ProtectedMaterialEvaluator`
+- Metric types — `NumericMetric`, `BooleanMetric`, `StringMetric`
+
+The .NET integration uses MEAI's `IEvaluator` directly — no new evaluator interface. Our contribution is the **orchestration layer**: extension methods that run agents, extract data, call `IEvaluator` per item, and aggregate results.
+
+### Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Developer Code                                              │
+│  agent.EvaluateAsync(queries, evaluator)                     │
+│  run.EvaluateAsync(evaluator)                                │
+└────────────────┬─────────────────────────────────────────────┘
+                 │
+┌────────────────▼─────────────────────────────────────────────┐
+│  Orchestration Layer (Microsoft.Agents.AI)                   │
+│  AgentEvaluationExtensions — runs agents, extracts data,     │
+│  calls IEvaluator per item, aggregates into                  │
+│  AgentEvaluationResults                                      │
+└────────────────┬─────────────────────────────────────────────┘
+                 │ IEvaluator (MEAI)
+                 │
+     ┌───────────┼────────────┐
+     │           │            │
+ ┌───▼───┐  ┌───▼────┐  ┌────▼──────────┐
+ │ MEAI  │  │ Local  │  │ Foundry       │
+ │ Quality│  │ Checks │  │ (cloud batch) │
+ │ Safety │  │ Lambdas│  │               │
+ └────────┘  └────────┘  └───────────────┘
+```
+
+All evaluators implement MEAI's `IEvaluator`. The orchestration layer doesn't need to know which kind — it calls `EvaluateAsync(messages, chatResponse)` per item on all of them. `FoundryEvaluator` handles batching internally (buffers items, submits once, returns per-item results).
+
+### .NET Core Types
+
+**No new evaluator interface.** Use MEAI's `IEvaluator` directly.
+
+**`AgentEvaluationResults`** — The only new type. Aggregates per-item MEAI `EvaluationResult`s across a batch of queries:
+
+```csharp
+public class AgentEvaluationResults
+{
+    public string Provider { get; init; }
+    public string? ReportUrl { get; init; }
+
+    // Per-item — standard MEAI EvaluationResult, unchanged
+    public IReadOnlyList<EvaluationResult> Items { get; init; }
+
+    // Aggregate pass/fail derived from metric interpretations
+    public int Passed { get; }
+    public int Failed { get; }
+    public int Total { get; }
+    public bool AllPassed { get; }
+
+    // Workflow: per-agent breakdown
+    public IReadOnlyDictionary<string, AgentEvaluationResults>? SubResults { get; init; }
+
+    public void AssertAllPassed(string? message = null);
+}
+```
+
+### .NET Evaluator Implementations
+
+All implement MEAI's `IEvaluator`:
+
+**`LocalEvaluator`** — Runs lambda checks locally, returns `BooleanMetric` per check:
+
+```csharp
+var local = new LocalEvaluator(
+    FunctionEvaluator.Create("is_concise",
+        (string response) => response.Split().Length < 500),
+    EvalChecks.KeywordCheck("weather"),
+    EvalChecks.ToolCalledCheck("get_weather"));
+```
+
+**MEAI evaluators** — Used directly, no adapter needed:
+
+```csharp
+var quality = new CompositeEvaluator(
+    new RelevanceEvaluator(),
+    new CoherenceEvaluator());
+```
+
+**`FoundryEvaluator`** — Implements `IEvaluator` but batches internally. On first call, buffers the item. On the last item (or when explicitly flushed), submits the batch to Foundry and distributes per-item results:
+
+```csharp
+var foundry = new FoundryEvaluator(projectClient, "gpt-4o");
+```
+
+### .NET Orchestration: Extension Methods
+
+```csharp
+public static class AgentEvaluationExtensions
+{
+    // Evaluate an agent against test queries
+    public static Task<AgentEvaluationResults> EvaluateAsync(
+        this AIAgent agent,
+        IEnumerable<string> queries,
+        IEvaluator evaluator,
+        ChatConfiguration? chatConfiguration = null,
+        CancellationToken cancellationToken = default);
+
+    // Evaluate with multiple evaluators (one result per evaluator)
+    public static Task<IReadOnlyList<AgentEvaluationResults>> EvaluateAsync(
+        this AIAgent agent,
+        IEnumerable<string> queries,
+        IEnumerable<IEvaluator> evaluators,
+        ChatConfiguration? chatConfiguration = null,
+        CancellationToken cancellationToken = default);
+
+    // Evaluate a completed response
+    public static Task<AgentEvaluationResults> EvaluateAsync(
+        this AgentResponse response,
+        string query,
+        IEvaluator evaluator,
+        ChatConfiguration? chatConfiguration = null,
+        CancellationToken cancellationToken = default);
+
+    // Evaluate a workflow run with per-agent breakdown
+    public static Task<AgentEvaluationResults> EvaluateAsync(
+        this Run run,
+        IEvaluator evaluator,
+        ChatConfiguration? chatConfiguration = null,
+        bool includeOverall = true,
+        bool includePerAgent = true,
+        CancellationToken cancellationToken = default);
+}
+```
+
+**Usage:**
+
+```csharp
+// MEAI evaluators — just works
+var results = await agent.EvaluateAsync(
+    queries: ["What's the weather?"],
+    evaluator: new RelevanceEvaluator(),
+    chatConfiguration: new ChatConfiguration(evalClient));
+
+// Local checks
+var results = await agent.EvaluateAsync(
+    queries: ["What's the weather?"],
+    evaluator: new LocalEvaluator(
+        EvalChecks.KeywordCheck("weather")));
+
+// Foundry cloud
+var results = await agent.EvaluateAsync(
+    queries: ["What's the weather?"],
+    evaluator: new FoundryEvaluator(projectClient, "gpt-4o"));
+
+// Mixed — one result per evaluator
+var results = await agent.EvaluateAsync(
+    queries: ["What's the weather?"],
+    evaluators: [
+        new LocalEvaluator(EvalChecks.KeywordCheck("weather")),
+        new RelevanceEvaluator(),
+        new FoundryEvaluator(projectClient, "gpt-4o")
+    ],
+    chatConfiguration: new ChatConfiguration(evalClient));
+
+// Workflow with per-agent breakdown
+Run run = await workflowRunner.RunAsync(workflow, "Plan a trip");
+var results = await run.EvaluateAsync(
+    evaluator: new FoundryEvaluator(projectClient, "gpt-4o"));
+```
+
+### .NET Function Evaluators
+
+Typed factory overloads (C# equivalent of Python's `@function_evaluator`):
+
+```csharp
+public static class FunctionEvaluator
+{
+    public static EvalCheck Create(string name, Func<string, bool> check);           // response only
+    public static EvalCheck Create(string name, Func<string, string?, bool> check);  // + expected
+    public static EvalCheck Create(string name, Func<EvalItem, bool> check);         // full item
+    public static EvalCheck Create(string name, Func<EvalItem, CheckResult> check);  // full control
+    public static EvalCheck Create(string name, Func<string, Task<bool>> check);     // async
+}
+```
+
+`EvalItem` is a lightweight record used only by `FunctionEvaluator` and `LocalEvaluator` to pass context to check functions. It is not part of the `IEvaluator` interface:
+
+```csharp
+public record EvalItem(
+    string Query, string Response,
+    IReadOnlyList<ChatMessage> Conversation,
+    IReadOnlyList<AITool>? Tools = null,
+    string? Expected = null, string? Context = null);
+```
+
+### Workflow Data Extraction (.NET)
+
+`run.EvaluateAsync()` walks `Run.OutgoingEvents` via LINQ:
+
+1. Pair `ExecutorInvokedEvent` / `ExecutorCompletedEvent` by `ExecutorId`
+2. Extract `AgentResponseEvent` for per-agent `ChatResponse`
+3. Call `evaluator.EvaluateAsync()` per invocation
+4. Group by `ExecutorId` for per-agent `SubResults`
+5. Use final workflow output for overall eval
+
+### .NET Package Structure
+
+| Package | Contents |
+|---------|----------|
+| `Microsoft.Agents.AI` | `AgentEvaluationResults`, `LocalEvaluator`, `FunctionEvaluator`, `EvalChecks`, `EvalItem`, `AgentEvaluationExtensions` |
+| `Microsoft.Agents.AI.AzureAI` | `FoundryEvaluator`, `Evaluators` constants |
+
+### Python ↔ .NET Mapping
+
+| Python | .NET |
+|--------|------|
+| `Evaluator` protocol | MEAI `IEvaluator` (no new interface) |
+| `EvalItem` dataclass | `EvalItem` record (internal to checks) |
+| `EvalResults` | `AgentEvaluationResults` |
+| `EvalItemResult` / `EvalScoreResult` | MEAI `EvaluationResult` / `EvaluationMetric` (reused) |
+| `LocalEvaluator` | `LocalEvaluator` (implements `IEvaluator`) |
+| `@function_evaluator` | `FunctionEvaluator.Create()` overloads |
+| `keyword_check()` / `tool_called_check()` | `EvalChecks.KeywordCheck()` / `EvalChecks.ToolCalledCheck()` |
+| `FoundryEvals` | `FoundryEvaluator` (implements `IEvaluator`) |
+| `evaluate_agent()` | `agent.EvaluateAsync()` extension method |
+| `evaluate_response()` | `response.EvaluateAsync()` extension method |
+| `evaluate_workflow()` | `run.EvaluateAsync()` extension method |
+| `AgentEvalConverter` | Internal to extension methods |
 
 ## More Information
 
