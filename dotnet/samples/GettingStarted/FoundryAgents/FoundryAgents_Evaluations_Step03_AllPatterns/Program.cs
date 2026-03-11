@@ -8,9 +8,11 @@
 //   4. Foundry evaluators — cloud-based evaluation with Azure AI Foundry
 //   5. Mixed evaluators — combining local checks with cloud evaluation
 //   6. Pre-existing response evaluation — evaluate responses without re-running the agent
+//   7. Conversation split strategies — LastTurn, Full, PerTurn, and call-site override
 //
 // Mirrors the Python sample: evaluate_all_patterns_sample.py
 
+using System.Linq;
 using Azure.AI.Projects;
 using Azure.AI.Projects.OpenAI;
 using Azure.Identity;
@@ -200,6 +202,71 @@ try
                     "response_quality"))));
 
     PrintResults("Pre-existing Responses", preExistingResults);
+
+    // ================================================================
+    // Section 7: Conversation Split Strategies
+    // ================================================================
+    Console.WriteLine("SECTION 7: Conversation Split Strategies");
+    Console.WriteLine(new string('-', 60));
+
+    // Build a multi-turn conversation manually
+    var multiTurnConversation = new List<ChatMessage>
+    {
+        new(ChatRole.User, "What's the weather in Seattle?"),
+        new(ChatRole.Assistant, "Seattle is 62°F, cloudy with a chance of rain."),
+        new(ChatRole.User, "And Paris?"),
+        new(ChatRole.Assistant, "Paris is 68°F, partly sunny."),
+        new(ChatRole.User, "Compare them."),
+        new(ChatRole.Assistant, "Seattle is cooler at 62°F with rain likely, while Paris is warmer at 68°F and sunnier."),
+    };
+
+    // Strategy 1: LAST_TURN (default) — evaluates the final response
+    var lastTurnItem = new EvalItem(
+        "Compare them.",
+        "Seattle is cooler at 62°F with rain likely, while Paris is warmer at 68°F and sunnier.",
+        multiTurnConversation);
+
+    var (lastQuery, lastResponse) = lastTurnItem.Split(ConversationSplit.LastTurn);
+    Console.WriteLine($"  LastTurn split: {lastQuery.Count} query msgs, {lastResponse.Count} response msgs");
+
+    // Strategy 2: FULL — evaluates the whole conversation trajectory
+    var fullItem = new EvalItem(
+        "What's the weather in Seattle?",
+        "Full conversation trajectory",
+        multiTurnConversation)
+    {
+        SplitStrategy = ConversationSplit.Full,
+    };
+
+    var (fullQuery, fullResponse) = fullItem.Split();
+    Console.WriteLine($"  Full split: {fullQuery.Count} query msgs, {fullResponse.Count} response msgs");
+
+    // Strategy 3: PER_TURN — one eval item per user turn
+    var perTurnItems = EvalItem.PerTurnItems(multiTurnConversation);
+    Console.WriteLine($"  PerTurn split: {perTurnItems.Count} items from {multiTurnConversation.Count} messages");
+
+    foreach (var turnItem in perTurnItems)
+    {
+        Console.WriteLine($"    Turn: \"{turnItem.Query}\" → {turnItem.Response.Length} chars");
+    }
+
+    // Evaluate per-turn items with a local evaluator
+    var splitEvaluator = new LocalEvaluator(
+        FunctionEvaluator.Create("has_response", (string r) => r.Length > 5));
+
+    AgentEvaluationResults perTurnResults = await splitEvaluator.EvaluateAsync(
+        perTurnItems.ToList());
+
+    PrintResults("Per-Turn Evaluation", perTurnResults);
+
+    // Strategy 4: Call-site override — force all evaluators to use FULL split
+    AgentEvaluationResults fullSplitResults = await agent.EvaluateAsync(
+        queries,
+        new LocalEvaluator(EvalChecks.KeywordCheck("weather")),
+        conversationSplit: ConversationSplit.Full);
+
+    PrintResults("Call-site Full Split", fullSplitResults);
+    Console.WriteLine();
 }
 finally
 {

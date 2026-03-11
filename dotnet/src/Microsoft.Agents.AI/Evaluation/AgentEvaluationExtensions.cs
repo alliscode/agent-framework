@@ -22,6 +22,9 @@ public static partial class AgentEvaluationExtensions
     /// <param name="queries">Test queries to send to the agent.</param>
     /// <param name="evaluator">The evaluator to score responses.</param>
     /// <param name="evalName">Display name for this evaluation run.</param>
+    /// <param name="conversationSplit">
+    /// Optional split strategy to apply to all items. When set, overrides evaluator-level defaults.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Evaluation results.</returns>
     public static async Task<AgentEvaluationResults> EvaluateAsync(
@@ -29,9 +32,10 @@ public static partial class AgentEvaluationExtensions
         IEnumerable<string> queries,
         IAgentEvaluator evaluator,
         string evalName = "Agent Framework Eval",
+        ConversationSplit? conversationSplit = null,
         CancellationToken cancellationToken = default)
     {
-        var items = await RunAgentForEvalAsync(agent, queries, cancellationToken).ConfigureAwait(false);
+        var items = await RunAgentForEvalAsync(agent, queries, conversationSplit, cancellationToken).ConfigureAwait(false);
         return await evaluator.EvaluateAsync(items, evalName, cancellationToken).ConfigureAwait(false);
     }
 
@@ -43,6 +47,9 @@ public static partial class AgentEvaluationExtensions
     /// <param name="evaluator">The MEAI evaluator (e.g., <c>RelevanceEvaluator</c>, <c>CompositeEvaluator</c>).</param>
     /// <param name="chatConfiguration">Chat configuration for the MEAI evaluator (includes the judge model).</param>
     /// <param name="evalName">Display name for this evaluation run.</param>
+    /// <param name="conversationSplit">
+    /// Optional split strategy to apply to all items. When set, overrides evaluator-level defaults.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Evaluation results.</returns>
     public static async Task<AgentEvaluationResults> EvaluateAsync(
@@ -51,10 +58,11 @@ public static partial class AgentEvaluationExtensions
         IEvaluator evaluator,
         ChatConfiguration chatConfiguration,
         string evalName = "Agent Framework Eval",
+        ConversationSplit? conversationSplit = null,
         CancellationToken cancellationToken = default)
     {
         var wrapped = new MeaiEvaluatorAdapter(evaluator, chatConfiguration);
-        return await agent.EvaluateAsync(queries, wrapped, evalName, cancellationToken).ConfigureAwait(false);
+        return await agent.EvaluateAsync(queries, wrapped, evalName, conversationSplit, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -64,6 +72,9 @@ public static partial class AgentEvaluationExtensions
     /// <param name="queries">Test queries to send to the agent.</param>
     /// <param name="evaluators">The evaluators to score responses.</param>
     /// <param name="evalName">Display name for this evaluation run.</param>
+    /// <param name="conversationSplit">
+    /// Optional split strategy to apply to all items. When set, overrides evaluator-level defaults.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>One result per evaluator.</returns>
     public static async Task<IReadOnlyList<AgentEvaluationResults>> EvaluateAsync(
@@ -71,9 +82,10 @@ public static partial class AgentEvaluationExtensions
         IEnumerable<string> queries,
         IEnumerable<IAgentEvaluator> evaluators,
         string evalName = "Agent Framework Eval",
+        ConversationSplit? conversationSplit = null,
         CancellationToken cancellationToken = default)
     {
-        var items = await RunAgentForEvalAsync(agent, queries, cancellationToken).ConfigureAwait(false);
+        var items = await RunAgentForEvalAsync(agent, queries, conversationSplit, cancellationToken).ConfigureAwait(false);
 
         var results = new List<AgentEvaluationResults>();
         foreach (var evaluator in evaluators)
@@ -143,6 +155,7 @@ public static partial class AgentEvaluationExtensions
     private static async Task<List<EvalItem>> RunAgentForEvalAsync(
         AIAgent agent,
         IEnumerable<string> queries,
+        ConversationSplit? conversationSplit,
         CancellationToken cancellationToken)
     {
         var items = new List<EvalItem>();
@@ -158,6 +171,7 @@ public static partial class AgentEvaluationExtensions
 
             var response = await agent.RunAsync(messages, cancellationToken: cancellationToken).ConfigureAwait(false);
             var item = BuildEvalItem(query, response, messages, agent);
+            item.SplitStrategy = conversationSplit;
             items.Add(item);
         }
 

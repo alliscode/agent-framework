@@ -23,6 +23,9 @@ public static class WorkflowEvaluationExtensions
     /// <param name="includeOverall">Whether to include an overall evaluation.</param>
     /// <param name="includePerAgent">Whether to include per-agent breakdowns.</param>
     /// <param name="evalName">Display name for this evaluation run.</param>
+    /// <param name="conversationSplit">
+    /// Optional split strategy to apply to all items. When set, overrides evaluator-level defaults.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Evaluation results with optional per-agent sub-results.</returns>
     public static async Task<AgentEvaluationResults> EvaluateAsync(
@@ -31,12 +34,13 @@ public static class WorkflowEvaluationExtensions
         bool includeOverall = true,
         bool includePerAgent = true,
         string evalName = "Workflow Eval",
+        ConversationSplit? conversationSplit = null,
         CancellationToken cancellationToken = default)
     {
         var events = run.OutgoingEvents.ToList();
 
         // Extract per-agent data
-        var agentData = ExtractAgentData(events);
+        var agentData = ExtractAgentData(events, conversationSplit);
 
         // Build overall items from final output
         var overallItems = new List<EvalItem>();
@@ -53,7 +57,10 @@ public static class WorkflowEvaluationExtensions
                     new(ChatRole.Assistant, finalResponse.Response.Text),
                 };
 
-                overallItems.Add(new EvalItem(query, finalResponse.Response.Text, conversation));
+                overallItems.Add(new EvalItem(query, finalResponse.Response.Text, conversation)
+                {
+                    SplitStrategy = conversationSplit,
+                });
             }
         }
 
@@ -81,7 +88,9 @@ public static class WorkflowEvaluationExtensions
         return overallResult;
     }
 
-    private static Dictionary<string, List<EvalItem>> ExtractAgentData(List<WorkflowEvent> events)
+    private static Dictionary<string, List<EvalItem>> ExtractAgentData(
+        List<WorkflowEvent> events,
+        ConversationSplit? conversationSplit)
     {
         var invoked = new Dictionary<string, ExecutorInvokedEvent>();
         var agentData = new Dictionary<string, List<EvalItem>>();
@@ -103,7 +112,10 @@ public static class WorkflowEvaluationExtensions
                     new(ChatRole.Assistant, responseText),
                 };
 
-                var item = new EvalItem(query, responseText, conversation);
+                var item = new EvalItem(query, responseText, conversation)
+                {
+                    SplitStrategy = conversationSplit,
+                };
 
                 if (!agentData.TryGetValue(completedEvent.ExecutorId, out var items))
                 {
