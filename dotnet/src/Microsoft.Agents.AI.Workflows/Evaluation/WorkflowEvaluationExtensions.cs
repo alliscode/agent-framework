@@ -23,8 +23,10 @@ public static class WorkflowEvaluationExtensions
     /// <param name="includeOverall">Whether to include an overall evaluation.</param>
     /// <param name="includePerAgent">Whether to include per-agent breakdowns.</param>
     /// <param name="evalName">Display name for this evaluation run.</param>
-    /// <param name="conversationSplit">
-    /// Optional split strategy to apply to all items. When set, overrides evaluator-level defaults.
+    /// <param name="splitter">
+    /// Optional conversation splitter to apply to all items.
+    /// Use <see cref="ConversationSplitters.LastTurn"/>, <see cref="ConversationSplitters.Full"/>,
+    /// or a custom <see cref="IConversationSplitter"/> implementation.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Evaluation results with optional per-agent sub-results.</returns>
@@ -34,13 +36,13 @@ public static class WorkflowEvaluationExtensions
         bool includeOverall = true,
         bool includePerAgent = true,
         string evalName = "Workflow Eval",
-        ConversationSplit? conversationSplit = null,
+        IConversationSplitter? splitter = null,
         CancellationToken cancellationToken = default)
     {
         var events = run.OutgoingEvents.ToList();
 
         // Extract per-agent data
-        var agentData = ExtractAgentData(events, conversationSplit);
+        var agentData = ExtractAgentData(events, splitter);
 
         // Build overall items from final output
         var overallItems = new List<EvalItem>();
@@ -59,7 +61,7 @@ public static class WorkflowEvaluationExtensions
 
                 overallItems.Add(new EvalItem(query, finalResponse.Response.Text, conversation)
                 {
-                    SplitStrategy = conversationSplit,
+                    Splitter = splitter,
                 });
             }
         }
@@ -90,7 +92,7 @@ public static class WorkflowEvaluationExtensions
 
     private static Dictionary<string, List<EvalItem>> ExtractAgentData(
         List<WorkflowEvent> events,
-        ConversationSplit? conversationSplit)
+        IConversationSplitter? splitter)
     {
         var invoked = new Dictionary<string, ExecutorInvokedEvent>();
         var agentData = new Dictionary<string, List<EvalItem>>();
@@ -114,7 +116,7 @@ public static class WorkflowEvaluationExtensions
 
                 var item = new EvalItem(query, responseText, conversation)
                 {
-                    SplitStrategy = conversationSplit,
+                    Splitter = splitter,
                 };
 
                 if (!agentData.TryGetValue(completedEvent.ExecutorId, out var items))

@@ -21,7 +21,7 @@ public sealed class FoundryEvaluator : IAgentEvaluator
 {
     private readonly ChatConfiguration _chatConfiguration;
     private readonly string[] _evaluatorNames;
-    private readonly ConversationSplit? _conversationSplit;
+    private readonly IConversationSplitter? _splitter;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FoundryEvaluator"/> class.
@@ -32,26 +32,28 @@ public sealed class FoundryEvaluator : IAgentEvaluator
     /// When empty, defaults to relevance and coherence.
     /// </param>
     public FoundryEvaluator(ChatConfiguration chatConfiguration, params string[] evaluators)
-        : this(chatConfiguration, conversationSplit: null, evaluators)
+        : this(chatConfiguration, splitter: null, evaluators)
     {
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="FoundryEvaluator"/> class with a default split strategy.
+    /// Initializes a new instance of the <see cref="FoundryEvaluator"/> class with a default splitter.
     /// </summary>
     /// <param name="chatConfiguration">Chat configuration for the LLM-based evaluators.</param>
-    /// <param name="conversationSplit">
-    /// Default split strategy for multi-turn conversations. Overridden by
-    /// <see cref="EvalItem.SplitStrategy"/> when set on individual items.
+    /// <param name="splitter">
+    /// Default conversation splitter for multi-turn conversations. Overridden by
+    /// <see cref="EvalItem.Splitter"/> when set on individual items.
+    /// Use <see cref="ConversationSplitters.LastTurn"/>, <see cref="ConversationSplitters.Full"/>,
+    /// or a custom <see cref="IConversationSplitter"/> implementation.
     /// </param>
     /// <param name="evaluators">
     /// Names of evaluators to use (e.g., "relevance", "coherence").
     /// When empty, defaults to relevance and coherence.
     /// </param>
-    public FoundryEvaluator(ChatConfiguration chatConfiguration, ConversationSplit? conversationSplit, params string[] evaluators)
+    public FoundryEvaluator(ChatConfiguration chatConfiguration, IConversationSplitter? splitter, params string[] evaluators)
     {
         this._chatConfiguration = chatConfiguration;
-        this._conversationSplit = conversationSplit;
+        this._splitter = splitter;
         this._evaluatorNames = evaluators.Length > 0
             ? evaluators
             : [Evaluators.Relevance, Evaluators.Coherence];
@@ -75,9 +77,9 @@ public sealed class FoundryEvaluator : IAgentEvaluator
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Resolve split: item-level > evaluator-level > LastTurn
-            var effectiveSplit = item.SplitStrategy ?? this._conversationSplit;
-            var (queryMessages, _) = item.Split(effectiveSplit);
+            // Resolve splitter: item-level > evaluator-level > LastTurn default
+            var effectiveSplitter = item.Splitter ?? this._splitter;
+            var (queryMessages, _) = item.Split(effectiveSplitter);
             var messages = queryMessages.ToList();
 
             var chatResponse = item.RawResponse

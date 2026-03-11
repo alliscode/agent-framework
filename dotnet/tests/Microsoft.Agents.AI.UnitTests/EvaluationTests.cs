@@ -548,7 +548,7 @@ public sealed class EvaluationTests
         var item = new EvalItem("Compare them.", "Seattle is cooler; Paris is warmer and sunnier.", conversation);
 
         // Act
-        var (query, response) = item.Split(ConversationSplit.LastTurn);
+        var (query, response) = item.Split(ConversationSplitters.LastTurn);
 
         // Assert — query includes everything up to and including "Compare them."
         Assert.Equal(5, query.Count);
@@ -568,7 +568,7 @@ public sealed class EvaluationTests
         var item = new EvalItem("What's the weather in Seattle?", "Full trajectory", conversation);
 
         // Act
-        var (query, response) = item.Split(ConversationSplit.Full);
+        var (query, response) = item.Split(ConversationSplitters.Full);
 
         // Assert — query is just the first user message
         Assert.Single(query);
@@ -592,7 +592,7 @@ public sealed class EvaluationTests
         var item = new EvalItem("What's the weather?", "It's sunny.", conversation);
 
         // Act
-        var (query, response) = item.Split(ConversationSplit.Full);
+        var (query, response) = item.Split(ConversationSplitters.Full);
 
         // Assert — system message + first user message
         Assert.Equal(2, query.Count);
@@ -617,16 +617,16 @@ public sealed class EvaluationTests
     }
 
     [Fact]
-    public void Split_SplitStrategyProperty_UsedWhenNoExplicitSplit()
+    public void Split_SplitterProperty_UsedWhenNoExplicitSplit()
     {
         // Arrange
         var conversation = CreateMultiTurnConversation();
         var item = new EvalItem("query", "response", conversation)
         {
-            SplitStrategy = ConversationSplit.Full,
+            Splitter = ConversationSplitters.Full,
         };
 
-        // Act — no explicit split, should use SplitStrategy
+        // Act — no explicit split, should use Splitter
         var (query, response) = item.Split();
 
         // Assert — Full split
@@ -635,17 +635,17 @@ public sealed class EvaluationTests
     }
 
     [Fact]
-    public void Split_ExplicitSplit_OverridesSplitStrategy()
+    public void Split_ExplicitSplitter_OverridesSplitterProperty()
     {
         // Arrange
         var conversation = CreateMultiTurnConversation();
         var item = new EvalItem("query", "response", conversation)
         {
-            SplitStrategy = ConversationSplit.Full,
+            Splitter = ConversationSplitters.Full,
         };
 
         // Act — explicit LastTurn overrides Full
-        var (query, response) = item.Split(ConversationSplit.LastTurn);
+        var (query, response) = item.Split(ConversationSplitters.LastTurn);
 
         // Assert — LastTurn behavior
         Assert.Equal(5, query.Count);
@@ -675,7 +675,7 @@ public sealed class EvaluationTests
         var item = new EvalItem("Thanks!", "You're welcome!", conversation);
 
         // Act
-        var (query, response) = item.Split(ConversationSplit.LastTurn);
+        var (query, response) = item.Split(ConversationSplitters.LastTurn);
 
         // Assert — tool messages stay in query context
         Assert.Equal(5, query.Count);
@@ -684,13 +684,13 @@ public sealed class EvaluationTests
     }
 
     [Fact]
-    public void SplitLastTurn_Static_CanBeUsedAsCustomFallback()
+    public void ConversationSplitters_LastTurn_CanBeUsedAsCustomFallback()
     {
         // Arrange
         var conversation = CreateMultiTurnConversation();
 
-        // Act
-        var (query, response) = EvalItem.SplitLastTurn(conversation);
+        // Act — use ConversationSplitters.LastTurn directly
+        var (query, response) = ConversationSplitters.LastTurn.Split(conversation);
 
         // Assert
         Assert.Equal(5, query.Count);
@@ -798,6 +798,39 @@ public sealed class EvaluationTests
         Assert.Equal(3, response.Count);
     }
 
+    [Fact]
+    public void Split_CustomSplitter_WorksAsItemProperty()
+    {
+        // Arrange — custom splitter set on the item (simulating call-site override)
+        var conversation = new List<ChatMessage>
+        {
+            new(ChatRole.User, "Remember this"),
+            new(ChatRole.Assistant, "Storing..."),
+            new(ChatRole.User, "What did I say?"),
+            new(ChatRole.Assistant, new List<AIContent>
+            {
+                new FunctionCallContent("c1", "retrieve_memory"),
+            }),
+            new(ChatRole.Tool, new List<AIContent>
+            {
+                new FunctionResultContent("c1", "You said: Remember this"),
+            }),
+            new(ChatRole.Assistant, "You said 'Remember this'."),
+        };
+
+        var item = new EvalItem("What did I say?", "You said 'Remember this'.", conversation)
+        {
+            Splitter = new MemorySplitter(),
+        };
+
+        // Act — no explicit splitter, uses item.Splitter
+        var (query, response) = item.Split();
+
+        // Assert — custom splitter was used
+        Assert.Equal(3, query.Count);
+        Assert.Equal(3, response.Count);
+    }
+
     private sealed class MemorySplitter : IConversationSplitter
     {
         public (IReadOnlyList<ChatMessage> QueryMessages, IReadOnlyList<ChatMessage> ResponseMessages) Split(
@@ -821,7 +854,7 @@ public sealed class EvaluationTests
             }
 
             // Fallback to last-turn split
-            return EvalItem.SplitLastTurn(conversation);
+            return ConversationSplitters.LastTurn.Split(conversation);
         }
     }
 }

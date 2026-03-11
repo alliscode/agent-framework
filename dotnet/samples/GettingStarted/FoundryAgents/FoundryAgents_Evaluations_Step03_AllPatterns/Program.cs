@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // This sample demonstrates all evaluation patterns available in Agent Framework for .NET.
 // It covers:
@@ -12,7 +12,6 @@
 //
 // Mirrors the Python sample: evaluate_all_patterns_sample.py
 
-using System.Linq;
 using Azure.AI.Projects;
 using Azure.AI.Projects.OpenAI;
 using Azure.Identity;
@@ -226,7 +225,7 @@ try
         "Seattle is cooler at 62°F with rain likely, while Paris is warmer at 68°F and sunnier.",
         multiTurnConversation);
 
-    var (lastQuery, lastResponse) = lastTurnItem.Split(ConversationSplit.LastTurn);
+    var (lastQuery, lastResponse) = lastTurnItem.Split(ConversationSplitters.LastTurn);
     Console.WriteLine($"  LastTurn split: {lastQuery.Count} query msgs, {lastResponse.Count} response msgs");
 
     // Strategy 2: FULL — evaluates the whole conversation trajectory
@@ -235,7 +234,7 @@ try
         "Full conversation trajectory",
         multiTurnConversation)
     {
-        SplitStrategy = ConversationSplit.Full,
+        Splitter = ConversationSplitters.Full,
     };
 
     var (fullQuery, fullResponse) = fullItem.Split();
@@ -259,13 +258,22 @@ try
 
     PrintResults("Per-Turn Evaluation", perTurnResults);
 
-    // Strategy 4: Call-site override — force all evaluators to use FULL split
+    // Strategy 4: Call-site override with built-in splitter
     AgentEvaluationResults fullSplitResults = await agent.EvaluateAsync(
         queries,
         new LocalEvaluator(EvalChecks.KeywordCheck("weather")),
-        conversationSplit: ConversationSplit.Full);
+        splitter: ConversationSplitters.Full);
 
     PrintResults("Call-site Full Split", fullSplitResults);
+
+    // Strategy 5: Custom splitter as call-site override
+    // Same parameter works for built-in and custom splitters
+    AgentEvaluationResults customSplitResults = await agent.EvaluateAsync(
+        queries,
+        new LocalEvaluator(EvalChecks.KeywordCheck("weather")),
+        splitter: new WeatherToolSplitter());
+
+    PrintResults("Custom Splitter Override", customSplitResults);
     Console.WriteLine();
 }
 finally
@@ -294,4 +302,33 @@ static void PrintResults(string title, AgentEvaluationResults results)
     }
 
     Console.WriteLine();
+}
+
+// ============================================================================
+// Custom Splitter — demonstrates IConversationSplitter
+// ============================================================================
+
+/// <summary>
+/// Example custom splitter that splits before the first tool call.
+/// Evaluates whether the agent's tool usage and final response are appropriate.
+/// </summary>
+sealed class WeatherToolSplitter : IConversationSplitter
+{
+    public (IReadOnlyList<ChatMessage> QueryMessages, IReadOnlyList<ChatMessage> ResponseMessages) Split(
+        IReadOnlyList<ChatMessage> conversation)
+    {
+        for (int i = 0; i < conversation.Count; i++)
+        {
+            if (conversation[i].Role == ChatRole.Assistant
+                && conversation[i].Contents.OfType<FunctionCallContent>().Any())
+            {
+                return (
+                    conversation.Take(i).ToList(),
+                    conversation.Skip(i).ToList());
+            }
+        }
+
+        // Fallback: use the default LastTurn split
+        return ConversationSplitters.LastTurn.Split(conversation);
+    }
 }

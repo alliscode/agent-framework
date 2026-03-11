@@ -47,81 +47,29 @@ public sealed class EvalItem
     public ChatResponse? RawResponse { get; set; }
 
     /// <summary>
-    /// Gets or sets the split strategy for this item.
+    /// Gets or sets the conversation splitter for this item.
     /// </summary>
     /// <remarks>
-    /// When set by orchestration functions (e.g. <c>EvaluateAsync(conversationSplit: ...)</c>),
-    /// this takes precedence over evaluator-level defaults.  Priority order:
-    /// explicit <see cref="Split(ConversationSplit?)"/> argument &gt;
-    /// <see cref="SplitStrategy"/> &gt; <see cref="ConversationSplit.LastTurn"/>.
+    /// When set by orchestration functions (e.g. <c>EvaluateAsync(splitter: ...)</c>),
+    /// this is used as the default by <see cref="Split(IConversationSplitter?)"/>.
+    /// Priority: explicit <c>Split(splitter)</c> argument &gt;
+    /// <see cref="Splitter"/> &gt; <see cref="ConversationSplitters.LastTurn"/>.
     /// </remarks>
-    public ConversationSplit? SplitStrategy { get; set; }
+    public IConversationSplitter? Splitter { get; set; }
 
     /// <summary>
     /// Splits the conversation into query messages and response messages.
     /// </summary>
-    /// <param name="split">
-    /// The split strategy to use. When <c>null</c>, uses <see cref="SplitStrategy"/>
-    /// if set, otherwise <see cref="ConversationSplit.LastTurn"/>.
+    /// <param name="splitter">
+    /// The splitter to use. When <c>null</c>, uses <see cref="Splitter"/>
+    /// if set, otherwise <see cref="ConversationSplitters.LastTurn"/>.
     /// </param>
     /// <returns>A tuple of (query messages, response messages).</returns>
     public (IReadOnlyList<ChatMessage> QueryMessages, IReadOnlyList<ChatMessage> ResponseMessages) Split(
-        ConversationSplit? split = null)
+        IConversationSplitter? splitter = null)
     {
-        var effective = split ?? this.SplitStrategy ?? ConversationSplit.LastTurn;
-
-        return effective switch
-        {
-            ConversationSplit.Full => SplitFull(this.Conversation),
-            _ => SplitLastTurn(this.Conversation),
-        };
-    }
-
-    /// <summary>
-    /// Splits the conversation using a custom splitter.
-    /// </summary>
-    /// <param name="splitter">The custom splitter implementation.</param>
-    /// <returns>A tuple of (query messages, response messages).</returns>
-    public (IReadOnlyList<ChatMessage> QueryMessages, IReadOnlyList<ChatMessage> ResponseMessages) Split(
-        IConversationSplitter splitter)
-    {
-        if (splitter is null)
-        {
-            throw new ArgumentNullException(nameof(splitter));
-        }
-
-        return splitter.Split(this.Conversation);
-    }
-
-    /// <summary>
-    /// Splits a conversation at the last user message.
-    /// </summary>
-    /// <remarks>
-    /// This static method is useful as a fallback in custom <see cref="IConversationSplitter"/>
-    /// implementations when the custom split pattern is not found.
-    /// </remarks>
-    /// <param name="conversation">The conversation to split.</param>
-    /// <returns>A tuple of (query messages, response messages).</returns>
-    public static (IReadOnlyList<ChatMessage> QueryMessages, IReadOnlyList<ChatMessage> ResponseMessages) SplitLastTurn(
-        IReadOnlyList<ChatMessage> conversation)
-    {
-        int lastUserIdx = -1;
-        for (int i = 0; i < conversation.Count; i++)
-        {
-            if (conversation[i].Role == ChatRole.User)
-            {
-                lastUserIdx = i;
-            }
-        }
-
-        if (lastUserIdx >= 0)
-        {
-            return (
-                conversation.Take(lastUserIdx + 1).ToList(),
-                conversation.Skip(lastUserIdx + 1).ToList());
-        }
-
-        return (Array.Empty<ChatMessage>(), conversation.ToList());
+        var effective = splitter ?? this.Splitter ?? ConversationSplitters.LastTurn;
+        return effective.Split(this.Conversation);
     }
 
     /// <summary>
@@ -159,7 +107,6 @@ public sealed class EvalItem
                 ? userIndices[t + 1]
                 : conversation.Count;
 
-            var queryMessages = conversation.Take(userIdx + 1).ToList();
             var responseMessages = conversation.Skip(userIdx + 1).Take(nextBoundary - userIdx - 1).ToList();
 
             var query = conversation[userIdx].Text ?? string.Empty;
@@ -180,28 +127,5 @@ public sealed class EvalItem
         }
 
         return items;
-    }
-
-    private static (IReadOnlyList<ChatMessage>, IReadOnlyList<ChatMessage>) SplitFull(
-        IReadOnlyList<ChatMessage> conversation)
-    {
-        int firstUserIdx = -1;
-        for (int i = 0; i < conversation.Count; i++)
-        {
-            if (conversation[i].Role == ChatRole.User)
-            {
-                firstUserIdx = i;
-                break;
-            }
-        }
-
-        if (firstUserIdx >= 0)
-        {
-            return (
-                conversation.Take(firstUserIdx + 1).ToList(),
-                conversation.Skip(firstUserIdx + 1).ToList());
-        }
-
-        return (Array.Empty<ChatMessage>(), conversation.ToList());
     }
 }
