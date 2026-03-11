@@ -12,8 +12,8 @@
 // For more details, see:
 // https://learn.microsoft.com/dotnet/ai/evaluation/libraries
 
-using Azure.AI.OpenAI;
 using Azure.AI.Projects;
+using Azure.AI.Projects.OpenAI;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -24,26 +24,25 @@ using Microsoft.Extensions.AI.Evaluation.Safety;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using ChatRole = Microsoft.Extensions.AI.ChatRole;
 
-string endpoint = Environment.GetEnvironmentVariable("AZURE_AI_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("AZURE_AI_PROJECT_ENDPOINT is not set.");
-string deploymentName = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
-string openAiEndpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-string evaluatorDeploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? deploymentName;
+string endpoint = Environment.GetEnvironmentVariable("AZURE_FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("AZURE_FOUNDRY_PROJECT_ENDPOINT is not set.");
+string deploymentName = Environment.GetEnvironmentVariable("AZURE_FOUNDRY_PROJECT_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
 
 Console.WriteLine("=" + new string('=', 79));
 Console.WriteLine("SELF-REFLECTION EVALUATION SAMPLE");
 Console.WriteLine("=" + new string('=', 79));
 Console.WriteLine();
 
-// Initialize Azure credentials and client
+// Initialize Azure credentials and client — everything derives from the project endpoint
 // WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
 // In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
 // latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 DefaultAzureCredential credential = new();
 AIProjectClient aiProjectClient = new(new Uri(endpoint), credential);
 
-// Set up the LLM-based chat client for quality evaluators
-IChatClient chatClient = new AzureOpenAIClient(new Uri(openAiEndpoint), credential)
-    .GetChatClient(evaluatorDeploymentName)
+// Get a chat client for LLM-based evaluators from the project client
+IChatClient chatClient = aiProjectClient
+    .GetProjectOpenAIClient()
+    .GetChatClient(deploymentName)
     .AsIChatClient();
 
 // Configure evaluation: quality evaluators use the LLM, safety evaluators use Azure AI Foundry

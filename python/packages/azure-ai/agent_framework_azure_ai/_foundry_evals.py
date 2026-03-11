@@ -27,7 +27,14 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Sequence
 
-from agent_framework._eval import EvalItem, EvalItemResult, EvalResults, EvalScoreResult
+from agent_framework._eval import (
+    ConversationSplit,
+    ConversationSplitter,
+    EvalItem,
+    EvalItemResult,
+    EvalResults,
+    EvalScoreResult,
+)
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI, OpenAI
@@ -515,6 +522,10 @@ class FoundryEvals:
         model_deployment: Model deployment name for the evaluator LLM judge.
         evaluators: Evaluator names (e.g. ``["relevance", "tool_call_accuracy"]``).
             When ``None`` (default), uses smart defaults based on item data.
+        conversation_split: How to split multi-turn conversations into
+            query/response halves.  Defaults to ``LAST_TURN``.  Pass a
+            ``ConversationSplit`` enum value or a custom callable — see
+            ``ConversationSplitter``.
         poll_interval: Seconds between status polls (default 5.0).
         timeout: Maximum seconds to wait for completion (default 600.0).
     """
@@ -526,12 +537,14 @@ class FoundryEvals:
         openai_client: OpenAI | AsyncOpenAI | None = None,
         model_deployment: str,
         evaluators: Sequence[str] | None = None,
+        conversation_split: ConversationSplitter = ConversationSplit.LAST_TURN,
         poll_interval: float = 5.0,
         timeout: float = 600.0,
     ):
         self._client = _resolve_openai_client(openai_client, project_client)
         self._model_deployment = model_deployment
         self._evaluators = list(evaluators) if evaluators is not None else None
+        self._conversation_split = conversation_split
         self._poll_interval = poll_interval
         self._timeout = timeout
 
@@ -629,7 +642,10 @@ class FoundryEvals:
         eval_name: str,
     ) -> EvalResults:
         """Evaluate using JSONL dataset upload path."""
-        dicts = [item.to_dict() for item in items]
+        dicts = [
+            item.to_dict(split=item.split_strategy or self._conversation_split)
+            for item in items
+        ]
         has_context = any("context" in d for d in dicts)
         has_tools = any("tool_definitions" in d for d in dicts)
 

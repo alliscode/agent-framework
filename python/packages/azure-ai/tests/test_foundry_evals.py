@@ -11,6 +11,7 @@ import pytest
 from agent_framework import AgentExecutorResponse, AgentResponse, Content, FunctionTool, Message, WorkflowEvent
 from agent_framework._eval import (
     AgentEvalConverter,
+    ConversationSplit,
     EvalItem,
     EvalResults,
     _extract_agent_eval_data,
@@ -317,7 +318,7 @@ class TestToEvalItem:
         assert item.tool_definitions[0]["name"] == "explicit_tool"
 
     def test_to_dict_format(self) -> None:
-        """EvalItem.to_dict() should split conversation into query_messages and response_messages."""
+        """EvalItem.to_dict() should split conversation at last user message."""
         response = AgentResponse(messages=[Message("assistant", ["Answer"])])
         item = AgentEvalConverter.to_eval_item(
             query="Q",
@@ -327,12 +328,291 @@ class TestToEvalItem:
         d = item.to_dict()
         assert isinstance(d["query_messages"], list)
         assert isinstance(d["response_messages"], list)
-        # user messages go to query_messages, assistant to response_messages
-        assert all(m["role"] in ("system", "user") for m in d["query_messages"])
-        assert all(m["role"] in ("assistant", "tool") for m in d["response_messages"])
+        # Single-turn: query_messages has just the user msg, response_messages has the assistant msg
+        assert len(d["query_messages"]) == 1
+        assert d["query_messages"][0]["role"] == "user"
+        assert len(d["response_messages"]) == 1
+        assert d["response_messages"][0]["role"] == "assistant"
         assert isinstance(d["tool_definitions"], list)
         assert d["tool_definitions"] == item.tool_definitions
         assert "conversation" not in d
+
+    def test_to_dict_multiturn_preserves_interleaving(self) -> None:
+        """Multi-turn to_dict() splits at last user message, preserving interleaving."""
+        conversation = [
+            {"role": "user", "content": "What's the weather?"},
+            {"role": "assistant", "content": "It's sunny in Seattle."},
+            {"role": "user", "content": "And tomorrow?"},
+            {"role": "assistant", "content": [{"type": "tool_call", "name": "get_forecast"}]},
+            {"role": "tool", "content": [{"type": "tool_result", "tool_result": "Rain expected"}]},
+            {"role": "assistant", "content": "Rain is expected tomorrow."},
+        ]
+        item = EvalItem(
+            query="And tomorrow?",
+            response="Rain is expected tomorrow.",
+            conversation=conversation,
+        )
+        d = item.to_dict()
+        # query_messages: everything up to and including the last user message
+        assert len(d["query_messages"]) == 3  # user, assistant, user
+        assert d["query_messages"][0]["role"] == "user"
+        assert d["query_messages"][1]["role"] == "assistant"  # interleaved!
+        assert d["query_messages"][2]["role"] == "user"
+        # response_messages: everything after the last user message
+        assert len(d["response_messages"]) == 3  # assistant(tool_call), tool, assistant
+        assert d["response_messages"][0]["role"] == "assistant"
+        assert d["response_messages"][1]["role"] == "tool"
+        assert d["response_messages"][2]["role"] == "assistant"
+
+    def test_to_dict_full_split(self) -> None:
+        """ConversationSplit.FULL splits after the first user message."""
+        conversation = [
+            {"role": "user", "content": "What's the weather?"},
+            {"role": "assistant", "content": "It's 62°F in Seattle."},
+            {"role": "user", "content": "And tomorrow?"},
+            {"role": "assistant", "content": "Rain is expected tomorrow."},
+        ]
+        item = EvalItem(
+            query="What's the weather?",
+            response="Rain is expected tomorrow.",
+            conversation=conversation,
+        )
+        d = item.to_dict(split=ConversationSplit.FULL)
+        # query_messages: just the first user message
+        assert len(d["query_messages"]) == 1
+        assert d["query_messages"][0]["role"] == "user"
+        assert d["query_messages"][0]["content"] == "What's the weather?"
+        # response_messages: everything after the first user message
+        assert len(d["response_messages"]) == 3
+        assert d["response_messages"][0]["role"] == "assistant"
+        assert d["response_messages"][1]["role"] == "user"
+        assert d["response_messages"][2]["role"] == "assistant"
+
+    def test_to_dict_full_split_with_system(self) -> None:
+        """FULL split includes system messages before the first user message in query."""
+        conversation = [
+            {"role": "system", "content": "You are a weather assistant."},
+            {"role": "user", "content": "What's the weather?"},
+            {"role": "assistant", "content": "It's sunny."},
+        ]
+        item = EvalItem(query="What's the weather?", response="It's sunny.", conversation=conversation)
+        d = item.to_dict(split=ConversationSplit.FULL)
+        # query includes system + first user
+        assert len(d["query_messages"]) == 2
+        assert d["query_messages"][0]["role"] == "system"
+        assert d["query_messages"][1]["role"] == "user"
+        assert len(d["response_messages"]) == 1
+
+    def test_to_dict_full_split_with_tools(self) -> None:
+        """FULL split puts all tool interactions in response_messages."""
+        conversation = [
+            {"role": "user", "content": "What's the weather?"},
+            {"role": "assistant", "content": [{"type": "tool_call", "name": "get_weather"}]},
+            {"role": "tool", "content": [{"type": "tool_result", "tool_result": "62°F"}]},
+            {"role": "assistant", "content": "It's 62°F."},
+            {"role": "user", "content": "Thanks!"},
+            {"role": "assistant", "content": "You're welcome!"},
+        ]
+        item = EvalItem(query="What's the weather?", response="You're welcome!", conversation=conversation)
+        d = item.to_dict(split=ConversationSplit.FULL)
+        assert len(d["query_messages"]) == 1
+        assert len(d["response_messages"]) == 5
+
+    def test_to_dict_last_turn_is_default(self) -> None:
+        """Default to_dict() uses LAST_TURN split."""
+        conversation = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there"},
+            {"role": "user", "content": "Bye"},
+            {"role": "assistant", "content": "Goodbye"},
+        ]
+        item = EvalItem(query="Bye", response="Goodbye", conversation=conversation)
+        d_default = item.to_dict()
+        d_explicit = item.to_dict(split=ConversationSplit.LAST_TURN)
+        assert d_default["query_messages"] == d_explicit["query_messages"]
+        assert d_default["response_messages"] == d_explicit["response_messages"]
+
+    def test_per_turn_items_simple(self) -> None:
+        """per_turn_items produces one EvalItem per user message."""
+        conversation = [
+            {"role": "user", "content": "What's the weather?"},
+            {"role": "assistant", "content": "It's 62°F."},
+            {"role": "user", "content": "And tomorrow?"},
+            {"role": "assistant", "content": "Rain expected."},
+        ]
+        items = EvalItem.per_turn_items(conversation)
+        assert len(items) == 2
+
+        # Turn 1
+        assert items[0].query == "What's the weather?"
+        assert items[0].response == "It's 62°F."
+        assert len(items[0].conversation) == 2
+
+        # Turn 2 — includes cumulative context
+        assert items[1].query == "And tomorrow?"
+        assert items[1].response == "Rain expected."
+        assert len(items[1].conversation) == 4
+
+    def test_per_turn_items_with_tools(self) -> None:
+        """per_turn_items handles tool calls within a turn."""
+        conversation = [
+            {"role": "user", "content": "Check weather"},
+            {"role": "assistant", "content": [{"type": "tool_call", "name": "get_weather"}]},
+            {"role": "tool", "content": [{"type": "tool_result", "tool_result": "sunny"}]},
+            {"role": "assistant", "content": "It's sunny."},
+            {"role": "user", "content": "Thanks"},
+            {"role": "assistant", "content": "You're welcome!"},
+        ]
+        tools = [{"name": "get_weather", "description": "Get weather"}]
+        items = EvalItem.per_turn_items(conversation, tool_definitions=tools)
+        assert len(items) == 2
+
+        # Turn 1: response includes tool_call, tool_result, and final assistant
+        assert items[0].response == "It's sunny."
+        assert items[0].tool_definitions == tools
+        assert len(items[0].conversation) == 4  # user, assistant(tool), tool, assistant
+
+        # Turn 2
+        assert items[1].response == "You're welcome!"
+        assert len(items[1].conversation) == 6  # full conversation
+
+    def test_per_turn_items_empty(self) -> None:
+        """per_turn_items returns empty list when no user messages."""
+        items = EvalItem.per_turn_items([{"role": "assistant", "content": "Hello"}])
+        assert items == []
+
+    def test_per_turn_items_single_turn(self) -> None:
+        """per_turn_items with single turn produces one item."""
+        conversation = [
+            {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": "Hello!"},
+        ]
+        items = EvalItem.per_turn_items(conversation)
+        assert len(items) == 1
+        assert items[0].query == "Hi"
+        assert items[0].response == "Hello!"
+
+    def test_custom_splitter_callable(self) -> None:
+        """Custom callable splitter is used by to_dict()."""
+        conversation = [
+            {"role": "user", "content": "Remember my name is Alice"},
+            {"role": "assistant", "content": "Got it, Alice!"},
+            {"role": "user", "content": "What's the capital of France?"},
+            {"role": "assistant", "content": [{"type": "tool_call", "name": "retrieve_memory", "tool_call_id": "m1"}]},
+            {"role": "tool", "tool_call_id": "m1", "content": [{"type": "tool_result", "tool_result": "User name: Alice"}]},
+            {"role": "assistant", "content": "The capital of France is Paris, Alice!"},
+        ]
+
+        def split_before_memory(conv):
+            """Split just before the memory retrieval tool call."""
+            for i, msg in enumerate(conv):
+                content = msg.get("content", [])
+                if isinstance(content, list):
+                    for c in content:
+                        if isinstance(c, dict) and c.get("name") == "retrieve_memory":
+                            return conv[:i], conv[i:]
+            return EvalItem._split_last_turn_static(conv)
+
+        item = EvalItem(query="What's the capital?", response="Paris, Alice!", conversation=conversation)
+        d = item.to_dict(split=split_before_memory)
+
+        # split_before_memory finds "retrieve_memory" at conv[3] (assistant tool_call msg)
+        # query = conv[:3] = [user, assistant, user]
+        # response = conv[3:] = [assistant(tool_call), tool, assistant]
+        assert len(d["query_messages"]) == 3
+        assert d["query_messages"][-1]["role"] == "user"
+        assert len(d["response_messages"]) == 3
+        assert d["response_messages"][0]["role"] == "assistant"  # the tool_call msg
+
+    def test_custom_splitter_with_fallback(self) -> None:
+        """Custom splitter falls back to _split_last_turn_static when pattern not found."""
+        conversation = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ]
+
+        def split_before_memory(conv):
+            for i, msg in enumerate(conv):
+                content = msg.get("content", [])
+                if isinstance(content, list):
+                    for c in content:
+                        if isinstance(c, dict) and c.get("name") == "retrieve_memory":
+                            return conv[:i], conv[i:]
+            return EvalItem._split_last_turn_static(conv)
+
+        item = EvalItem(query="Hello", response="Hi there!", conversation=conversation)
+        d = item.to_dict(split=split_before_memory)
+        # Falls back to last-turn split
+        assert len(d["query_messages"]) == 1
+        assert d["query_messages"][0]["role"] == "user"
+        assert len(d["response_messages"]) == 1
+        assert d["response_messages"][0]["role"] == "assistant"
+
+    def test_custom_splitter_lambda(self) -> None:
+        """A lambda works as a custom splitter."""
+        conversation = [
+            {"role": "user", "content": "A"},
+            {"role": "assistant", "content": "B"},
+            {"role": "user", "content": "C"},
+            {"role": "assistant", "content": "D"},
+        ]
+        # Split at index 2 (arbitrary)
+        item = EvalItem(query="C", response="D", conversation=conversation)
+        d = item.to_dict(split=lambda conv: (conv[:2], conv[2:]))
+        assert len(d["query_messages"]) == 2
+        assert len(d["response_messages"]) == 2
+
+    def test_split_strategy_on_item_used_by_to_dict(self) -> None:
+        """split_strategy field on EvalItem is used as default by to_dict()."""
+        conversation = [
+            {"role": "user", "content": "First"},
+            {"role": "assistant", "content": "Response 1"},
+            {"role": "user", "content": "Second"},
+            {"role": "assistant", "content": "Response 2"},
+        ]
+        item = EvalItem(
+            query="Second",
+            response="Response 2",
+            conversation=conversation,
+            split_strategy=ConversationSplit.FULL,
+        )
+        # to_dict() with no split arg should use item.split_strategy
+        d = item.to_dict()
+        assert len(d["query_messages"]) == 1  # FULL: just first user msg
+        assert d["query_messages"][0]["content"] == "First"
+        assert len(d["response_messages"]) == 3
+
+    def test_explicit_split_overrides_item_split_strategy(self) -> None:
+        """Explicit split= arg to to_dict() overrides item.split_strategy."""
+        conversation = [
+            {"role": "user", "content": "First"},
+            {"role": "assistant", "content": "Response 1"},
+            {"role": "user", "content": "Second"},
+            {"role": "assistant", "content": "Response 2"},
+        ]
+        item = EvalItem(
+            query="Second",
+            response="Response 2",
+            conversation=conversation,
+            split_strategy=ConversationSplit.FULL,
+        )
+        # Explicit split= should override split_strategy
+        d = item.to_dict(split=ConversationSplit.LAST_TURN)
+        assert len(d["query_messages"]) == 3  # LAST_TURN: up to last user
+        assert d["query_messages"][-1]["content"] == "Second"
+        assert len(d["response_messages"]) == 1
+
+    def test_no_split_defaults_to_last_turn(self) -> None:
+        """When neither split= nor split_strategy is set, defaults to LAST_TURN."""
+        conversation = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi"},
+        ]
+        item = EvalItem(query="Hello", response="Hi", conversation=conversation)
+        assert item.split_strategy is None
+        d = item.to_dict()
+        assert len(d["query_messages"]) == 1
+        assert d["query_messages"][0]["role"] == "user"
 
 
 # ---------------------------------------------------------------------------

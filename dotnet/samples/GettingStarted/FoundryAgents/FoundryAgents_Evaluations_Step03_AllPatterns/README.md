@@ -16,7 +16,6 @@ This sample demonstrates all evaluation patterns available in Agent Framework fo
 - Azure AI Foundry project with a deployed model
 - Set environment variables:
   - `AZURE_FOUNDRY_PROJECT_ENDPOINT` — Your Azure AI Foundry project endpoint
-  - `AZURE_OPENAI_ENDPOINT` — Your Azure OpenAI endpoint
   - `AZURE_FOUNDRY_PROJECT_DEPLOYMENT_NAME` — Model deployment name (default: `gpt-4o-mini`)
 
 ## Key Types

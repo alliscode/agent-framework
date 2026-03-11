@@ -21,8 +21,10 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, Sequence, runtime_checkable
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Protocol, Sequence, Union, runtime_checkable
 
 from ._tools import FunctionTool
 from ._types import AgentResponse, Message
@@ -37,6 +39,57 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Core types
 # ---------------------------------------------------------------------------
+
+
+class ConversationSplit(str, Enum):
+    """Built-in strategies for splitting a conversation into query/response halves.
+
+    Different splits evaluate different aspects of agent behavior:
+
+    - ``LAST_TURN``: Split at the last user message.  Everything up to and
+      including that message is the query; everything after is the response.
+      Evaluates whether the agent answered the *latest* question well.
+
+    - ``FULL``: The first user message (and any preceding system messages) is
+      the query; the entire remainder of the conversation is the response.
+      Evaluates whether the *whole conversation trajectory* served the
+      original request.
+
+    For custom splits (e.g. split before a memory-retrieval tool call),
+    pass a callable instead — see ``ConversationSplitter``.
+    """
+
+    LAST_TURN = "last_turn"
+    FULL = "full"
+
+
+ConversationSplitter = Union[
+    ConversationSplit,
+    Callable[[list[dict[str, Any]]], tuple[list[dict[str, Any]], list[dict[str, Any]]]],
+]
+"""Type accepted by ``EvalItem.to_dict(split=...)``.
+
+Either a built-in ``ConversationSplit`` enum value **or** a callable with
+signature::
+
+    def my_splitter(conversation: list[dict]) -> tuple[list[dict], list[dict]]:
+        '''Return (query_messages, response_messages).'''
+
+Custom splitters let you evaluate domain-specific boundaries — for example,
+splitting just before a memory-retrieval tool call to evaluate recall quality::
+
+    def split_before_memory(conversation):
+        for i, msg in enumerate(conversation):
+            content = msg.get("content", [])
+            if isinstance(content, list):
+                for c in content:
+                    if c.get("name") == "retrieve_memory":
+                        return conversation[:i], conversation[i:]
+        # Fallback: split at last user message
+        return EvalItem._split_last_turn_static(conversation)
+
+    item.to_dict(split=split_before_memory)
+"""
 
 
 @dataclass
@@ -55,6 +108,9 @@ class EvalItem:
         expected: Optional expected output for ground-truth comparison.
         response_id: Responses API response ID (for providers that support
             server-side retrieval).
+        split_strategy: Optional split strategy set by orchestration functions
+            (e.g. ``evaluate_agent(conversation_split=...)``).  When set, this
+            is used as the default by ``to_dict()`` and by evaluators.
     """
 
     query: str
@@ -64,22 +120,28 @@ class EvalItem:
     context: str | None = None
     expected: str | None = None
     response_id: str | None = None
+    split_strategy: ConversationSplitter | None = None
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(
+        self,
+        *,
+        split: ConversationSplitter | None = None,
+    ) -> dict[str, Any]:
         """Convert to a flat dict for serialization.
 
-        Produces ``query_messages`` (system + user) and ``response_messages``
-        (assistant + tool) from the conversation, matching the Foundry agent
-        evaluator schema where ``query`` and ``response`` each accept either
-        a string or a conversation array.
+        Produces ``query_messages`` and ``response_messages`` by splitting
+        the conversation according to *split*:
+
+        - ``LAST_TURN`` (default): split at the last user message.
+        - ``FULL``: split after the first user message.
+        - A callable: your function receives the conversation list and
+          returns ``(query_messages, response_messages)``.
+
+        When *split* is ``None`` (the default), uses ``self.split_strategy``
+        if set, otherwise ``ConversationSplit.LAST_TURN``.
         """
-        query_msgs: list[dict[str, Any]] = []
-        response_msgs: list[dict[str, Any]] = []
-        for msg in self.conversation:
-            if msg.get("role") in ("system", "user"):
-                query_msgs.append(msg)
-            else:
-                response_msgs.append(msg)
+        effective_split = split or self.split_strategy or ConversationSplit.LAST_TURN
+        query_msgs, response_msgs = self._split_conversation(effective_split)
 
         item: dict[str, Any] = {
             "query": self.query,
@@ -92,6 +154,118 @@ class EvalItem:
         if self.context:
             item["context"] = self.context
         return item
+
+    def _split_conversation(
+        self, split: ConversationSplitter
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Split ``self.conversation`` into (query_messages, response_messages)."""
+        if callable(split) and not isinstance(split, ConversationSplit):
+            return split(self.conversation)
+        if split == ConversationSplit.FULL:
+            return self._split_full()
+        return self._split_last_turn()
+
+    def _split_last_turn(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Split at the last user message (default strategy)."""
+        return self._split_last_turn_static(self.conversation)
+
+    @staticmethod
+    def _split_last_turn_static(
+        conversation: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Split at the last user message.  Usable as a fallback in custom splitters."""
+        last_user_idx = -1
+        for i, msg in enumerate(conversation):
+            if msg.get("role") == "user":
+                last_user_idx = i
+
+        if last_user_idx >= 0:
+            return (
+                conversation[: last_user_idx + 1],
+                conversation[last_user_idx + 1 :],
+            )
+        return [], list(conversation)
+
+    def _split_full(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Split after the first user message (evaluates whole trajectory)."""
+        first_user_idx = -1
+        for i, msg in enumerate(self.conversation):
+            if msg.get("role") == "user":
+                first_user_idx = i
+                break
+
+        if first_user_idx >= 0:
+            return (
+                self.conversation[: first_user_idx + 1],
+                self.conversation[first_user_idx + 1 :],
+            )
+        return [], list(self.conversation)
+
+    @classmethod
+    def per_turn_items(
+        cls,
+        conversation: list[dict[str, Any]],
+        *,
+        tool_definitions: list[dict[str, Any]] | None = None,
+        context: str | None = None,
+    ) -> list[EvalItem]:
+        """Split a multi-turn conversation into one ``EvalItem`` per turn.
+
+        Each user message starts a new turn.  The resulting ``EvalItem``
+        has cumulative context: ``query_messages`` contains the full
+        conversation up to and including that user message, and
+        ``response_messages`` contains the agent's actions up to the next
+        user message.  This lets you evaluate each response independently
+        with its full preceding context.
+
+        Args:
+            conversation: Full conversation in evaluator message format.
+            tool_definitions: Tool definitions shared across all items.
+            context: Optional grounding context shared across all items.
+
+        Returns:
+            A list of ``EvalItem`` instances, one per user turn.
+        """
+        user_indices = [i for i, m in enumerate(conversation) if m.get("role") == "user"]
+        if not user_indices:
+            return []
+
+        items: list[EvalItem] = []
+        for turn_idx, ui in enumerate(user_indices):
+            # Response runs from after the user message to the next user
+            # message (or end of conversation).
+            next_ui = user_indices[turn_idx + 1] if turn_idx + 1 < len(user_indices) else len(conversation)
+
+            query_msgs = conversation[: ui + 1]
+            response_msgs = conversation[ui + 1 : next_ui]
+
+            query_text = cls._extract_text(conversation[ui])
+            response_text = " ".join(
+                cls._extract_text(m) for m in response_msgs if m.get("role") == "assistant"
+            ).strip()
+
+            items.append(
+                cls(
+                    query=query_text,
+                    response=response_text,
+                    conversation=conversation[: next_ui],
+                    tool_definitions=tool_definitions,
+                    context=context,
+                )
+            )
+
+        return items
+
+    @staticmethod
+    def _extract_text(msg: dict[str, Any]) -> str:
+        """Extract plain text from a message dict."""
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+            return " ".join(parts).strip()
+        return str(content)
 
 
 @dataclass
@@ -627,6 +801,7 @@ async def evaluate_agent(
     evaluators: Evaluator | Sequence[Evaluator],
     eval_name: str | None = None,
     context: str | None = None,
+    conversation_split: ConversationSplitter | None = None,
 ) -> list[EvalResults]:
     """Run an agent against test queries and evaluate the results.
 
@@ -650,6 +825,8 @@ async def evaluate_agent(
         evaluators: One or more ``Evaluator`` instances.
         eval_name: Display name (defaults to agent name).
         context: Optional context for groundedness evaluation.
+        conversation_split: Split strategy applied to all items, overriding
+            each evaluator's default.  See ``ConversationSplitter``.
 
     Returns:
         A list of ``EvalResults``, one per evaluator provider.
@@ -724,6 +901,11 @@ async def evaluate_agent(
     else:
         raise ValueError("Provide either 'queries' or 'responses' (or both).")
 
+    # Stamp split strategy on items so evaluators respect it
+    if conversation_split is not None:
+        for item in items:
+            item.split_strategy = conversation_split
+
     name = eval_name or f"Eval: {getattr(agent, 'name', None) or getattr(agent, 'id', 'agent')}"
     return await _run_evaluators(evaluators, items, eval_name=name)
 
@@ -769,6 +951,7 @@ async def evaluate_workflow(
     eval_name: str | None = None,
     include_overall: bool = True,
     include_per_agent: bool = True,
+    conversation_split: ConversationSplitter | None = None,
 ) -> list[EvalResults]:
     """Evaluate a multi-agent workflow with per-agent breakdown.
 
@@ -791,6 +974,8 @@ async def evaluate_workflow(
         eval_name: Display name for the evaluation.
         include_overall: Whether to evaluate the workflow's final output.
         include_per_agent: Whether to evaluate each sub-agent individually.
+        conversation_split: Split strategy applied to all items, overriding
+            each evaluator's default.  See ``ConversationSplitter``.
 
     Returns:
         A list of ``EvalResults``, one per evaluator provider, each with
@@ -872,6 +1057,14 @@ async def evaluate_workflow(
         raise ValueError(
             "No agent executor data found in the workflow result. Ensure the workflow uses AgentExecutor-based agents."
         )
+
+    # Stamp split strategy on all items so evaluators respect it
+    if conversation_split is not None:
+        for items in agent_items_by_id.values():
+            for item in items:
+                item.split_strategy = conversation_split
+        for item in overall_items:
+            item.split_strategy = conversation_split
 
     # Run each provider, building per-agent sub_results for each
     all_results: list[EvalResults] = []

@@ -11,8 +11,8 @@
 //
 // Mirrors the Python sample: evaluate_all_patterns_sample.py
 
-using Azure.AI.OpenAI;
 using Azure.AI.Projects;
+using Azure.AI.Projects.OpenAI;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.AzureAI;
@@ -28,21 +28,20 @@ using Evaluators = Microsoft.Agents.AI.AzureAI.Evaluators;
 string endpoint = Environment.GetEnvironmentVariable("AZURE_FOUNDRY_PROJECT_ENDPOINT")
     ?? throw new InvalidOperationException("AZURE_FOUNDRY_PROJECT_ENDPOINT is not set.");
 string deploymentName = Environment.GetEnvironmentVariable("AZURE_FOUNDRY_PROJECT_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
-string openAiEndpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-string evaluatorDeploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? deploymentName;
 
 Console.WriteLine("=" + new string('=', 79));
 Console.WriteLine("AGENT FRAMEWORK EVALUATION — ALL PATTERNS");
 Console.WriteLine("=" + new string('=', 79));
 Console.WriteLine();
 
-// Initialize Azure credentials and clients
+// Initialize Azure credentials and clients — everything derives from the project endpoint
 DefaultAzureCredential credential = new();
 AIProjectClient aiProjectClient = new(new Uri(endpoint), credential);
 
-IChatClient chatClient = new AzureOpenAIClient(new Uri(openAiEndpoint), credential)
-    .GetChatClient(evaluatorDeploymentName)
+// Get a chat client for LLM-based evaluators from the project client
+IChatClient chatClient = aiProjectClient
+    .GetProjectOpenAIClient()
+    .GetChatClient(deploymentName)
     .AsIChatClient();
 
 ContentSafetyServiceConfiguration safetyConfig = new(

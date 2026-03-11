@@ -3,7 +3,7 @@
 import asyncio
 import os
 
-from agent_framework import Agent, AgentEvalConverter, Message, evaluate_agent, evaluate_response
+from agent_framework import Agent, AgentEvalConverter, ConversationSplit, Message, evaluate_agent, evaluate_response
 from agent_framework.azure import AzureOpenAIResponsesClient
 from agent_framework_azure_ai import Evaluators, FoundryEvals
 from azure.ai.projects.aio import AIProjectClient
@@ -124,11 +124,11 @@ async def main():
             print(f"✗ {r.failed} failed, {r.errored} errored")
 
     # =========================================================================
-    # Pattern 2: evaluate_agent() — batch test queries
+    # Pattern 2a: evaluate_agent() — batch test queries
     # =========================================================================
     print()
     print("=" * 60)
-    print("Pattern 2: evaluate_agent()")
+    print("Pattern 2a: evaluate_agent()")
     print("=" * 60)
 
     results = await evaluate_agent(
@@ -139,6 +139,35 @@ async def main():
             "What should I pack for London?",
         ],
         evaluators=evals,  # uses smart defaults (auto-adds tool_call_accuracy)
+    )
+
+    for r in results:
+        print(f"Status: {r.status}")
+        print(f"Results: {r.passed}/{r.total} passed")
+        print(f"Portal: {r.report_url}")
+        if r.all_passed:
+            print("✓ All passed")
+        else:
+            print(f"✗ {r.failed} failed, {r.errored} errored")
+
+    # =========================================================================
+    # Pattern 2b: evaluate_agent() — with conversation split override
+    # =========================================================================
+    print()
+    print("=" * 60)
+    print("Pattern 2b: evaluate_agent() with conversation_split")
+    print("=" * 60)
+
+    # conversation_split forces all evaluators to use the same split strategy.
+    # FULL evaluates the entire conversation trajectory against the original query.
+    results = await evaluate_agent(
+        agent=agent,
+        queries=[
+            "What's the weather like in Seattle?",
+            "What should I pack for London?",
+        ],
+        evaluators=evals,
+        conversation_split=ConversationSplit.FULL,  # overrides evaluator defaults
     )
 
     for r in results:

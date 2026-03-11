@@ -22,7 +22,111 @@ However, using Foundry Evals with an agent-framework agent today requires signif
 
 Additionally, evaluation is a concern that extends beyond any single provider. Developers may want to use local evaluators (LLM-as-judge, regex, keyword matching), third-party evaluation libraries, or multiple providers in combination. The architecture must support this without creating a Foundry-specific lock-in at the API level.
 
-The goal is: any agent-framework agent evaluable with any evaluation provider in 3-5 lines of code.
+### Eval Scenarios in Agent Framework
+
+Agent evaluation has several distinct shapes depending on the agent topology.
+
+**Single agent, single query.** The simplest case — one agent, one query, one response:
+
+```
+results = evaluate(agent, query="What's the weather?", evaluator=evals)
+# results.passed / results.total → 3/3
+# results.items[0].scores → {relevance: 5, coherence: 4, task_adherence: 5}
+```
+
+This produces a flat list of scored items — one item per query. Even this simple case benefits from an aggregate result type that can report pass/fail across multiple evaluator dimensions.
+
+**Single agent, batch of queries.** The natural extension — run multiple queries and get per-item results:
+
+```
+results = evaluate(agent, queries=["What's the weather?", "Book a flight"], evaluator=evals)
+# results.items → [item_0_scores, item_1_scores]
+# results.passed → 5, results.failed → 1, results.total → 6
+```
+
+Each query produces one `EvalItem` with its own scores. The result container aggregates across all items and all evaluator dimensions, so `passed` is the total number of passing scores across all items. This is where a container type starts earning its keep — you need something that holds per-item detail while also giving you the aggregate view for CI assertions (`results.assert_passed()`).
+
+**Multi-turn conversations.** An agent that carries a multi-turn conversation still produces one evaluated interaction per conversation, but the evaluator needs the full conversation history to score accurately:
+
+```
+results = evaluate(agent, queries=["What's the weather?", "And tomorrow?"], evaluator=evals)
+# The second query is evaluated with the full conversation context:
+#   results.items[1].conversation → [user: "What's the weather?", assistant: "...", user: "And tomorrow?"]
+```
+
+The evaluation data format (`EvalItem`) must carry the complete conversation — including intermediate tool calls and their results — not just the final query/response pair. This is what allows evaluators to assess coherence across turns and verify that the agent maintained context.
+
+**Multi-turn with multiple evaluators.** When you run both local checks and cloud evaluators on the same data, you get one result set per evaluator:
+
+```
+results = evaluate(agent, queries=queries, evaluators=[local_checks, foundry_evals])
+# results → [local_results, foundry_results]
+# results[0].provider → "LocalEvaluator", results[0].passed → 4/4
+# results[1].provider → "FoundryEvals",   results[1].passed → 5/6
+```
+
+This is why `evaluate` returns a list when given multiple evaluators — each evaluator produces its own `EvalResults` with its own pass/fail semantics. Local checks use boolean pass/fail; cloud evaluators may use numeric scores with thresholds.
+
+**Workflows with sub-agents.** A workflow orchestrates multiple agents. When evaluating a completed workflow run, you want both the overall result and a per-agent breakdown so you can pinpoint which agent is underperforming:
+
+```
+run = workflow.run("Plan a trip to Paris")
+results = evaluate(workflow, run=run, evaluator=evals)
+# results.passed → 8/10 (overall)
+# results.sub_results → {
+#   "planner":    {passed: 3/3},
+#   "researcher": {passed: 3/4},  ← this agent needs work
+#   "writer":     {passed: 2/3},
+# }
+```
+
+The result container's `sub_results` field maps agent names to their own result sets, using the same result type recursively. This lets you drill into any agent's scores while still getting the aggregate view at the workflow level.
+
+**Pre-existing responses.** Sometimes you already have responses from production or a previous run. You want to evaluate them without re-running the agent:
+
+```
+response = agent.run("What's the weather?")
+# ... later ...
+results = evaluate(agent, response=response, evaluator=evals)
+```
+
+The agent is still provided so the evaluator can access tool definitions and instructions for context, but it isn't invoked. The framework extracts the conversation from the existing response and builds eval items from it.
+
+**Summary.** These scenarios share a common shape: orchestration that runs (or reuses) agent interactions, extracts structured data into a provider-agnostic format, delegates to one or more evaluators, and aggregates results into a container that supports both per-item inspection and aggregate pass/fail. The design below implements this shape.
+
+### Conversation Split Strategies
+
+Multi-turn conversations must be split into query (input) and response (output) halves for evaluation. How you split determines *what you're evaluating*:
+
+**Last-turn split** — split at the last user message. Everything up to and including it is the query context; the agent's subsequent actions are the response:
+
+```
+conversation: user1 → assistant1 → user2 → assistant2(tool) → tool_result → assistant3
+query_messages:    [user1, assistant1, user2]
+response_messages: [assistant2(tool), tool_result, assistant3]
+```
+
+This evaluates: "Given all the context so far, did the agent answer the latest question well?" Best for response quality at a specific point in the conversation.
+
+**Full-conversation split** — the first user message is the query; everything after is the response:
+
+```
+query_messages:    [user1]
+response_messages: [assistant1, user2, assistant2(tool), tool_result, assistant3]
+```
+
+This evaluates: "Given the original request, did the entire conversation trajectory serve the user?" Best for task completion and overall conversation quality.
+
+**Per-turn split** — produces N eval items from an N-turn conversation. Each turn is evaluated with its cumulative context:
+
+```
+item 1: query = [user1],                        response = [assistant1]
+item 2: query = [user1, assistant1, user2],      response = [assistant2(tool), tool_result, assistant3]
+```
+
+This evaluates each response independently. Best for fine-grained analysis and pinpointing where a conversation goes wrong.
+
+These factorings produce different scores for the same conversation. An agent could score well on every individual turn (last-turn) but take a poor path overall (full), or vice versa. The framework supports all three, defaulting to last-turn since it matches the most common "evaluate the latest response" scenario.
 
 ## Decision Drivers
 

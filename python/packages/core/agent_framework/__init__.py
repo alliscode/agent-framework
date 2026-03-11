@@ -30,6 +30,8 @@ from ._clients import (
     SupportsWebSearchTool,
 )
 from ._eval import (
+    ConversationSplit,
+    ConversationSplitter,
     EvalItem,
     EvalItemResult,
     EvalResults,
@@ -250,6 +252,8 @@ __all__ = [
     "EmbeddingGenerationOptions",
     "EmbeddingInputT",
     "EmbeddingT",
+    "ConversationSplit",
+    "ConversationSplitter",
     "EvalItem",
     "EvalItemResult",
     "EvalResults",
