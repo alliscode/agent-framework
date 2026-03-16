@@ -8,7 +8,7 @@ namespace Microsoft.Agents.AI.AzureAI;
 /// <remarks>
 /// Use these instead of raw strings for IDE autocomplete and typo prevention.
 /// </remarks>
-public static class Evaluators
+public static class FoundryEvals
 {
     // Agent behavior
 

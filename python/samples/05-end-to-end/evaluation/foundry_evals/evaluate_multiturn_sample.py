@@ -4,7 +4,7 @@ import asyncio
 import os
 
 from agent_framework import ConversationSplit, EvalItem
-from agent_framework_azure_ai import Evaluators, FoundryEvals
+from agent_framework_azure_ai import FoundryEvals
 from azure.ai.projects.aio import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
@@ -117,7 +117,7 @@ async def main():
     results = await FoundryEvals(
         project_client=project_client,
         model_deployment=deployment,
-        evaluators=[Evaluators.RELEVANCE, Evaluators.COHERENCE],
+        evaluators=[FoundryEvals.RELEVANCE, FoundryEvals.COHERENCE],
         # conversation_split defaults to LAST_TURN
     ).evaluate([item], eval_name="Split Strategy: LAST_TURN")
 
@@ -141,7 +141,7 @@ async def main():
     results = await FoundryEvals(
         project_client=project_client,
         model_deployment=deployment,
-        evaluators=[Evaluators.RELEVANCE, Evaluators.COHERENCE],
+        evaluators=[FoundryEvals.RELEVANCE, FoundryEvals.COHERENCE],
         conversation_split=ConversationSplit.FULL,
     ).evaluate([item], eval_name="Split Strategy: FULL")
 
@@ -171,7 +171,7 @@ async def main():
     results = await FoundryEvals(
         project_client=project_client,
         model_deployment=deployment,
-        evaluators=[Evaluators.RELEVANCE, Evaluators.COHERENCE],
+        evaluators=[FoundryEvals.RELEVANCE, FoundryEvals.COHERENCE],
     ).evaluate(items, eval_name="Split Strategy: Per-Turn")
 
     print(f"\n  Result: {results.passed}/{results.total} passed ({len(items)} items × 2 evaluators)")

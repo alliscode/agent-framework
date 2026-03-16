@@ -113,17 +113,9 @@ def tool_called_check(*tool_names: str) -> EvalCheck:
     def _check(item: EvalItem) -> CheckResult:
         called: set[str] = set()
         for msg in item.conversation:
-            # Foundry format: content is a list of typed items
-            for ci in msg.get("content", []):
-                if isinstance(ci, dict) and ci.get("type") == "tool_call":
-                    name = ci.get("name", "")
-                    if name:
-                        called.add(name)
-            # Also check OpenAI format for compatibility
-            for tc in msg.get("tool_calls", []):
-                name = tc.get("function", {}).get("name", "")
-                if name:
-                    called.add(name)
+            for c in msg.contents or []:
+                if c.type == "function_call" and c.name:
+                    called.add(c.name)
         missing = [t for t in tool_names if t not in called]
         if missing:
             return CheckResult(
@@ -142,7 +134,7 @@ def tool_called_check(*tool_names: str) -> EvalCheck:
 
 # Parameters recognized by the function evaluator wrapper
 _KNOWN_PARAMS = frozenset({
-    "query", "response", "expected", "conversation", "tool_definitions", "context",
+    "query", "response", "expected", "conversation", "tools", "context",
 })
 
 
@@ -151,16 +143,16 @@ def _resolve_function_args(fn: Callable[..., Any], item: EvalItem) -> dict[str, 
 
     Supported parameter names:
 
-    ========== ====================================================
-    Name       Value from EvalItem
-    ========== ====================================================
-    query      ``item.query``
-    response   ``item.response``
-    expected   ``item.expected``  (empty string if not set)
-    conversation ``item.conversation``
-    tool_definitions ``item.tool_definitions``
-    context    ``item.context``
-    ========== ====================================================
+    ================ ====================================================
+    Name             Value from EvalItem
+    ================ ====================================================
+    query            ``item.query``
+    response         ``item.response``
+    expected         ``item.expected``  (empty string if not set)
+    conversation     ``item.conversation``  (list[Message])
+    tools            ``item.tools``  (typed ``FunctionTool`` objects)
+    context          ``item.context``
+    ================ ====================================================
 
     Parameters with default values are only supplied when their name is
     recognised.  Unknown required parameters raise ``TypeError``.
@@ -173,7 +165,7 @@ def _resolve_function_args(fn: Callable[..., Any], item: EvalItem) -> dict[str, 
         "response": item.response,
         "expected": item.expected or "",
         "conversation": item.conversation,
-        "tool_definitions": item.tool_definitions,
+        "tools": item.tools,
         "context": item.context,
     }
 
@@ -243,8 +235,8 @@ def function_evaluator(
     * ``query`` — the user query (str)
     * ``response`` — the agent response (str)
     * ``expected`` — expected output for ground-truth comparison (str)
-    * ``conversation`` — full conversation history (list[dict])
-    * ``tool_definitions`` — tool schemas available to the agent (list[dict])
+    * ``conversation`` — full conversation history (list[Message])
+    * ``tools`` — typed tool objects (list[FunctionTool])
     * ``context`` — grounding context (str | None)
 
     Return ``bool``, ``float`` (≥0.5 = pass), ``dict`` with ``score`` or

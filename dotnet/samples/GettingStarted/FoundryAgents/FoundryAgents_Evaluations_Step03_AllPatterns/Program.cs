@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
 // This sample demonstrates all evaluation patterns available in Agent Framework for .NET.
 // It covers:
@@ -24,7 +24,7 @@ using Microsoft.Extensions.AI.Evaluation.Safety;
 
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using ChatRole = Microsoft.Extensions.AI.ChatRole;
-using Evaluators = Microsoft.Agents.AI.AzureAI.Evaluators;
+using FoundryEvals = Microsoft.Agents.AI.AzureAI.FoundryEvals;
 
 string endpoint = Environment.GetEnvironmentVariable("AZURE_FOUNDRY_PROJECT_ENDPOINT")
     ?? throw new InvalidOperationException("AZURE_FOUNDRY_PROJECT_ENDPOINT is not set.");
@@ -141,9 +141,9 @@ try
 
     var foundryEvaluator = new FoundryEvaluator(
         chatConfiguration,
-        Evaluators.Relevance,
-        Evaluators.Coherence,
-        Evaluators.Groundedness);
+        FoundryEvals.Relevance,
+        FoundryEvals.Coherence,
+        FoundryEvals.Groundedness);
 
     AgentEvaluationResults foundryResults = await agent.EvaluateAsync(
         queries,
@@ -164,7 +164,7 @@ try
             new LocalEvaluator(
                 EvalChecks.KeywordCheck("weather"),
                 FunctionEvaluator.Create("not_empty", (string r) => r.Length > 0)),
-            new FoundryEvaluator(chatConfiguration, Evaluators.Relevance),
+            new FoundryEvaluator(chatConfiguration, FoundryEvals.Relevance),
         });
 
     foreach (AgentEvaluationResults result in mixedResults)
@@ -179,17 +179,20 @@ try
     Console.WriteLine(new string('-', 60));
 
     // Get responses first
-    var responses = new List<(string Query, AgentResponse Response)>();
+    var savedQueries = new List<string>();
+    var savedResponses = new List<AgentResponse>();
     foreach (string query in queries)
     {
         AgentResponse response = await agent.RunAsync(
             new List<ChatMessage> { new(ChatRole.User, query) });
-        responses.Add((query, response));
+        savedQueries.Add(query);
+        savedResponses.Add(response);
     }
 
     // Evaluate the saved responses without re-running the agent
     AgentEvaluationResults preExistingResults = await agent.EvaluateAsync(
-        responses,
+        savedResponses,
+        savedQueries,
         new LocalEvaluator(
             EvalChecks.KeywordCheck("weather"),
             FunctionEvaluator.Create("response_quality",

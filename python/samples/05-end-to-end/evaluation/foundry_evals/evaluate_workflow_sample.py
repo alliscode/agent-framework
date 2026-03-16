@@ -5,7 +5,7 @@ import os
 
 from agent_framework import Agent, Message, evaluate_workflow
 from agent_framework.azure import AzureOpenAIResponsesClient
-from agent_framework_azure_ai import Evaluators, FoundryEvals
+from agent_framework_azure_ai import FoundryEvals
 from agent_framework_orchestrations import SequentialBuilder
 from azure.ai.projects.aio import AIProjectClient
 from azure.identity import DefaultAzureCredential
@@ -134,7 +134,7 @@ async def main():
             "Plan a trip from London to Tokyo",
             "Plan a trip from New York to Rome",
         ],
-        evaluators=evals.select(Evaluators.RELEVANCE, Evaluators.TASK_ADHERENCE),
+        evaluators=evals.select(FoundryEvals.RELEVANCE, FoundryEvals.TASK_ADHERENCE),
     )
 
     for r in eval_results:

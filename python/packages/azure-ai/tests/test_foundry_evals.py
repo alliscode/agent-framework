@@ -16,13 +16,12 @@ from agent_framework._eval import (
     EvalResults,
     _extract_agent_eval_data,
     _extract_overall_query,
-    evaluate_response,
+    evaluate_agent,
     evaluate_workflow,
 )
 from agent_framework._workflows._workflow import WorkflowRunResult
 
 from agent_framework_azure_ai._foundry_evals import (
-    Evaluators,
     FoundryEvals,
     _build_item_schema,
     _build_testing_criteria,
@@ -31,6 +30,15 @@ from agent_framework_azure_ai._foundry_evals import (
     _resolve_evaluator,
     _resolve_openai_client,
 )
+
+
+def _make_tool(name: str) -> MagicMock:
+    """Create a mock FunctionTool for use in tests."""
+    t = MagicMock()
+    t.name = name
+    t.description = f"{name} tool"
+    t.parameters = MagicMock(return_value={"type": "object"})
+    return t
 
 # ---------------------------------------------------------------------------
 # _resolve_evaluator
@@ -246,8 +254,8 @@ class TestToEvalItem:
         assert item.query == "What's the weather?"
         assert item.response == "The weather is sunny."
         assert len(item.conversation) == 2
-        assert item.conversation[0]["role"] == "user"
-        assert item.conversation[1]["role"] == "assistant"
+        assert item.conversation[0].role == "user"
+        assert item.conversation[1].role == "assistant"
 
     def test_message_query(self) -> None:
         input_msgs = [
@@ -281,9 +289,9 @@ class TestToEvalItem:
             response=response,
             tools=[tool],
         )
-        assert item.tool_definitions is not None
-        assert len(item.tool_definitions) == 1
-        assert item.tool_definitions[0]["name"] == "search"
+        assert item.tools is not None
+        assert len(item.tools) == 1
+        assert item.tools[0].name == "search"
 
     def test_with_agent_tools(self) -> None:
         tool = FunctionTool(name="calc", description="Calculate", func=lambda x: str(x))
@@ -296,8 +304,8 @@ class TestToEvalItem:
             response=response,
             agent=agent,
         )
-        assert item.tool_definitions is not None
-        assert item.tool_definitions[0]["name"] == "calc"
+        assert item.tools is not None
+        assert item.tools[0].name == "calc"
 
     def test_explicit_tools_override_agent(self) -> None:
         agent_tool = FunctionTool(name="agent_tool", description="from agent", func=lambda: "")
@@ -313,9 +321,9 @@ class TestToEvalItem:
             agent=agent,
             tools=[explicit_tool],
         )
-        assert item.tool_definitions is not None
-        assert len(item.tool_definitions) == 1
-        assert item.tool_definitions[0]["name"] == "explicit_tool"
+        assert item.tools is not None
+        assert len(item.tools) == 1
+        assert item.tools[0].name == "explicit_tool"
 
     def test_to_dict_format(self) -> None:
         """EvalItem.to_dict() should split conversation at last user message."""
@@ -334,24 +342,21 @@ class TestToEvalItem:
         assert len(d["response_messages"]) == 1
         assert d["response_messages"][0]["role"] == "assistant"
         assert isinstance(d["tool_definitions"], list)
-        assert d["tool_definitions"] == item.tool_definitions
+        assert len(d["tool_definitions"]) == 1
+        assert d["tool_definitions"][0]["name"] == "t"
         assert "conversation" not in d
 
     def test_to_dict_multiturn_preserves_interleaving(self) -> None:
         """Multi-turn to_dict() splits at last user message, preserving interleaving."""
         conversation = [
-            {"role": "user", "content": "What's the weather?"},
-            {"role": "assistant", "content": "It's sunny in Seattle."},
-            {"role": "user", "content": "And tomorrow?"},
-            {"role": "assistant", "content": [{"type": "tool_call", "name": "get_forecast"}]},
-            {"role": "tool", "content": [{"type": "tool_result", "tool_result": "Rain expected"}]},
-            {"role": "assistant", "content": "Rain is expected tomorrow."},
+            Message("user", ["What's the weather?"]),
+            Message("assistant", ["It's sunny in Seattle."]),
+            Message("user", ["And tomorrow?"]),
+            Message("assistant", [Content(type="function_call", name="get_forecast")]),
+            Message("tool", [Content(type="function_result", result="Rain expected")]),
+            Message("assistant", ["Rain is expected tomorrow."]),
         ]
-        item = EvalItem(
-            query="And tomorrow?",
-            response="Rain is expected tomorrow.",
-            conversation=conversation,
-        )
+        item = EvalItem(conversation=conversation)
         d = item.to_dict()
         # query_messages: everything up to and including the last user message
         assert len(d["query_messages"]) == 3  # user, assistant, user
@@ -367,21 +372,17 @@ class TestToEvalItem:
     def test_to_dict_full_split(self) -> None:
         """ConversationSplit.FULL splits after the first user message."""
         conversation = [
-            {"role": "user", "content": "What's the weather?"},
-            {"role": "assistant", "content": "It's 62°F in Seattle."},
-            {"role": "user", "content": "And tomorrow?"},
-            {"role": "assistant", "content": "Rain is expected tomorrow."},
+            Message("user", ["What's the weather?"]),
+            Message("assistant", ["It's 62°F in Seattle."]),
+            Message("user", ["And tomorrow?"]),
+            Message("assistant", ["Rain is expected tomorrow."]),
         ]
-        item = EvalItem(
-            query="What's the weather?",
-            response="Rain is expected tomorrow.",
-            conversation=conversation,
-        )
+        item = EvalItem(conversation=conversation)
         d = item.to_dict(split=ConversationSplit.FULL)
         # query_messages: just the first user message
         assert len(d["query_messages"]) == 1
         assert d["query_messages"][0]["role"] == "user"
-        assert d["query_messages"][0]["content"] == "What's the weather?"
+        assert d["query_messages"][0]["content"] == [{"type": "text", "text": "What's the weather?"}]
         # response_messages: everything after the first user message
         assert len(d["response_messages"]) == 3
         assert d["response_messages"][0]["role"] == "assistant"
@@ -391,11 +392,11 @@ class TestToEvalItem:
     def test_to_dict_full_split_with_system(self) -> None:
         """FULL split includes system messages before the first user message in query."""
         conversation = [
-            {"role": "system", "content": "You are a weather assistant."},
-            {"role": "user", "content": "What's the weather?"},
-            {"role": "assistant", "content": "It's sunny."},
+            Message("system", ["You are a weather assistant."]),
+            Message("user", ["What's the weather?"]),
+            Message("assistant", ["It's sunny."]),
         ]
-        item = EvalItem(query="What's the weather?", response="It's sunny.", conversation=conversation)
+        item = EvalItem(conversation=conversation)
         d = item.to_dict(split=ConversationSplit.FULL)
         # query includes system + first user
         assert len(d["query_messages"]) == 2
@@ -406,14 +407,14 @@ class TestToEvalItem:
     def test_to_dict_full_split_with_tools(self) -> None:
         """FULL split puts all tool interactions in response_messages."""
         conversation = [
-            {"role": "user", "content": "What's the weather?"},
-            {"role": "assistant", "content": [{"type": "tool_call", "name": "get_weather"}]},
-            {"role": "tool", "content": [{"type": "tool_result", "tool_result": "62°F"}]},
-            {"role": "assistant", "content": "It's 62°F."},
-            {"role": "user", "content": "Thanks!"},
-            {"role": "assistant", "content": "You're welcome!"},
+            Message("user", ["What's the weather?"]),
+            Message("assistant", [Content(type="function_call", name="get_weather")]),
+            Message("tool", [Content(type="function_result", result="62°F")]),
+            Message("assistant", ["It's 62°F."]),
+            Message("user", ["Thanks!"]),
+            Message("assistant", ["You're welcome!"]),
         ]
-        item = EvalItem(query="What's the weather?", response="You're welcome!", conversation=conversation)
+        item = EvalItem(conversation=conversation)
         d = item.to_dict(split=ConversationSplit.FULL)
         assert len(d["query_messages"]) == 1
         assert len(d["response_messages"]) == 5
@@ -421,12 +422,12 @@ class TestToEvalItem:
     def test_to_dict_last_turn_is_default(self) -> None:
         """Default to_dict() uses LAST_TURN split."""
         conversation = [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there"},
-            {"role": "user", "content": "Bye"},
-            {"role": "assistant", "content": "Goodbye"},
+            Message("user", ["Hello"]),
+            Message("assistant", ["Hi there"]),
+            Message("user", ["Bye"]),
+            Message("assistant", ["Goodbye"]),
         ]
-        item = EvalItem(query="Bye", response="Goodbye", conversation=conversation)
+        item = EvalItem(conversation=conversation)
         d_default = item.to_dict()
         d_explicit = item.to_dict(split=ConversationSplit.LAST_TURN)
         assert d_default["query_messages"] == d_explicit["query_messages"]
@@ -435,10 +436,10 @@ class TestToEvalItem:
     def test_per_turn_items_simple(self) -> None:
         """per_turn_items produces one EvalItem per user message."""
         conversation = [
-            {"role": "user", "content": "What's the weather?"},
-            {"role": "assistant", "content": "It's 62°F."},
-            {"role": "user", "content": "And tomorrow?"},
-            {"role": "assistant", "content": "Rain expected."},
+            Message("user", ["What's the weather?"]),
+            Message("assistant", ["It's 62°F."]),
+            Message("user", ["And tomorrow?"]),
+            Message("assistant", ["Rain expected."]),
         ]
         items = EvalItem.per_turn_items(conversation)
         assert len(items) == 2
@@ -448,28 +449,28 @@ class TestToEvalItem:
         assert items[0].response == "It's 62°F."
         assert len(items[0].conversation) == 2
 
-        # Turn 2 — includes cumulative context
-        assert items[1].query == "And tomorrow?"
+        # Turn 2 — includes cumulative context; query joins all user texts in query split
+        assert items[1].query == "What's the weather? And tomorrow?"
         assert items[1].response == "Rain expected."
         assert len(items[1].conversation) == 4
 
     def test_per_turn_items_with_tools(self) -> None:
         """per_turn_items handles tool calls within a turn."""
         conversation = [
-            {"role": "user", "content": "Check weather"},
-            {"role": "assistant", "content": [{"type": "tool_call", "name": "get_weather"}]},
-            {"role": "tool", "content": [{"type": "tool_result", "tool_result": "sunny"}]},
-            {"role": "assistant", "content": "It's sunny."},
-            {"role": "user", "content": "Thanks"},
-            {"role": "assistant", "content": "You're welcome!"},
+            Message("user", ["Check weather"]),
+            Message("assistant", [Content(type="function_call", name="get_weather")]),
+            Message("tool", [Content(type="function_result", result="sunny")]),
+            Message("assistant", ["It's sunny."]),
+            Message("user", ["Thanks"]),
+            Message("assistant", ["You're welcome!"]),
         ]
-        tools = [{"name": "get_weather", "description": "Get weather"}]
-        items = EvalItem.per_turn_items(conversation, tool_definitions=tools)
+        tool_objs = [_make_tool("get_weather")]
+        items = EvalItem.per_turn_items(conversation, tools=tool_objs)
         assert len(items) == 2
 
         # Turn 1: response includes tool_call, tool_result, and final assistant
         assert items[0].response == "It's sunny."
-        assert items[0].tool_definitions == tools
+        assert items[0].tools == tool_objs
         assert len(items[0].conversation) == 4  # user, assistant(tool), tool, assistant
 
         # Turn 2
@@ -478,14 +479,14 @@ class TestToEvalItem:
 
     def test_per_turn_items_empty(self) -> None:
         """per_turn_items returns empty list when no user messages."""
-        items = EvalItem.per_turn_items([{"role": "assistant", "content": "Hello"}])
+        items = EvalItem.per_turn_items([Message("assistant", ["Hello"])])
         assert items == []
 
     def test_per_turn_items_single_turn(self) -> None:
         """per_turn_items with single turn produces one item."""
         conversation = [
-            {"role": "user", "content": "Hi"},
-            {"role": "assistant", "content": "Hello!"},
+            Message("user", ["Hi"]),
+            Message("assistant", ["Hello!"]),
         ]
         items = EvalItem.per_turn_items(conversation)
         assert len(items) == 1
@@ -495,25 +496,23 @@ class TestToEvalItem:
     def test_custom_splitter_callable(self) -> None:
         """Custom callable splitter is used by to_dict()."""
         conversation = [
-            {"role": "user", "content": "Remember my name is Alice"},
-            {"role": "assistant", "content": "Got it, Alice!"},
-            {"role": "user", "content": "What's the capital of France?"},
-            {"role": "assistant", "content": [{"type": "tool_call", "name": "retrieve_memory", "tool_call_id": "m1"}]},
-            {"role": "tool", "tool_call_id": "m1", "content": [{"type": "tool_result", "tool_result": "User name: Alice"}]},
-            {"role": "assistant", "content": "The capital of France is Paris, Alice!"},
+            Message("user", ["Remember my name is Alice"]),
+            Message("assistant", ["Got it, Alice!"]),
+            Message("user", ["What's the capital of France?"]),
+            Message("assistant", [Content(type="function_call", name="retrieve_memory", call_id="m1")]),
+            Message("tool", [Content(type="function_result", call_id="m1", result="User name: Alice")]),
+            Message("assistant", ["The capital of France is Paris, Alice!"]),
         ]
 
         def split_before_memory(conv):
             """Split just before the memory retrieval tool call."""
             for i, msg in enumerate(conv):
-                content = msg.get("content", [])
-                if isinstance(content, list):
-                    for c in content:
-                        if isinstance(c, dict) and c.get("name") == "retrieve_memory":
-                            return conv[:i], conv[i:]
+                for c in msg.contents:
+                    if c.name == "retrieve_memory":
+                        return conv[:i], conv[i:]
             return EvalItem._split_last_turn_static(conv)
 
-        item = EvalItem(query="What's the capital?", response="Paris, Alice!", conversation=conversation)
+        item = EvalItem(conversation=conversation)
         d = item.to_dict(split=split_before_memory)
 
         # split_before_memory finds "retrieve_memory" at conv[3] (assistant tool_call msg)
@@ -527,20 +526,18 @@ class TestToEvalItem:
     def test_custom_splitter_with_fallback(self) -> None:
         """Custom splitter falls back to _split_last_turn_static when pattern not found."""
         conversation = [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there!"},
+            Message("user", ["Hello"]),
+            Message("assistant", ["Hi there!"]),
         ]
 
         def split_before_memory(conv):
             for i, msg in enumerate(conv):
-                content = msg.get("content", [])
-                if isinstance(content, list):
-                    for c in content:
-                        if isinstance(c, dict) and c.get("name") == "retrieve_memory":
-                            return conv[:i], conv[i:]
+                for c in msg.contents:
+                    if c.name == "retrieve_memory":
+                        return conv[:i], conv[i:]
             return EvalItem._split_last_turn_static(conv)
 
-        item = EvalItem(query="Hello", response="Hi there!", conversation=conversation)
+        item = EvalItem(conversation=conversation)
         d = item.to_dict(split=split_before_memory)
         # Falls back to last-turn split
         assert len(d["query_messages"]) == 1
@@ -551,13 +548,13 @@ class TestToEvalItem:
     def test_custom_splitter_lambda(self) -> None:
         """A lambda works as a custom splitter."""
         conversation = [
-            {"role": "user", "content": "A"},
-            {"role": "assistant", "content": "B"},
-            {"role": "user", "content": "C"},
-            {"role": "assistant", "content": "D"},
+            Message("user", ["A"]),
+            Message("assistant", ["B"]),
+            Message("user", ["C"]),
+            Message("assistant", ["D"]),
         ]
         # Split at index 2 (arbitrary)
-        item = EvalItem(query="C", response="D", conversation=conversation)
+        item = EvalItem(conversation=conversation)
         d = item.to_dict(split=lambda conv: (conv[:2], conv[2:]))
         assert len(d["query_messages"]) == 2
         assert len(d["response_messages"]) == 2
@@ -565,50 +562,46 @@ class TestToEvalItem:
     def test_split_strategy_on_item_used_by_to_dict(self) -> None:
         """split_strategy field on EvalItem is used as default by to_dict()."""
         conversation = [
-            {"role": "user", "content": "First"},
-            {"role": "assistant", "content": "Response 1"},
-            {"role": "user", "content": "Second"},
-            {"role": "assistant", "content": "Response 2"},
+            Message("user", ["First"]),
+            Message("assistant", ["Response 1"]),
+            Message("user", ["Second"]),
+            Message("assistant", ["Response 2"]),
         ]
         item = EvalItem(
-            query="Second",
-            response="Response 2",
             conversation=conversation,
             split_strategy=ConversationSplit.FULL,
         )
         # to_dict() with no split arg should use item.split_strategy
         d = item.to_dict()
         assert len(d["query_messages"]) == 1  # FULL: just first user msg
-        assert d["query_messages"][0]["content"] == "First"
+        assert d["query_messages"][0]["content"] == [{"type": "text", "text": "First"}]
         assert len(d["response_messages"]) == 3
 
     def test_explicit_split_overrides_item_split_strategy(self) -> None:
         """Explicit split= arg to to_dict() overrides item.split_strategy."""
         conversation = [
-            {"role": "user", "content": "First"},
-            {"role": "assistant", "content": "Response 1"},
-            {"role": "user", "content": "Second"},
-            {"role": "assistant", "content": "Response 2"},
+            Message("user", ["First"]),
+            Message("assistant", ["Response 1"]),
+            Message("user", ["Second"]),
+            Message("assistant", ["Response 2"]),
         ]
         item = EvalItem(
-            query="Second",
-            response="Response 2",
             conversation=conversation,
             split_strategy=ConversationSplit.FULL,
         )
         # Explicit split= should override split_strategy
         d = item.to_dict(split=ConversationSplit.LAST_TURN)
         assert len(d["query_messages"]) == 3  # LAST_TURN: up to last user
-        assert d["query_messages"][-1]["content"] == "Second"
+        assert d["query_messages"][-1]["content"] == [{"type": "text", "text": "Second"}]
         assert len(d["response_messages"]) == 1
 
     def test_no_split_defaults_to_last_turn(self) -> None:
         """When neither split= nor split_strategy is set, defaults to LAST_TURN."""
         conversation = [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi"},
+            Message("user", ["Hello"]),
+            Message("assistant", ["Hi"]),
         ]
-        item = EvalItem(query="Hello", response="Hi", conversation=conversation)
+        item = EvalItem(conversation=conversation)
         assert item.split_strategy is None
         d = item.to_dict()
         assert len(d["query_messages"]) == 1
@@ -758,14 +751,14 @@ class TestFoundryEvals:
         mock_client.evals.runs.retrieve.return_value = mock_completed
 
         items = [
-            EvalItem(query="Hello", response="Hi there!", conversation=[]),
-            EvalItem(query="Weather?", response="Sunny.", conversation=[]),
+            EvalItem(conversation=[Message("user", ["Hello"]), Message("assistant", ["Hi there!"])]),
+            EvalItem(conversation=[Message("user", ["Weather?"]), Message("assistant", ["Sunny."])]),
         ]
 
         fe = FoundryEvals(
             openai_client=mock_client,
             model_deployment="gpt-4o",
-            evaluators=[Evaluators.RELEVANCE],
+            evaluators=[FoundryEvals.RELEVANCE],
         )
         results = await fe.evaluate(items)
 
@@ -809,7 +802,7 @@ class TestFoundryEvals:
         mock_client.evals.runs.retrieve.return_value = mock_completed
 
         fe = FoundryEvals(openai_client=mock_client, model_deployment="gpt-4o")
-        await fe.evaluate([EvalItem(query="Hi", response="Hello", conversation=[])])
+        await fe.evaluate([EvalItem(conversation=[Message("user", ["Hi"]), Message("assistant", ["Hello"])])])
 
         # Verify default evaluators were used
         create_call = mock_client.evals.create.call_args
@@ -840,7 +833,7 @@ class TestFoundryEvals:
         mock_client.evals.runs.retrieve.return_value = mock_completed
 
         items = [
-            EvalItem(query="", response="Answer", conversation=[], response_id="resp_xyz"),
+            EvalItem(conversation=[Message("assistant", ["Answer"])], response_id="resp_xyz"),
         ]
 
         fe = FoundryEvals(openai_client=mock_client, model_deployment="gpt-4o")
@@ -872,9 +865,7 @@ class TestFoundryEvals:
 
         items = [
             EvalItem(
-                query="What's the weather?",
-                response="Sunny",
-                conversation=[{"role": "user", "content": "What's the weather?"}],
+                conversation=[Message("user", ["What's the weather?"]), Message("assistant", ["Sunny"])],
             ),
         ]
 
@@ -909,10 +900,8 @@ class TestFoundryEvals:
 
         items = [
             EvalItem(
-                query="Do the thing",
-                response="Done",
-                conversation=[],
-                tool_definitions=[{"name": "my_tool"}],
+                conversation=[Message("user", ["Do the thing"]), Message("assistant", ["Done"])],
+                tools=[_make_tool("my_tool")],
                 response_id="resp_xyz",
             ),
         ]
@@ -920,7 +909,7 @@ class TestFoundryEvals:
         fe = FoundryEvals(
             openai_client=mock_client,
             model_deployment="gpt-4o",
-            evaluators=[Evaluators.TOOL_CALL_ACCURACY],
+            evaluators=[FoundryEvals.TOOL_CALL_ACCURACY],
         )
         await fe.evaluate(items)
 
@@ -951,29 +940,29 @@ class TestFoundryEvals:
         mock_oai.evals.runs.retrieve.return_value = mock_completed
 
         fe = FoundryEvals(project_client=mock_project, model_deployment="gpt-4o")
-        results = await fe.evaluate([EvalItem(query="Hi", response="Hello", conversation=[])])
+        results = await fe.evaluate([EvalItem(conversation=[Message("user", ["Hi"]), Message("assistant", ["Hello"])])])
 
         assert results.status == "completed"
         mock_project.get_openai_client.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
-# Evaluators constants
+# FoundryEvals constants
 # ---------------------------------------------------------------------------
 
 
 class TestEvaluators:
     def test_constants_resolve(self) -> None:
-        assert _resolve_evaluator(Evaluators.RELEVANCE) == "builtin.relevance"
-        assert _resolve_evaluator(Evaluators.TOOL_CALL_ACCURACY) == "builtin.tool_call_accuracy"
-        assert _resolve_evaluator(Evaluators.VIOLENCE) == "builtin.violence"
-        assert _resolve_evaluator(Evaluators.INTENT_RESOLUTION) == "builtin.intent_resolution"
+        assert _resolve_evaluator(FoundryEvals.RELEVANCE) == "builtin.relevance"
+        assert _resolve_evaluator(FoundryEvals.TOOL_CALL_ACCURACY) == "builtin.tool_call_accuracy"
+        assert _resolve_evaluator(FoundryEvals.VIOLENCE) == "builtin.violence"
+        assert _resolve_evaluator(FoundryEvals.INTENT_RESOLUTION) == "builtin.intent_resolution"
 
     def test_all_constants_are_valid(self) -> None:
-        for attr in dir(Evaluators):
+        for attr in dir(FoundryEvals):
             if attr.startswith("_"):
                 continue
-            value = getattr(Evaluators, attr)
+            value = getattr(FoundryEvals, attr)
             if isinstance(value, str):
                 _resolve_evaluator(value)  # should not raise
 
@@ -985,39 +974,35 @@ class TestEvaluators:
 
 class TestResolveDefaultEvaluators:
     def test_explicit_evaluators_passthrough(self) -> None:
-        result = _resolve_default_evaluators([Evaluators.VIOLENCE])
-        assert result == [Evaluators.VIOLENCE]
+        result = _resolve_default_evaluators([FoundryEvals.VIOLENCE])
+        assert result == [FoundryEvals.VIOLENCE]
 
     def test_none_gives_defaults(self) -> None:
         result = _resolve_default_evaluators(None)
-        assert Evaluators.RELEVANCE in result
-        assert Evaluators.COHERENCE in result
-        assert Evaluators.TASK_ADHERENCE in result
-        assert Evaluators.TOOL_CALL_ACCURACY not in result
+        assert FoundryEvals.RELEVANCE in result
+        assert FoundryEvals.COHERENCE in result
+        assert FoundryEvals.TASK_ADHERENCE in result
+        assert FoundryEvals.TOOL_CALL_ACCURACY not in result
 
     def test_none_with_tool_items_adds_tool_eval(self) -> None:
         items = [
             EvalItem(
-                query="search for stuff",
-                response="found it",
-                conversation=[],
-                tool_definitions=[{"name": "search"}],
+                conversation=[Message("user", ["search for stuff"]), Message("assistant", ["found it"])],
+                tools=[_make_tool("search")],
             ),
         ]
         result = _resolve_default_evaluators(None, items=items)
-        assert Evaluators.TOOL_CALL_ACCURACY in result
+        assert FoundryEvals.TOOL_CALL_ACCURACY in result
 
     def test_explicit_evaluators_ignore_tool_items(self) -> None:
         items = [
             EvalItem(
-                query="search",
-                response="found",
-                conversation=[],
-                tool_definitions=[{"name": "search"}],
+                conversation=[Message("user", ["search"]), Message("assistant", ["found"])],
+                tools=[_make_tool("search")],
             ),
         ]
-        result = _resolve_default_evaluators([Evaluators.RELEVANCE], items=items)
-        assert result == [Evaluators.RELEVANCE]
+        result = _resolve_default_evaluators([FoundryEvals.RELEVANCE], items=items)
+        assert result == [FoundryEvals.RELEVANCE]
 
 
 # ---------------------------------------------------------------------------
@@ -1028,7 +1013,7 @@ class TestResolveDefaultEvaluators:
 class TestFilterToolEvaluators:
     def test_keeps_tool_evaluators_when_items_have_tools(self) -> None:
         items = [
-            EvalItem(query="q", response="r", conversation=[], tool_definitions=[{"name": "t"}]),
+            EvalItem(conversation=[Message("user", ["q"]), Message("assistant", ["r"])], tools=[_make_tool("t")]),
         ]
         result = _filter_tool_evaluators(
             ["relevance", "tool_call_accuracy"],
@@ -1039,7 +1024,7 @@ class TestFilterToolEvaluators:
 
     def test_removes_tool_evaluators_when_no_tools(self) -> None:
         items = [
-            EvalItem(query="q", response="r", conversation=[]),
+            EvalItem(conversation=[Message("user", ["q"]), Message("assistant", ["r"])]),
         ]
         result = _filter_tool_evaluators(
             ["relevance", "tool_call_accuracy"],
@@ -1050,14 +1035,14 @@ class TestFilterToolEvaluators:
 
     def test_falls_back_to_defaults_when_all_filtered(self) -> None:
         items = [
-            EvalItem(query="q", response="r", conversation=[]),
+            EvalItem(conversation=[Message("user", ["q"]), Message("assistant", ["r"])]),
         ]
         result = _filter_tool_evaluators(
             ["tool_call_accuracy", "tool_selection"],
             items,
         )
         # Should fall back to defaults since all evaluators were tool evaluators
-        assert Evaluators.RELEVANCE in result
+        assert FoundryEvals.RELEVANCE in result
 
 
 # ---------------------------------------------------------------------------
@@ -1188,11 +1173,11 @@ class TestResolveOpenAIClient:
 
 
 # ---------------------------------------------------------------------------
-# evaluate_response (core function, uses FoundryEvals as evaluator)
+# evaluate_agent with responses= (core function, uses FoundryEvals as evaluator)
 # ---------------------------------------------------------------------------
 
 
-class TestEvaluateResponse:
+class TestEvaluateAgentWithResponses:
     @pytest.mark.asyncio
     async def test_single_response_with_response_id(self) -> None:
         mock_oai = MagicMock()
@@ -1219,8 +1204,8 @@ class TestEvaluateResponse:
             response_id="resp_abc123",
         )
 
-        results = await evaluate_response(
-            response=response,
+        results = await evaluate_agent(
+            responses=response,
             evaluators=FoundryEvals(project_client=mock_project, model_deployment="gpt-4o"),
         )
 
@@ -1258,8 +1243,8 @@ class TestEvaluateResponse:
             AgentResponse(messages=[Message("assistant", ["Answer 2"])], response_id="resp_2"),
         ]
 
-        results = await evaluate_response(
-            response=responses,
+        results = await evaluate_agent(
+            responses=responses,
             evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
         )
 
@@ -1274,8 +1259,8 @@ class TestEvaluateResponse:
         response = AgentResponse(messages=[Message("assistant", ["Hello"])])
 
         with pytest.raises(ValueError, match="does not have a response_id"):
-            await evaluate_response(
-                response=response,
+            await evaluate_agent(
+                responses=response,
                 evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
             )
 
@@ -1301,9 +1286,9 @@ class TestEvaluateResponse:
 
         response = AgentResponse(messages=[Message("assistant", ["It's sunny."])])
 
-        results = await evaluate_response(
-            response=response,
-            query="What's the weather?",
+        results = await evaluate_agent(
+            responses=response,
+            queries=["What's the weather?"],
             evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
         )
 
@@ -1346,9 +1331,9 @@ class TestEvaluateResponse:
 
         response = AgentResponse(messages=[Message("assistant", ["Result."])])
 
-        results = await evaluate_response(
-            response=response,
-            query="Do the thing",
+        results = await evaluate_agent(
+            responses=response,
+            queries=["Do the thing"],
             agent=mock_agent,
             evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
         )
@@ -1388,9 +1373,9 @@ class TestEvaluateResponse:
             AgentResponse(messages=[Message("assistant", ["Answer 2"])]),
         ]
 
-        results = await evaluate_response(
-            response=responses,
-            query=["Question 1", "Question 2"],
+        results = await evaluate_agent(
+            responses=responses,
+            queries=["Question 1", "Question 2"],
             evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
         )
 
@@ -1411,10 +1396,10 @@ class TestEvaluateResponse:
             AgentResponse(messages=[Message("assistant", ["A2"])]),
         ]
 
-        with pytest.raises(ValueError, match="does not match"):
-            await evaluate_response(
-                response=responses,
-                query=["Q1", "Q2", "Q3"],
+        with pytest.raises(ValueError, match="queries but"):
+            await evaluate_agent(
+                responses=responses,
+                queries=["Q1", "Q2", "Q3"],
                 evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
             )
 
@@ -1443,8 +1428,8 @@ class TestEvaluateResponse:
             response_id="resp_xyz",
         )
 
-        await evaluate_response(
-            response=response,
+        await evaluate_agent(
+            responses=response,
             evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
         )
 
@@ -1488,12 +1473,12 @@ class TestEvaluateResponse:
         fe = FoundryEvals(
             openai_client=mock_oai,
             model_deployment="gpt-4o",
-            evaluators=[Evaluators.TOOL_CALL_ACCURACY],
+            evaluators=[FoundryEvals.TOOL_CALL_ACCURACY],
         )
 
-        await evaluate_response(
-            response=response,
-            query="What's the weather?",
+        await evaluate_agent(
+            responses=response,
+            queries=["What's the weather?"],
             agent=agent,
             evaluators=fe,
         )
@@ -1892,7 +1877,7 @@ class TestEvaluateWorkflow:
         fe = FoundryEvals(
             openai_client=mock_oai,
             model_deployment="gpt-4o",
-            evaluators=[Evaluators.RELEVANCE, Evaluators.TOOL_CALL_ACCURACY],
+            evaluators=[FoundryEvals.RELEVANCE, FoundryEvals.TOOL_CALL_ACCURACY],
         )
 
         await evaluate_workflow(
@@ -1955,7 +1940,7 @@ class TestEvaluateWorkflow:
         fe = FoundryEvals(
             openai_client=mock_oai,
             model_deployment="gpt-4o",
-            evaluators=[Evaluators.RELEVANCE, Evaluators.TOOL_CALL_ACCURACY],
+            evaluators=[FoundryEvals.RELEVANCE, FoundryEvals.TOOL_CALL_ACCURACY],
         )
 
         await evaluate_workflow(

@@ -41,49 +41,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Built-in evaluator constants
-# ---------------------------------------------------------------------------
-
-
-class Evaluators:
-    """Constants for Foundry built-in evaluator names.
-
-    Use these instead of raw strings for IDE autocomplete and typo prevention::
-
-        from agent_framework_azure_ai import Evaluators
-
-        evaluators = [Evaluators.RELEVANCE, Evaluators.TOOL_CALL_ACCURACY]
-    """
-
-    # Agent behavior
-    INTENT_RESOLUTION: str = "intent_resolution"
-    TASK_ADHERENCE: str = "task_adherence"
-    TASK_COMPLETION: str = "task_completion"
-    TASK_NAVIGATION_EFFICIENCY: str = "task_navigation_efficiency"
-
-    # Tool usage
-    TOOL_CALL_ACCURACY: str = "tool_call_accuracy"
-    TOOL_SELECTION: str = "tool_selection"
-    TOOL_INPUT_ACCURACY: str = "tool_input_accuracy"
-    TOOL_OUTPUT_UTILIZATION: str = "tool_output_utilization"
-    TOOL_CALL_SUCCESS: str = "tool_call_success"
-
-    # Quality
-    COHERENCE: str = "coherence"
-    FLUENCY: str = "fluency"
-    RELEVANCE: str = "relevance"
-    GROUNDEDNESS: str = "groundedness"
-    RESPONSE_COMPLETENESS: str = "response_completeness"
-    SIMILARITY: str = "similarity"
-
-    # Safety
-    VIOLENCE: str = "violence"
-    SEXUAL: str = "sexual"
-    SELF_HARM: str = "self_harm"
-    HATE_UNFAIRNESS: str = "hate_unfairness"
-
-
 # Agent evaluators accept query/response as conversation arrays.
 _AGENT_EVALUATORS: set[str] = {
     "builtin.intent_resolution",
@@ -134,13 +91,13 @@ _BUILTIN_EVALUATORS: dict[str, str] = {
 
 # Default evaluator sets used when evaluators=None
 _DEFAULT_EVALUATORS: list[str] = [
-    Evaluators.RELEVANCE,
-    Evaluators.COHERENCE,
-    Evaluators.TASK_ADHERENCE,
+    "relevance",
+    "coherence",
+    "task_adherence",
 ]
 
 _DEFAULT_TOOL_EVALUATORS: list[str] = [
-    Evaluators.TOOL_CALL_ACCURACY,
+    "tool_call_accuracy",
 ]
 
 
@@ -245,7 +202,7 @@ def _resolve_default_evaluators(
     """Resolve evaluators, applying defaults when ``None``.
 
     Defaults to relevance + coherence + task_adherence. Automatically adds
-    tool_call_accuracy when items contain tool_definitions.
+    tool_call_accuracy when items contain tools.
     """
     if evaluators is not None:
         return list(evaluators)
@@ -253,7 +210,7 @@ def _resolve_default_evaluators(
     result = list(_DEFAULT_EVALUATORS)
     if items is not None:
         has_tools = any(
-            (item.tool_definitions if isinstance(item, EvalItem) else item.get("tool_definitions")) for item in items
+            (item.tools if isinstance(item, EvalItem) else item.get("tool_definitions")) for item in items
         )
         if has_tools:
             result.extend(_DEFAULT_TOOL_EVALUATORS)
@@ -266,7 +223,7 @@ def _filter_tool_evaluators(
 ) -> list[str]:
     """Remove tool evaluators if no items have tool definitions."""
     has_tools = any(
-        (item.tool_definitions if isinstance(item, EvalItem) else item.get("tool_definitions")) for item in items
+        (item.tools if isinstance(item, EvalItem) else item.get("tool_definitions")) for item in items
     )
     if has_tools:
         return evaluators
@@ -496,6 +453,13 @@ class FoundryEvals:
     provider-agnostic ``evaluate_agent()`` and
     ``evaluate_workflow()`` functions from ``agent_framework``.
 
+    Also provides constants for built-in evaluator names for IDE
+    autocomplete and typo prevention::
+
+        from agent_framework_azure_ai import FoundryEvals
+
+        evaluators = [FoundryEvals.RELEVANCE, FoundryEvals.TOOL_CALL_ACCURACY]
+
     The simplest usage::
 
         from agent_framework import evaluate_agent
@@ -529,6 +493,37 @@ class FoundryEvals:
         poll_interval: Seconds between status polls (default 5.0).
         timeout: Maximum seconds to wait for completion (default 600.0).
     """
+
+    # ---------------------------------------------------------------------------
+    # Built-in evaluator name constants
+    # ---------------------------------------------------------------------------
+
+    # Agent behavior
+    INTENT_RESOLUTION: str = "intent_resolution"
+    TASK_ADHERENCE: str = "task_adherence"
+    TASK_COMPLETION: str = "task_completion"
+    TASK_NAVIGATION_EFFICIENCY: str = "task_navigation_efficiency"
+
+    # Tool usage
+    TOOL_CALL_ACCURACY: str = "tool_call_accuracy"
+    TOOL_SELECTION: str = "tool_selection"
+    TOOL_INPUT_ACCURACY: str = "tool_input_accuracy"
+    TOOL_OUTPUT_UTILIZATION: str = "tool_output_utilization"
+    TOOL_CALL_SUCCESS: str = "tool_call_success"
+
+    # Quality
+    COHERENCE: str = "coherence"
+    FLUENCY: str = "fluency"
+    RELEVANCE: str = "relevance"
+    GROUNDEDNESS: str = "groundedness"
+    RESPONSE_COMPLETENESS: str = "response_completeness"
+    SIMILARITY: str = "similarity"
+
+    # Safety
+    VIOLENCE: str = "violence"
+    SEXUAL: str = "sexual"
+    SELF_HARM: str = "self_harm"
+    HATE_UNFAIRNESS: str = "hate_unfairness"
 
     def __init__(
         self,
@@ -716,7 +711,7 @@ async def evaluate_traces(
     to evaluate recent activity.
 
     Args:
-        evaluators: Evaluator names (e.g. ``[Evaluators.RELEVANCE]``).
+        evaluators: Evaluator names (e.g. ``[FoundryEvals.RELEVANCE]``).
             Defaults to relevance, coherence, and task_adherence.
         openai_client: OpenAI client. Provide this or *project_client*.
         project_client: An ``AIProjectClient`` instance.
@@ -736,7 +731,7 @@ async def evaluate_traces(
 
         results = await evaluate_traces(
             response_ids=[response.response_id],
-            evaluators=[Evaluators.RELEVANCE],
+            evaluators=[FoundryEvals.RELEVANCE],
             project_client=project_client,
             model_deployment="gpt-4o",
         )

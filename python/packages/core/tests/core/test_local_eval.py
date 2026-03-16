@@ -9,6 +9,7 @@ import inspect
 import pytest
 
 from agent_framework._eval import EvalItem
+from agent_framework._types import Message
 from agent_framework._local_eval import (
     CheckResult,
     LocalEvaluator,
@@ -24,19 +25,19 @@ from agent_framework._local_eval import (
 # ---------------------------------------------------------------------------
 
 def _make_item(
-    query: str = "What's the weather?",
+    query: str = "What's the weather in Paris?",
     response: str = "It's sunny and 75°F",
     expected: str | None = None,
     conversation: list | None = None,
-    tool_definitions: list | None = None,
+    tools: list | None = None,
     context: str | None = None,
 ) -> EvalItem:
+    if conversation is None:
+        conversation = [Message("user", [query]), Message("assistant", [response])]
     return EvalItem(
-        query=query,
-        response=response,
+        conversation=conversation,
         expected=expected,
-        conversation=conversation or [],
-        tool_definitions=tool_definitions or [],
+        tools=tools,
         context=context,
     )
 
@@ -139,7 +140,7 @@ class TestTier2GroundTruth:
 
 
 # ---------------------------------------------------------------------------
-# Tier 3: full context (conversation, tool_definitions, context)
+# Tier 3: full context (conversation, tools, context)
 # ---------------------------------------------------------------------------
 
 class TestTier3FullContext:
@@ -148,18 +149,19 @@ class TestTier3FullContext:
         def multi_turn(query: str, response: str, *, conversation: list) -> bool:
             return len(conversation) >= 2
 
-        item = _make_item(conversation=[{"role": "user"}, {"role": "assistant"}])
+        item = _make_item(conversation=[Message("user", []), Message("assistant", [])])
         assert multi_turn(item).passed is True
 
-        item2 = _make_item(conversation=[{"role": "user"}])
+        item2 = _make_item(conversation=[Message("user", [])])
         assert multi_turn(item2).passed is False
 
-    def test_tool_definitions_access(self):
+    def test_tools_access(self):
         @function_evaluator
-        def has_tools(tool_definitions: list) -> bool:
-            return len(tool_definitions) > 0
+        def has_tools(tools: list) -> bool:
+            return len(tools) > 0
 
-        item = _make_item(tool_definitions=[{"name": "get_weather"}])
+        mock_tool = type('MockTool', (), {'name': 'get_weather', 'description': 'Get weather', 'parameters': lambda self: {}})()
+        item = _make_item(tools=[mock_tool])
         assert has_tools(item).passed is True
 
     def test_context_access(self):
@@ -179,7 +181,7 @@ class TestTier3FullContext:
             response: str,
             expected: str,
             conversation: list,
-            tool_definitions: list,
+            tools: list,
             context: str,
         ) -> bool:
             return all([query, response, expected is not None, isinstance(conversation, list)])
@@ -402,3 +404,58 @@ class TestAsyncFunctionEvaluator:
         result = await my_async(_make_item())
         assert result.passed is True
         assert result.check_name == "named_async"
+
+
+# ---------------------------------------------------------------------------
+# Auto-wrapping bare checks in evaluate_agent
+# ---------------------------------------------------------------------------
+
+class TestAutoWrapEvalChecks:
+    @pytest.mark.asyncio
+    async def test_bare_check_in_evaluators_list(self):
+        """Bare EvalCheck callables are auto-wrapped in LocalEvaluator."""
+        from agent_framework._eval import _run_evaluators
+
+        @function_evaluator
+        def is_long(response: str) -> bool:
+            return len(response.split()) > 2
+
+        items = [_make_item(response="It is sunny and warm today")]
+        results = await _run_evaluators(is_long, items, eval_name="test")
+        assert len(results) == 1
+        assert results[0].result_counts["passed"] == 1
+
+    @pytest.mark.asyncio
+    async def test_mixed_evaluators_and_checks(self):
+        """Mix of Evaluator instances and bare checks works."""
+        from agent_framework._eval import _run_evaluators
+
+        @function_evaluator
+        def has_words(response: str) -> bool:
+            return len(response.split()) > 0
+
+        local = LocalEvaluator(keyword_check("sunny"))
+
+        items = [_make_item(response="It is sunny")]
+        results = await _run_evaluators([local, has_words], items, eval_name="test")
+        assert len(results) == 2
+        assert all(r.result_counts["passed"] == 1 for r in results)
+
+    @pytest.mark.asyncio
+    async def test_adjacent_checks_grouped(self):
+        """Adjacent bare checks are grouped into a single LocalEvaluator."""
+        from agent_framework._eval import _run_evaluators
+
+        @function_evaluator
+        def check_a(response: str) -> bool:
+            return True
+
+        @function_evaluator
+        def check_b(response: str) -> bool:
+            return True
+
+        items = [_make_item()]
+        results = await _run_evaluators([check_a, check_b], items, eval_name="test")
+        # Two adjacent checks → one LocalEvaluator → one result
+        assert len(results) == 1
+        assert results[0].result_counts["passed"] == 1

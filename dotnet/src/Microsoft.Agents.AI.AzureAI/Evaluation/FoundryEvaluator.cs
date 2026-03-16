@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
 using System.Linq;
 using Microsoft.Extensions.AI;
@@ -56,7 +56,7 @@ public sealed class FoundryEvaluator : IAgentEvaluator
         this._splitter = splitter;
         this._evaluatorNames = evaluators.Length > 0
             ? evaluators
-            : [Evaluators.Relevance, Evaluators.Coherence];
+            : [FoundryEvals.Relevance, FoundryEvals.Coherence];
     }
 
     /// <inheritdoc />
@@ -113,16 +113,16 @@ public sealed class FoundryEvaluator : IAgentEvaluator
         {
             var evaluator = name switch
             {
-                Evaluators.Relevance => new RelevanceEvaluator(),
-                Evaluators.Coherence => new CoherenceEvaluator(),
-                Evaluators.Groundedness => new GroundednessEvaluator(),
-                Evaluators.Fluency => (IEvaluator)new FluencyEvaluator(),
+                FoundryEvals.Relevance => new RelevanceEvaluator(),
+                FoundryEvals.Coherence => new CoherenceEvaluator(),
+                FoundryEvals.Groundedness => new GroundednessEvaluator(),
+                FoundryEvals.Fluency => (IEvaluator)new FluencyEvaluator(),
 
                 // Safety evaluators
-                Evaluators.Violence or
-                Evaluators.Sexual or
-                Evaluators.SelfHarm or
-                Evaluators.HateUnfairness => new ContentHarmEvaluator(),
+                FoundryEvals.Violence or
+                FoundryEvals.Sexual or
+                FoundryEvals.SelfHarm or
+                FoundryEvals.HateUnfairness => new ContentHarmEvaluator(),
 
                 // Agent evaluators not yet available in MEAI — log warning and skip
                 _ => null,

@@ -107,22 +107,68 @@ public static partial class AgentEvaluationExtensions
     /// Evaluates pre-existing agent responses without re-running the agent.
     /// </summary>
     /// <param name="agent">The agent (used for tool definitions).</param>
-    /// <param name="responses">Pre-existing query/response pairs.</param>
+    /// <param name="responses">Pre-existing agent responses.</param>
+    /// <param name="queries">The queries that produced each response (must match count).</param>
     /// <param name="evaluator">The evaluator to score responses.</param>
     /// <param name="evalName">Display name for this evaluation run.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Evaluation results.</returns>
     public static async Task<AgentEvaluationResults> EvaluateAsync(
         this AIAgent agent,
-        IEnumerable<(string Query, AgentResponse Response)> responses,
+        IEnumerable<AgentResponse> responses,
+        IEnumerable<string> queries,
         IAgentEvaluator evaluator,
         string evalName = "Agent Framework Eval",
         CancellationToken cancellationToken = default)
     {
-        var items = new List<EvalItem>();
+        var items = BuildItemsFromResponses(agent, responses, queries);
+        return await evaluator.EvaluateAsync(items, evalName, cancellationToken).ConfigureAwait(false);
+    }
 
-        foreach (var (query, response) in responses)
+    /// <summary>
+    /// Evaluates pre-existing agent responses using an MEAI evaluator directly.
+    /// </summary>
+    /// <param name="agent">The agent (used for tool definitions).</param>
+    /// <param name="responses">Pre-existing agent responses.</param>
+    /// <param name="queries">The queries that produced each response (must match count).</param>
+    /// <param name="evaluator">The MEAI evaluator.</param>
+    /// <param name="chatConfiguration">Chat configuration for the MEAI evaluator.</param>
+    /// <param name="evalName">Display name for this evaluation run.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Evaluation results.</returns>
+    public static async Task<AgentEvaluationResults> EvaluateAsync(
+        this AIAgent agent,
+        IEnumerable<AgentResponse> responses,
+        IEnumerable<string> queries,
+        IEvaluator evaluator,
+        ChatConfiguration chatConfiguration,
+        string evalName = "Agent Framework Eval",
+        CancellationToken cancellationToken = default)
+    {
+        var wrapped = new MeaiEvaluatorAdapter(evaluator, chatConfiguration);
+        return await agent.EvaluateAsync(responses, queries, wrapped, evalName, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static List<EvalItem> BuildItemsFromResponses(
+        AIAgent agent,
+        IEnumerable<AgentResponse> responses,
+        IEnumerable<string> queries)
+    {
+        var responseList = responses.ToList();
+        var queryList = queries.ToList();
+
+        if (responseList.Count != queryList.Count)
         {
+            throw new ArgumentException(
+                $"Got {queryList.Count} queries but {responseList.Count} responses. Counts must match.");
+        }
+
+        var items = new List<EvalItem>();
+        for (int i = 0; i < responseList.Count; i++)
+        {
+            var query = queryList[i];
+            var response = responseList[i];
+
             var messages = new List<ChatMessage>
             {
                 new(ChatRole.User, query),
@@ -133,29 +179,7 @@ public static partial class AgentEvaluationExtensions
             items.Add(item);
         }
 
-        return await evaluator.EvaluateAsync(items, evalName, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Evaluates pre-existing agent responses using an MEAI evaluator directly.
-    /// </summary>
-    /// <param name="agent">The agent (used for tool definitions).</param>
-    /// <param name="responses">Pre-existing query/response pairs.</param>
-    /// <param name="evaluator">The MEAI evaluator.</param>
-    /// <param name="chatConfiguration">Chat configuration for the MEAI evaluator.</param>
-    /// <param name="evalName">Display name for this evaluation run.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Evaluation results.</returns>
-    public static async Task<AgentEvaluationResults> EvaluateAsync(
-        this AIAgent agent,
-        IEnumerable<(string Query, AgentResponse Response)> responses,
-        IEvaluator evaluator,
-        ChatConfiguration chatConfiguration,
-        string evalName = "Agent Framework Eval",
-        CancellationToken cancellationToken = default)
-    {
-        var wrapped = new MeaiEvaluatorAdapter(evaluator, chatConfiguration);
-        return await agent.EvaluateAsync(responses, wrapped, evalName, cancellationToken).ConfigureAwait(false);
+        return items;
     }
 
     private static async Task<List<EvalItem>> RunAgentForEvalAsync(

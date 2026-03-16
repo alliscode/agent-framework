@@ -3,7 +3,7 @@
 import asyncio
 import os
 
-from agent_framework_azure_ai import Evaluators, evaluate_traces
+from agent_framework_azure_ai import FoundryEvals, evaluate_traces
 from azure.ai.projects.aio import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
@@ -55,7 +55,7 @@ async def main():
 
     results = await evaluate_traces(
         response_ids=response_ids,
-        evaluators=[Evaluators.RELEVANCE, Evaluators.GROUNDEDNESS, Evaluators.TOOL_CALL_ACCURACY],
+        evaluators=[FoundryEvals.RELEVANCE, FoundryEvals.GROUNDEDNESS, FoundryEvals.TOOL_CALL_ACCURACY],
         project_client=project_client,
         model_deployment=deployment,
     )
@@ -81,7 +81,7 @@ async def main():
     # Evaluate by response IDs (uses response-based data source internally)
     results = await evaluate_traces(
         response_ids=response_ids,
-        evaluators=[Evaluators.RELEVANCE, Evaluators.COHERENCE],
+        evaluators=[FoundryEvals.RELEVANCE, FoundryEvals.COHERENCE],
         project_client=project_client,
         model_deployment=deployment,
     )
@@ -92,7 +92,7 @@ async def main():
     # Evaluate by agent ID + time window (when trace-based API is available)
     # results = await evaluate_traces(
     #     agent_id="travel-bot",
-    #     evaluators=[Evaluators.INTENT_RESOLUTION, Evaluators.TASK_ADHERENCE],
+    #     evaluators=[FoundryEvals.INTENT_RESOLUTION, FoundryEvals.TASK_ADHERENCE],
     #     project_client=project_client,
     #     model_deployment=deployment,
     #     lookback_hours=24,

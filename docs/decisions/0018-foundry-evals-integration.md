@@ -22,79 +22,349 @@ However, using Foundry Evals with an agent-framework agent today requires signif
 
 Additionally, evaluation is a concern that extends beyond any single provider. Developers may want to use local evaluators (LLM-as-judge, regex, keyword matching), third-party evaluation libraries, or multiple providers in combination. The architecture must support this without creating a Foundry-specific lock-in at the API level.
 
-### Eval Scenarios in Agent Framework
+### What Developers Need from Agent Evaluation
 
-Agent evaluation has several distinct shapes depending on the agent topology.
+Agent evaluation needs to work across several dimensions of complexity.
 
-**Single agent, single query.** The simplest case — one agent, one query, one response:
+**Single agents and workflows.** At the simplest level, a developer has one agent and wants to know if its responses are good — relevant, coherent, grounded, safe. But agents rarely work alone. In a workflow, multiple agents collaborate: a planner breaks down a task, a researcher gathers information, a writer produces output. Developers need to evaluate both the overall workflow result and the individual agents within it, so they can pinpoint which agent is underperforming without re-running the entire workflow.
 
-```
-results = evaluate(agent, query="What's the weather?", evaluator=evals)
-# results.passed / results.total → 3/3
-# results.items[0].scores → {relevance: 5, coherence: 4, task_adherence: 5}
-```
+**One-shot and multi-turn conversations.** A single query-response pair is the simplest thing to evaluate, but real agents carry multi-turn conversations with tool calls, intermediate reasoning, and follow-up questions. The evaluation data must capture the full conversation trajectory — including tool invocations and their results — because evaluators need this context to assess whether the agent maintained coherence, used its tools correctly, and stayed on task across turns.
 
-This produces a flat list of scored items — one item per query. Even this simple case benefits from an aggregate result type that can report pass/fail across multiple evaluator dimensions.
+**Conversation factoring.** A multi-turn conversation can be factored into "query" and "response" in multiple valid ways, and the choice changes what you're measuring. You might split at the last user message to evaluate "did the agent answer this specific question well?" Or you might treat the first user message as the query and everything after as the response to evaluate "did the entire conversation serve the original request?" Or you might split per-turn to get fine-grained scores at each step. These different factorings can produce meaningfully different scores for the same conversation. Developers need to control this easily, both globally and per-evaluator.
 
-**Single agent, batch of queries.** The natural extension — run multiple queries and get per-item results:
+**Multiple providers, mix and match.** Azure AI Foundry offers rich LLM-as-judge evaluators for quality, safety, and tool usage — with portal dashboards and comparison views. But developers also want fast local checks (keyword matching, tool-was-called assertions) for inner-loop development and CI, custom function-based evaluators for domain-specific logic, and potentially third-party evaluation libraries. A developer should be able to run Foundry evaluators alongside local checks on the same data without restructuring their code, and swap providers without rewriting evaluation calls.
 
-```
-results = evaluate(agent, queries=["What's the weather?", "Book a flight"], evaluator=evals)
-# results.items → [item_0_scores, item_1_scores]
-# results.passed → 5, results.failed → 1, results.total → 6
-```
+**Bring your own evaluator.** Beyond selecting from a menu of built-in evaluators, developers want to write their own evaluation logic — from simple functions that check a response for specific content, to sophisticated LLM-as-judge prompts, to evaluators that compare against ground-truth expected outputs. The barrier to creating a custom evaluator should be as low as writing a function.
 
-Each query produces one `EvalItem` with its own scores. The result container aggregates across all items and all evaluator dimensions, so `passed` is the total number of passing scores across all items. This is where a container type starts earning its keep — you need something that holds per-item detail while also giving you the aggregate view for CI assertions (`results.assert_passed()`).
+**Evaluate without re-running.** Developers often have responses from production logs, previous test runs, or manual testing. They want to evaluate these existing responses without invoking the agent again. The framework already knows the agent's tools and instructions — it should use that context automatically.
 
-**Multi-turn conversations.** An agent that carries a multi-turn conversation still produces one evaluated interaction per conversation, but the evaluator needs the full conversation history to score accurately:
+## Decision Drivers
 
-```
-results = evaluate(agent, queries=["What's the weather?", "And tomorrow?"], evaluator=evals)
-# The second query is evaluated with the full conversation context:
-#   results.items[1].conversation → [user: "What's the weather?", assistant: "...", user: "And tomorrow?"]
-```
+- **Zero-friction evaluation**: Developers should go from "I have an agent" to "I have eval results" with minimal code.
+- **Provider-agnostic API**: Core evaluation capabilities must not be tied to any specific provider. Provider configuration should be separate from the evaluation call.
+- **Lowest concept count**: Introduce the fewest possible new types, abstractions, and APIs for developers to learn.
+- **Leverage existing knowledge**: The framework already knows which agents exist, what tools they have, and what conversations occurred. Evals should use this automatically rather than requiring the developer to re-specify it.
+- **Foundry-native results**: When using Foundry, results should be viewable in the Foundry portal with dashboards and comparison views.
+- **Progressive disclosure**: Simple scenarios should be near-zero code. Advanced scenarios should build on the same primitives.
+- **Cross-language parity**: Design must be implementable in both Python and .NET.
 
-The evaluation data format (`EvalItem`) must carry the complete conversation — including intermediate tool calls and their results — not just the final query/response pair. This is what allows evaluators to assess coherence across turns and verify that the agent maintained context.
+## Considered Options
 
-**Multi-turn with multiple evaluators.** When you run both local checks and cloud evaluators on the same data, you get one result set per evaluator:
+1. **Provider-specific functions** — Build Foundry-specific helper functions (`evaluate_agent()`, etc.) directly in the Azure package. All eval functions take Foundry connection parameters.
+2. **Evaluator protocol with core orchestration** — Define a provider-agnostic `Evaluator` protocol in core. Orchestration functions live in core. Providers implement the protocol.
+3. **Full eval framework** — Build comprehensive eval infrastructure including custom evaluator definitions, scoring profiles, and reporting inside agent-framework.
 
-```
-results = evaluate(agent, queries=queries, evaluators=[local_checks, foundry_evals])
-# results → [local_results, foundry_results]
-# results[0].provider → "LocalEvaluator", results[0].passed → 4/4
-# results[1].provider → "FoundryEvals",   results[1].passed → 5/6
-```
+## Decision Outcome
 
-This is why `evaluate` returns a list when given multiple evaluators — each evaluator produces its own `EvalResults` with its own pass/fail semantics. Local checks use boolean pass/fail; cloud evaluators may use numeric scores with thresholds.
+Proposed option: "Evaluator protocol with core orchestration", because it delivers the low-friction developer experience, supports multiple providers without API changes, and keeps the concept count low.
 
-**Workflows with sub-agents.** A workflow orchestrates multiple agents. When evaluating a completed workflow run, you want both the overall result and a per-agent breakdown so you can pinpoint which agent is underperforming:
+### Usage Examples
 
-```
-run = workflow.run("Plan a trip to Paris")
-results = evaluate(workflow, run=run, evaluator=evals)
-# results.passed → 8/10 (overall)
-# results.sub_results → {
-#   "planner":    {passed: 3/3},
-#   "researcher": {passed: 3/4},  ← this agent needs work
-#   "writer":     {passed: 2/3},
-# }
-```
+#### Evaluate an agent
 
-The result container's `sub_results` field maps agent names to their own result sets, using the same result type recursively. This lets you drill into any agent's scores while still getting the aggregate view at the workflow level.
+**Python:**
 
-**Pre-existing responses.** Sometimes you already have responses from production or a previous run. You want to evaluate them without re-running the agent:
+```python
+evals = FoundryEvals(
+    project_client=client,
+    model_deployment="gpt-4o",
+    evaluators=[FoundryEvals.RELEVANCE, FoundryEvals.COHERENCE],
+)
 
-```
-response = agent.run("What's the weather?")
-# ... later ...
-results = evaluate(agent, response=response, evaluator=evals)
+results = await evaluate_agent(
+    agent=my_agent,
+    queries=["What's the weather?"],
+    evaluators=evals,
+)
+for r in results:
+    r.assert_passed()
 ```
 
-The agent is still provided so the evaluator can access tool definitions and instructions for context, but it isn't invoked. The framework extracts the conversation from the existing response and builds eval items from it.
+**C#:**
 
-**Summary.** These scenarios share a common shape: orchestration that runs (or reuses) agent interactions, extracts structured data into a provider-agnostic format, delegates to one or more evaluators, and aggregates results into a container that supports both per-item inspection and aggregate pass/fail. The design below implements this shape.
+```csharp
+var evals = new FoundryEvaluator(chatConfiguration, FoundryEvals.Relevance, FoundryEvals.Coherence);
 
-### Conversation Split Strategies
+AgentEvaluationResults results = await agent.EvaluateAsync(
+    new[] { "What's the weather?" },
+    evals);
+
+results.AssertAllPassed();
+```
+
+`evaluate_agent` returns one `EvalResults` per evaluator. Each result contains per-item scores:
+
+```
+# results[0] (FoundryEvals)
+EvalResults(status="completed", passed=1, failed=0, total=1)
+  items[0]: EvalItemResult(query="What's the weather?", scores={"relevance": 5, "coherence": 5})
+```
+
+#### Evaluate a response you already have
+
+**Python:**
+
+```python
+query = "What's the weather?"
+response = await agent.run([Message("user", [query])])
+
+results = await evaluate_agent(
+    agent=agent,
+    responses=response,
+    queries=[query],
+    evaluators=evals,
+)
+```
+
+**C#:**
+
+```csharp
+var query = "What's the weather?";
+AgentResponse response = await agent.RunAsync(
+    new[] { new ChatMessage(ChatRole.User, query) });
+
+AgentEvaluationResults results = await agent.EvaluateAsync(
+    responses: new[] { response },
+    queries: new[] { query },
+    evals);
+```
+
+Same return shape as above — the response is evaluated without re-running the agent.
+
+#### Evaluate with conversation split strategies
+
+By default, evaluators see only the last turn (final user message → final assistant response). For multi-turn conversations, you can control how the conversation is factored for evaluation:
+
+**Python:**
+
+```python
+results = await evaluate_agent(
+    agent=agent,
+    queries=["Plan a 3-day trip to Paris"],
+    evaluators=evals,
+    conversation_split=ConversationSplit.FULL,      # evaluate entire trajectory
+)
+
+# Or per-turn: each user→assistant exchange scored independently
+results = await evaluate_agent(
+    agent=agent,
+    queries=["Plan a 3-day trip to Paris"],
+    evaluators=evals,
+    conversation_split=ConversationSplit.PER_TURN,
+)
+```
+
+**C#:**
+
+```csharp
+// Full conversation as context
+AgentEvaluationResults results = await agent.EvaluateAsync(
+    new[] { "Plan a 3-day trip to Paris" },
+    evals,
+    splitter: ConversationSplitters.Full);
+
+// Per-turn splitting
+var items = EvalItem.PerTurnItems(conversation);  // one EvalItem per user turn
+var results = await evals.EvaluateAsync(items);
+```
+
+With `PER_TURN`, a 3-turn conversation produces 3 scored items:
+
+```
+EvalResults(status="completed", passed=3, failed=0, total=3)
+  items[0]: query="Plan a 3-day trip to Paris"    scores={"relevance": 5}
+  items[1]: query="What about restaurants?"        scores={"relevance": 4}
+  items[2]: query="Make it budget-friendly"        scores={"relevance": 5}
+```
+
+#### Evaluate a multi-agent workflow
+
+**Python:**
+
+```python
+result = await workflow.run("Plan a trip to Paris")
+eval_results = await evaluate_workflow(
+    workflow=workflow,
+    workflow_result=result,
+    evaluators=evals,
+)
+
+for r in eval_results:
+    print(f"  overall: {r.passed}/{r.total}")
+    for name, sub in r.sub_results.items():
+        print(f"    {name}: {sub.passed}/{sub.total}")
+```
+
+**C#:**
+
+```csharp
+WorkflowRunResult result = await workflow.RunAsync("Plan a trip to Paris");
+
+IReadOnlyList<AgentEvaluationResults> evalResults = await result.EvaluateAsync(evals);
+
+foreach (var r in evalResults)
+{
+    Console.WriteLine($"  overall: {r.Passed}/{r.Total}");
+    foreach (var (name, sub) in r.SubResults)
+        Console.WriteLine($"    {name}: {sub.Passed}/{sub.Total}");
+}
+```
+
+Workflows return one result per evaluator, with sub-results per agent in the workflow:
+
+```
+EvalResults(status="completed", passed=2, failed=0, total=2)
+  sub_results:
+    "planner":  EvalResults(passed=1, total=1)
+    "researcher": EvalResults(passed=1, total=1)
+```
+
+#### Mix multiple providers
+
+**Python:**
+
+```python
+@function_evaluator
+def is_helpful(response: str) -> bool:
+    return len(response.split()) > 10
+
+foundry = FoundryEvals(
+    project_client=client,
+    model_deployment="gpt-4o",
+    evaluators=[FoundryEvals.RELEVANCE, FoundryEvals.COHERENCE],
+)
+
+results = await evaluate_agent(
+    agent=agent,
+    queries=queries,
+    evaluators=[is_helpful, keyword_check("weather"), foundry],
+)
+```
+
+**C#:**
+
+```csharp
+IReadOnlyList<AgentEvaluationResults> results = await agent.EvaluateAsync(
+    queries,
+    evaluators: new IAgentEvaluator[]
+    {
+        new LocalEvaluator(
+            EvalChecks.KeywordCheck("weather"),
+            FunctionEvaluator.Create("is_helpful", (string r) => r.Split(' ').Length > 10)),
+        new FoundryEvaluator(chatConfiguration, FoundryEvals.Relevance, FoundryEvals.Coherence),
+    });
+```
+
+Multiple evaluators return one result each — `results[0]` is the local evaluator, `results[1]` is Foundry.
+
+#### Custom function evaluators
+
+**Python:**
+
+```python
+@function_evaluator
+def mentions_city(response: str, expected: str) -> bool:
+    return expected.lower() in response.lower()
+
+@function_evaluator
+def used_tools(conversation: list, tools: list) -> float:
+    # ... scoring logic
+    return score
+
+local = LocalEvaluator(mentions_city, used_tools)
+```
+
+**C#:**
+
+```csharp
+var local = new LocalEvaluator(
+    FunctionEvaluator.Create("mentions_city",
+        (EvalItem item) => item.Expected != null
+            && item.Response.Contains(item.Expected, StringComparison.OrdinalIgnoreCase)),
+    FunctionEvaluator.Create("is_concise",
+        (string response) => response.Split(' ').Length < 500));
+```
+
+## What To Build
+
+### Core: Evaluator Protocol
+
+A runtime-checkable protocol that any evaluation provider implements:
+
+```python
+@runtime_checkable
+class Evaluator(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    async def evaluate(
+        self, items: Sequence[EvalItem], *, eval_name: str = "Agent Framework Eval"
+    ) -> EvalResults: ...
+```
+
+The protocol is minimal — just `name` and `evaluate()`.
+
+### Core: EvalItem
+
+Provider-agnostic data format for items to evaluate:
+
+```python
+@dataclass
+class EvalItem:
+    conversation: list[Message]               # Single source of truth
+    tools: list[FunctionTool] | None = None   # Agent's available tools
+    context: str | None = None
+    expected: str | None = None               # Ground-truth for comparison
+    response_id: str | None = None            # For Responses API providers
+    split_strategy: ConversationSplitter | None = None
+
+    query: str       # property — derived from conversation split
+    response: str    # property — derived from conversation split
+```
+
+`conversation` is the single source of truth. `query` and `response` are derived properties — splitting the conversation at the last user message (default) and extracting text from each side. Changing the `split_strategy` consistently changes all derived values.
+
+`tools` provides typed `FunctionTool` objects — including MCP tools, which are automatically extracted after agent runs.
+
+`EvalItem.to_dict()` serializes to flat dict: splits conversation, converts each half to OpenAI chat format (`query_messages`/`response_messages`), derives `query`/`response` strings, and serializes `tools` as `tool_definitions`.
+
+### Internal: AgentEvalConverter
+
+Internal class that converts agent-framework types to `EvalItem`. Used by `evaluate_agent()` and `evaluate_workflow()` — not part of the public API:
+
+| Agent Framework | Eval Format |
+|---|---|
+| `Content.function_call` | `tool_call` in OpenAI chat format |
+| `Content.function_result` | `tool_result` in OpenAI chat format |
+| `FunctionTool` | `{name, description, parameters}` schema |
+| `Message` history | `conversation` list + `query`/`response` extraction |
+
+### Core: EvalResults
+
+Rich result type with convenience properties for CI integration:
+
+```python
+results.all_passed          # bool: no failures or errors (recursive for workflow)
+results.passed              # int: passing count
+results.failed              # int: failure count
+results.total               # int: total = passed + failed + errored
+results.items               # list[EvalItemResult]: per-item scores and errors
+results.error               # str | None: error details on failure
+results.sub_results         # dict: per-agent breakdown (workflow evals)
+results.report_url          # str | None: portal link (Foundry)
+results.assert_passed()     # raises AssertionError with details
+```
+
+### Core: Orchestration Functions
+
+Provider-agnostic functions that extract data and delegate to evaluators:
+
+| Function | What it does |
+|---|---|
+| `evaluate_agent()` | Runs agent against test queries (or evaluates pre-existing `responses=`), converts to `EvalItem`s, passes to evaluator |
+| `evaluate_workflow()` | Extracts per-agent data from `WorkflowRunResult`, evaluates each agent and overall output. Per-agent breakdown in `sub_results` |
+
+### Core: Conversation Split Strategies
 
 Multi-turn conversations must be split into query (input) and response (output) halves for evaluation. How you split determines *what you're evaluating*:
 
@@ -126,292 +396,7 @@ item 2: query = [user1, assistant1, user2],      response = [assistant2(tool), t
 
 This evaluates each response independently. Best for fine-grained analysis and pinpointing where a conversation goes wrong.
 
-These factorings produce different scores for the same conversation. An agent could score well on every individual turn (last-turn) but take a poor path overall (full), or vice versa. The framework supports all three, defaulting to last-turn since it matches the most common "evaluate the latest response" scenario.
-
-## Decision Drivers
-
-- **Zero-friction evaluation**: Developers should go from "I have an agent" to "I have eval results" with minimal code.
-- **Provider-agnostic API**: The core evaluation functions (`evaluate_agent`, `evaluate_workflow`) must not be tied to any specific provider. Provider configuration should be separate from the evaluation call.
-- **Lowest concept count**: Introduce the fewest possible new concepts. The evaluator IS the provider — no separate "provider" abstraction.
-- **Agent discovery and tool reuse**: The framework already knows which agents exist and what tools they have. Evals should leverage this automatically.
-- **Foundry-native results**: When using Foundry, results should be viewable in the Foundry portal.
-- **Progressive disclosure**: Simple scenarios should be near-zero code. Advanced scenarios should build on the same primitives.
-- **Cross-language parity**: Design must be implementable in both Python and .NET.
-
-## Considered Options
-
-1. **Provider-specific functions** — Build Foundry-specific helper functions (`evaluate_agent()`, etc.) directly in the Azure package. All eval functions take Foundry connection parameters.
-2. **Evaluator protocol with core orchestration** — Define a provider-agnostic `Evaluator` protocol in core. Orchestration functions live in core. Providers implement the protocol.
-3. **Full eval framework** — Build comprehensive eval infrastructure including custom evaluator definitions, scoring profiles, and reporting inside agent-framework.
-
-## Decision Outcome
-
-Chosen option: "Evaluator protocol with core orchestration", because it delivers the zero-friction developer experience, supports multiple providers without API changes, and keeps the concept count low (evaluator = provider).
-
-### Architecture: Core vs Provider Split
-
-The evaluation system is split across two layers:
-
-**Core (`agent_framework._eval`, `agent_framework._local_eval`)**:
-
-*Data types:*
-- `EvalItem` — Provider-agnostic data format for evaluation items (includes `expected` for ground-truth comparison)
-- `EvalResults` — Universal result type with pass/fail counts, portal links, per-item detail, sub_results
-- `EvalItemResult` / `EvalScoreResult` — Per-item results with individual scores, error details, token usage
-
-*Evaluator protocol:*
-- `Evaluator` — Protocol that evaluation providers implement
-- `LocalEvaluator` — Built-in `Evaluator` implementation that runs checks locally without API calls
-
-*Orchestration functions:*
-- `evaluate_agent()`, `evaluate_workflow()` — Extract data from agents/workflows and delegate to evaluators
-- Internal `AgentEvalConverter` — Converts agent-framework types (`Message`, `Content`, `FunctionTool`) to eval format
-
-*Built-in checks (for use with `LocalEvaluator`):*
-- `keyword_check(*keywords)` — Response must contain specified keywords
-- `tool_called_check(*tool_names)` — Agent must have called specified tools
-
-*Custom function evaluators:*
-- `@function_evaluator` — Decorator to wrap a sync or async function as an eval check with signature-based parameter injection
-
-**Azure AI Provider (`agent_framework_azure_ai._foundry_evals`)**:
-
-*Evaluator implementation:*
-- `FoundryEvals` — `Evaluator` implementation backed by Azure AI Foundry (smart defaults, auto-detection, portal links)
-- `Evaluators` — Constants for Foundry built-in evaluator names (agent behavior, tool usage, quality, safety)
-
-*Foundry-specific functions:*
-- `evaluate_traces()` — Evaluate from stored response IDs or OTel traces
-- `evaluate_foundry_target()` — Evaluate a Foundry-registered agent or deployment
-- `setup_continuous_eval()` — Continuous evaluation rules (not yet available)
-
-### Consequences
-
-- Good, because the same `evaluate_agent()` call works with Foundry, local, or third-party evaluators
-- Good, because provider config is set once on the evaluator, not repeated on every function call
-- Good, because mixing providers (e.g., Foundry quality + local keyword match) is natural
-- Good, because data extraction logic is reusable across providers
-- Neutral, because it requires core to define the `Evaluator` protocol (lightweight)
-- Bad, because advanced Foundry features (scheduled evals, continuous eval) remain Foundry-specific functions
-
-## Pros and Cons of the Options
-
-### Provider-specific functions (Option 1, previous approach)
-
-All eval functions take `openai_client=`, `model_deployment=`, etc. directly.
-
-- Good, because simple implementation — no protocol/abstraction needed
-- Bad, because every function signature is Foundry-specific (`project_client`, `model_deployment`)
-- Bad, because switching providers requires rewriting all eval calls
-- Bad, because mixing providers (Foundry + local) in one eval run is impossible
-
-### Full eval framework (Option 3)
-
-Build comprehensive eval infrastructure including custom evaluator definitions, dataset management, and reporting.
-
-- Good, because it could provide evaluator features that Foundry doesn't support natively
-- Bad, because it duplicates Foundry functionality and significantly expands maintenance burden
-- Bad, because eval results would fragment across separate systems
-
-## Usage Examples
-
-### Basic: Evaluate an agent
-
-```python
-from agent_framework import evaluate_agent
-from agent_framework_azure_ai import FoundryEvals
-
-evals = FoundryEvals(project_client=client, model_deployment="gpt-4o")
-
-results = await evaluate_agent(
-    agent=my_agent,
-    queries=["What's the weather?"],
-    evaluators=evals,  # smart defaults: relevance, coherence, task_adherence
-                       # auto-adds tool_call_accuracy when agent has tools
-)
-for r in results:
-    r.assert_passed()
-```
-
-### Evaluate a response you already have
-
-```python
-from agent_framework import evaluate_agent
-from agent_framework_azure_ai import FoundryEvals
-
-evals = FoundryEvals(project_client=client, model_deployment="gpt-4o")
-
-# Pass responses= to evaluate without re-running the agent
-results = await evaluate_agent(
-    agent=agent,
-    responses=response,
-    queries=["What's the weather?"],
-    evaluators=evals,
-)
-```
-
-### Evaluate a multi-agent workflow
-
-```python
-from agent_framework import evaluate_workflow
-from agent_framework_azure_ai import FoundryEvals
-
-evals = FoundryEvals(project_client=client, model_deployment="gpt-4o")
-
-result = await workflow.run("Plan a trip to Paris")
-eval_results = await evaluate_workflow(
-    workflow=workflow,
-    workflow_result=result,
-    evaluators=evals,
-)
-
-for r in eval_results:
-    print(f"{r.provider}:")
-    print(f"  overall: {r.passed}/{r.total}")
-    for name, sub in r.sub_results.items():
-        print(f"    {name}: {sub.passed}/{sub.total}")
-```
-
-### Select specific evaluators
-
-```python
-evals = FoundryEvals(
-    project_client=client,
-    model_deployment="gpt-4o",
-    evaluators=["relevance", "coherence"],
-)
-results = await evaluate_agent(agent=agent, queries=queries, evaluators=evals)
-```
-
-### Mix multiple providers
-
-```python
-from agent_framework import evaluate_agent, LocalEvaluator, function_evaluator, keyword_check, tool_called_check
-from agent_framework_azure_ai import FoundryEvals
-
-# Custom function evaluator — just name your parameters
-@function_evaluator
-def is_helpful(response: str) -> bool:
-    return len(response.split()) > 10
-
-# Local checks — instant, no API calls
-local = LocalEvaluator(
-    is_helpful,
-    keyword_check("weather"),
-    tool_called_check("get_weather"),
-)
-
-# Foundry — deep quality assessment via LLM-as-judge
-foundry = FoundryEvals(project_client=client, model_deployment="gpt-4o")
-
-# Both evaluate the same items; one EvalResults per provider
-results = await evaluate_agent(
-    agent=agent,
-    queries=queries,
-    evaluators=[local, foundry],
-)
-```
-
-### Foundry-specific: Trace-based evaluation
-
-```python
-from agent_framework_azure_ai import Evaluators, evaluate_traces
-
-results = await evaluate_traces(
-    response_ids=[response.response_id],
-    evaluators=[Evaluators.RELEVANCE],
-    project_client=project_client,
-    model_deployment="gpt-4o",
-)
-```
-
-### Direct evaluator access
-
-```python
-from agent_framework import EvalItem
-from agent_framework_azure_ai import FoundryEvals
-
-evals = FoundryEvals(project_client=client, model_deployment="gpt-4o")
-
-items = [EvalItem(query=q, response=r, conversation=[]) for q, r in pairs]
-
-# Call the evaluator directly
-results = await evals.evaluate(items, eval_name="My Custom Eval")
-```
-
-## What To Build
-
-### Core: Evaluator Protocol
-
-A runtime-checkable protocol that any evaluation provider implements:
-
-```python
-@runtime_checkable
-class Evaluator(Protocol):
-    @property
-    def name(self) -> str: ...
-
-    async def evaluate(
-        self, items: Sequence[EvalItem], *, eval_name: str = "Agent Framework Eval"
-    ) -> EvalResults: ...
-```
-
-The protocol is minimal — just `name` and `evaluate()`.
-
-### Core: EvalItem
-
-Provider-agnostic data format for items to evaluate:
-
-```python
-@dataclass
-class EvalItem:
-    query: str
-    response: str
-    conversation: list[dict[str, Any]]         # OpenAI chat format
-    tool_definitions: list[dict[str, Any]] | None = None
-    context: str | None = None
-    expected: str | None = None                # Ground-truth for comparison
-    response_id: str | None = None             # For Responses API providers
-```
-
-`EvalItem.to_dict()` serializes to flat dict with JSON-encoded strings for `conversation` and `tool_definitions`, suitable for JSONL data sources.
-
-### Internal: AgentEvalConverter
-
-Internal class that converts agent-framework types to `EvalItem`. Used by `evaluate_agent()` and `evaluate_workflow()` — not part of the public API:
-
-| Agent Framework | Eval Format |
-|---|---|
-| `Content.function_call` | `tool_call` in OpenAI chat format |
-| `Content.function_result` | `tool_result` in OpenAI chat format |
-| `FunctionTool` | `{name, description, parameters}` schema |
-| `Message` history | `conversation` list + `query`/`response` extraction |
-
-### Core: EvalResults
-
-Rich result type with convenience properties for CI integration:
-
-```python
-results.all_passed          # bool: no failures or errors (recursive for workflow)
-results.passed              # int: passing count
-results.failed              # int: failure count
-results.total               # int: total = passed + failed + errored
-results.per_evaluator       # dict: per-evaluator breakdown
-results.items               # list[EvalItemResult]: per-item scores and errors
-results.error               # str | None: error details on failure
-results.sub_results         # dict: per-agent breakdown (workflow evals)
-results.report_url          # str | None: portal link (Foundry)
-results.assert_passed()     # raises AssertionError with details
-```
-
-### Core: Orchestration Functions
-
-Provider-agnostic functions that extract data and delegate to evaluators:
-
-| Function | What it does |
-|---|---|
-| `evaluate_agent()` | Runs agent against test queries (or evaluates pre-existing `responses=`), converts to `EvalItem`s, passes to evaluator |
-| `evaluate_workflow()` | Extracts per-agent data from `WorkflowRunResult`, evaluates each agent and overall output. Per-agent breakdown in `sub_results` |
+These factorings produce different scores for the same conversation. The framework ships all three as built-in strategies, defaulting to last-turn. Developers can also provide a custom splitter — a function (Python) or `IConversationSplitter` implementation (.NET) — and override the strategy at the call site or per evaluator.
 
 ### Azure AI: FoundryEvals
 
@@ -426,16 +411,16 @@ class FoundryEvals:
 
 **Smart auto-detection in `evaluate()`:**
 - Default evaluators: relevance, coherence, task_adherence
-- Auto-adds `tool_call_accuracy` when items have `tool_definitions`
-- Filters out tool evaluators for items without `tool_definitions`
+- Auto-adds `tool_call_accuracy` when items have tools/`tool_definitions`
+- Filters out tool evaluators for items without tools
 - Responses API fast path when all items have `response_id` and no tool evaluators
 
-### Azure AI: Evaluators Constants
+### Azure AI: FoundryEvaluators Constants
 
 ```python
-from agent_framework_azure_ai import Evaluators
+from agent_framework_azure_ai import FoundryEvaluators
 
-evaluators = [Evaluators.RELEVANCE, Evaluators.TOOL_CALL_ACCURACY]
+evaluators = [FoundryEvals.RELEVANCE, FoundryEvals.TOOL_CALL_ACCURACY]
 ```
 
 Categories: Agent behavior, Tool usage, Quality, Safety.
@@ -446,7 +431,6 @@ Categories: Agent behavior, Tool usage, Quality, Safety.
 |---|---|
 | `evaluate_traces()` | Evaluate from stored response IDs or OTel traces |
 | `evaluate_foundry_target()` | Evaluate a Foundry-registered agent or deployment |
-| `setup_continuous_eval()` | Create evaluation rules (not yet available) |
 
 ### Core: LocalEvaluator and Function Evaluators
 
@@ -473,14 +457,14 @@ def mentions_city(response: str, expected: str) -> bool:
 
 # Tier 3: Full context — inspect conversation and tools
 @function_evaluator
-def used_tools(conversation: list, tool_definitions: list) -> float:
+def used_tools(conversation: list, tools: list) -> float:
     # ... scoring logic
     return score
 
 local = LocalEvaluator(is_concise, mentions_city, used_tools)
 ```
 
-Supported parameters: `query`, `response`, `expected`, `conversation`, `tool_definitions`, `context`.
+Supported parameters: `query`, `response`, `expected`, `conversation`, `tools`, `context`.
 Return types: `bool`, `float` (≥0.5 = pass), `dict` with `score` or `passed` key, or `CheckResult`.
 
 Async functions are handled automatically — `@function_evaluator` detects `async def` and produces the right wrapper.
@@ -496,13 +480,6 @@ Async functions are handled automatically — `@function_evaluator` detects `asy
 1. **Per-agent workflow evals use dataset path**: Workflow sub-agent evaluations always clear `response_id` to force the dataset evaluation path. The Responses API retrieval path doesn't work for agents whose input is another agent's full conversation (the evaluator can't extract a clean user query from the stored response).
 2. **Tool evaluators require query + agent**: Tool evaluators need tool definition schemas, which are not available through Responses API response retrieval. When using these evaluators with `evaluate_agent(responses=...)`, provide `queries=` and pass an agent with tool definitions.
 3. **`model_deployment` always required**: Could potentially be inferred from the Foundry project configuration.
-
-## Resolved Issues
-
-1. **`options=` vs `default_options=` silent failure** (fixed): `Agent.__init__` now accepts `options=` as an alias for `default_options=`, preventing the common mistake of `Agent(options={"store": False})` silently dropping into `additional_properties`.
-2. **`function_call` status serialization** (fixed): `_parse_response_from_openai` now preserves `status` in `additional_properties`, and serialization reads it back with a fallback to `"completed"`.
-3. **Stale session state** (fixed): `AgentExecutor.reset()` clears `service_session_id`. Workflows call `executor.reset()` on all executors during `reset_for_new_run`.
-4. **`response_id` gated on store** (fixed): `response_id` is only set on `ChatResponse` when `store` is not `False`. This prevents evals from attempting the Responses API path for non-stored responses (which would 404).
 
 ## Open Questions
 
@@ -542,8 +519,8 @@ The .NET integration uses MEAI's `IEvaluator` directly — no new evaluator inte
                  │
      ┌───────────┼────────────┐
      │           │            │
- ┌───▼───┐  ┌───▼────┐  ┌────▼──────────┐
- │ MEAI  │  │ Local  │  │ Foundry       │
+ ┌───▼───-┐  ┌───▼────┐  ┌────▼──────────┐
+ │ MEAI   │  │ Local  │  │ Foundry       │
  │ Quality│  │ Checks │  │ (cloud batch) │
  │ Safety │  │ Lambdas│  │               │
  └────────┘  └────────┘  └───────────────┘

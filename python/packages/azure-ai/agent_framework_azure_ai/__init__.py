@@ -10,7 +10,6 @@ from agent_framework._eval import (
     EvalScoreResult,
     Evaluator,
     evaluate_agent,
-    evaluate_response,
     evaluate_workflow,
 )
 
@@ -24,7 +23,6 @@ from ._embedding_client import (
     RawAzureAIInferenceEmbeddingClient,
 )
 from ._foundry_evals import (
-    Evaluators,
     FoundryEvals,
     evaluate_foundry_target,
     evaluate_traces,
@@ -55,7 +53,6 @@ __all__ = [
     "EvalResults",
     "EvalScoreResult",
     "Evaluator",
-    "Evaluators",
     "FoundryEvals",
     "FoundryMemoryProvider",
     "RawAzureAIClient",
@@ -63,7 +60,6 @@ __all__ = [
     "__version__",
     "evaluate_agent",
     "evaluate_foundry_target",
-    "evaluate_response",
     "evaluate_traces",
     "evaluate_workflow",
     "setup_continuous_eval",

@@ -38,7 +38,7 @@ from agent_framework import (
     tool_called_check,
 )
 from agent_framework.azure import AzureOpenAIResponsesClient
-from agent_framework_azure_ai import Evaluators, FoundryEvals
+from agent_framework_azure_ai import FoundryEvals
 from agent_framework_orchestrations import GroupChatBuilder, SequentialBuilder
 from azure.ai.projects.aio import AIProjectClient
 from azure.identity import DefaultAzureCredential
@@ -294,7 +294,7 @@ async def demo_foundry_response(project_client, deployment):
     quality_evals = FoundryEvals(
         project_client=project_client,
         model_deployment=deployment,
-        evaluators=[Evaluators.RELEVANCE, Evaluators.COHERENCE],
+        evaluators=[FoundryEvals.RELEVANCE, FoundryEvals.COHERENCE],
     )
     results = await evaluate_agent(
         agent=agent,
@@ -341,9 +341,9 @@ async def demo_foundry_select(project_client, deployment):
         project_client=project_client,
         model_deployment=deployment,
         evaluators=[
-            Evaluators.RELEVANCE,
-            Evaluators.TASK_ADHERENCE,
-            Evaluators.TOOL_CALL_ACCURACY,
+            FoundryEvals.RELEVANCE,
+            FoundryEvals.TASK_ADHERENCE,
+            FoundryEvals.TOOL_CALL_ACCURACY,
         ],
     )
     results = await evaluate_agent(

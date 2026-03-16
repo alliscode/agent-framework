@@ -65,14 +65,14 @@ class ConversationSplit(str, Enum):
 
 ConversationSplitter = Union[
     ConversationSplit,
-    Callable[[list[dict[str, Any]]], tuple[list[dict[str, Any]], list[dict[str, Any]]]],
+    Callable[[list[Message]], tuple[list[Message], list[Message]]],
 ]
 """Type accepted by ``EvalItem.to_dict(split=...)``.
 
 Either a built-in ``ConversationSplit`` enum value **or** a callable with
 signature::
 
-    def my_splitter(conversation: list[dict]) -> tuple[list[dict], list[dict]]:
+    def my_splitter(conversation: list[Message]) -> tuple[list[Message], list[Message]]:
         '''Return (query_messages, response_messages).'''
 
 Custom splitters let you evaluate domain-specific boundaries — for example,
@@ -80,11 +80,9 @@ splitting just before a memory-retrieval tool call to evaluate recall quality::
 
     def split_before_memory(conversation):
         for i, msg in enumerate(conversation):
-            content = msg.get("content", [])
-            if isinstance(content, list):
-                for c in content:
-                    if c.get("name") == "retrieve_memory":
-                        return conversation[:i], conversation[i:]
+            for c in msg.contents or []:
+                if c.type == "function_call" and c.name == "retrieve_memory":
+                    return conversation[:i], conversation[i:]
         # Fallback: split at last user message
         return EvalItem._split_last_turn_static(conversation)
 
@@ -97,30 +95,45 @@ class EvalItem:
     """A single item to be evaluated.
 
     Represents one query/response interaction in a provider-agnostic format.
-    Evaluation providers convert this to their internal format.
+    ``conversation`` is the single source of truth — ``query`` and ``response``
+    are derived from it via the split strategy.
 
     Attributes:
-        query: The user's input query.
-        response: The agent's text response.
-        conversation: Full conversation as typed content messages.
-        tool_definitions: Tool definitions if the agent has tools.
+        conversation: Full conversation as ``Message`` objects.
+        tools: Typed tool objects (e.g. ``FunctionTool``) for evaluator logic.
         context: Optional grounding context document.
         expected: Optional expected output for ground-truth comparison.
         response_id: Responses API response ID (for providers that support
             server-side retrieval).
-        split_strategy: Optional split strategy set by orchestration functions
-            (e.g. ``evaluate_agent(conversation_split=...)``).  When set, this
-            is used as the default by ``to_dict()`` and by evaluators.
+        split_strategy: Split strategy controlling how ``query`` and
+            ``response`` are derived from the conversation. Defaults to
+            ``ConversationSplit.LAST_TURN``.
     """
 
-    query: str
-    response: str
-    conversation: list[dict[str, Any]]
-    tool_definitions: list[dict[str, Any]] | None = None
+    conversation: list[Message]
+    tools: list[FunctionTool] | None = None
     context: str | None = None
     expected: str | None = None
     response_id: str | None = None
     split_strategy: ConversationSplitter | None = None
+
+    @property
+    def query(self) -> str:
+        """User query text, derived from the query side of the conversation split."""
+        query_msgs, _ = self._split_conversation(
+            self.split_strategy or ConversationSplit.LAST_TURN
+        )
+        user_texts = [m.text for m in query_msgs if m.role == "user" and m.text]
+        return " ".join(user_texts).strip()
+
+    @property
+    def response(self) -> str:
+        """Agent response text, derived from the response side of the conversation split."""
+        _, response_msgs = self._split_conversation(
+            self.split_strategy or ConversationSplit.LAST_TURN
+        )
+        assistant_texts = [m.text for m in response_msgs if m.role == "assistant" and m.text]
+        return " ".join(assistant_texts).strip()
 
     def to_dict(
         self,
@@ -129,8 +142,9 @@ class EvalItem:
     ) -> dict[str, Any]:
         """Convert to a flat dict for serialization.
 
-        Produces ``query_messages`` and ``response_messages`` by splitting
-        the conversation according to *split*:
+        Produces ``query``, ``response``, ``query_messages`` and
+        ``response_messages`` by splitting the conversation according to
+        *split*:
 
         - ``LAST_TURN`` (default): split at the last user message.
         - ``FULL``: split after the first user message.
@@ -143,21 +157,31 @@ class EvalItem:
         effective_split = split or self.split_strategy or ConversationSplit.LAST_TURN
         query_msgs, response_msgs = self._split_conversation(effective_split)
 
+        query_text = " ".join(
+            m.text for m in query_msgs if m.role == "user" and m.text
+        ).strip()
+        response_text = " ".join(
+            m.text for m in response_msgs if m.role == "assistant" and m.text
+        ).strip()
+
         item: dict[str, Any] = {
-            "query": self.query,
-            "response": self.response,
-            "query_messages": query_msgs,
-            "response_messages": response_msgs,
+            "query": query_text,
+            "response": response_text,
+            "query_messages": AgentEvalConverter.convert_messages(query_msgs),
+            "response_messages": AgentEvalConverter.convert_messages(response_msgs),
         }
-        if self.tool_definitions:
-            item["tool_definitions"] = self.tool_definitions
+        if self.tools:
+            item["tool_definitions"] = [
+                {"name": t.name, "description": t.description, "parameters": t.parameters()}
+                for t in self.tools
+            ]
         if self.context:
             item["context"] = self.context
         return item
 
     def _split_conversation(
         self, split: ConversationSplitter
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    ) -> tuple[list[Message], list[Message]]:
         """Split ``self.conversation`` into (query_messages, response_messages)."""
         if callable(split) and not isinstance(split, ConversationSplit):
             return split(self.conversation)
@@ -165,18 +189,18 @@ class EvalItem:
             return self._split_full()
         return self._split_last_turn()
 
-    def _split_last_turn(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    def _split_last_turn(self) -> tuple[list[Message], list[Message]]:
         """Split at the last user message (default strategy)."""
         return self._split_last_turn_static(self.conversation)
 
     @staticmethod
     def _split_last_turn_static(
-        conversation: list[dict[str, Any]],
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        conversation: list[Message],
+    ) -> tuple[list[Message], list[Message]]:
         """Split at the last user message.  Usable as a fallback in custom splitters."""
         last_user_idx = -1
         for i, msg in enumerate(conversation):
-            if msg.get("role") == "user":
+            if msg.role == "user":
                 last_user_idx = i
 
         if last_user_idx >= 0:
@@ -186,11 +210,11 @@ class EvalItem:
             )
         return [], list(conversation)
 
-    def _split_full(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    def _split_full(self) -> tuple[list[Message], list[Message]]:
         """Split after the first user message (evaluates whole trajectory)."""
         first_user_idx = -1
         for i, msg in enumerate(self.conversation):
-            if msg.get("role") == "user":
+            if msg.role == "user":
                 first_user_idx = i
                 break
 
@@ -204,9 +228,9 @@ class EvalItem:
     @classmethod
     def per_turn_items(
         cls,
-        conversation: list[dict[str, Any]],
+        conversation: list[Message],
         *,
-        tool_definitions: list[dict[str, Any]] | None = None,
+        tools: list[FunctionTool] | None = None,
         context: str | None = None,
     ) -> list[EvalItem]:
         """Split a multi-turn conversation into one ``EvalItem`` per turn.
@@ -219,14 +243,14 @@ class EvalItem:
         with its full preceding context.
 
         Args:
-            conversation: Full conversation in evaluator message format.
-            tool_definitions: Tool definitions shared across all items.
+            conversation: Full conversation as ``Message`` objects.
+            tools: Tool objects shared across all items.
             context: Optional grounding context shared across all items.
 
         Returns:
             A list of ``EvalItem`` instances, one per user turn.
         """
-        user_indices = [i for i, m in enumerate(conversation) if m.get("role") == "user"]
+        user_indices = [i for i, m in enumerate(conversation) if m.role == "user"]
         if not user_indices:
             return []
 
@@ -236,37 +260,15 @@ class EvalItem:
             # message (or end of conversation).
             next_ui = user_indices[turn_idx + 1] if turn_idx + 1 < len(user_indices) else len(conversation)
 
-            query_msgs = conversation[: ui + 1]
-            response_msgs = conversation[ui + 1 : next_ui]
-
-            query_text = cls._extract_text(conversation[ui])
-            response_text = " ".join(
-                cls._extract_text(m) for m in response_msgs if m.get("role") == "assistant"
-            ).strip()
-
             items.append(
                 cls(
-                    query=query_text,
-                    response=response_text,
                     conversation=conversation[: next_ui],
-                    tool_definitions=tool_definitions,
+                    tools=tools,
                     context=context,
                 )
             )
 
         return items
-
-    @staticmethod
-    def _extract_text(msg: dict[str, Any]) -> str:
-        """Extract plain text from a message dict."""
-        content = msg.get("content", "")
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
-            return " ".join(parts).strip()
-        return str(content)
-
 
 @dataclass
 class EvalScoreResult:
@@ -488,7 +490,7 @@ class Evaluator(Protocol):
 
         The evaluator determines which metrics to run. It may auto-detect
         capabilities from the items (e.g., run tool evaluators only when
-        ``tool_definitions`` is present).
+        ``tools`` is present).
 
         Args:
             items: Eval data items to score.
@@ -608,8 +610,8 @@ class AgentEvalConverter:
     def extract_tools(agent: Any) -> list[dict[str, Any]]:
         """Extract tool definitions from an agent instance.
 
-        Reads ``agent.default_options["tools"]`` and converts each
-        ``FunctionTool`` to ``{name, description, parameters}``.
+        Reads ``agent.default_options["tools"]`` and ``agent.mcp_tools``
+        and converts each ``FunctionTool`` to ``{name, description, parameters}``.
 
         Args:
             agent: An agent-framework agent instance.
@@ -618,14 +620,26 @@ class AgentEvalConverter:
             A list of tool definition dicts.
         """
         tools: list[dict[str, Any]] = []
+        seen: set[str] = set()
         raw_tools = getattr(agent, "default_options", {}).get("tools", [])
         for t in raw_tools:
-            if isinstance(t, FunctionTool):
+            if isinstance(t, FunctionTool) and t.name not in seen:
                 tools.append({
                     "name": t.name,
                     "description": t.description,
                     "parameters": t.parameters(),
                 })
+                seen.add(t.name)
+        # Include tools from connected MCP servers
+        for mcp in getattr(agent, "mcp_tools", []):
+            for t in getattr(mcp, "functions", []):
+                if isinstance(t, FunctionTool) and t.name not in seen:
+                    tools.append({
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters(),
+                    })
+                    seen.add(t.name)
         return tools
 
     @staticmethod
@@ -650,31 +664,29 @@ class AgentEvalConverter:
             An ``EvalItem`` suitable for passing to any ``Evaluator``.
         """
         if isinstance(query, str):
-            query_str = query
             input_msgs = [Message("user", [query])]
         else:
             input_msgs = list(query)
-            query_str = " ".join(m.text for m in input_msgs if m.role == "user")
 
         all_msgs = list(input_msgs) + list(response.messages or [])
-        conversation = AgentEvalConverter.convert_messages(all_msgs)
 
-        tool_defs: list[dict[str, Any]] = []
+        typed_tools: list[FunctionTool] = []
         if tools:
-            for t in tools:
-                tool_defs.append({
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": t.parameters(),
-                })
+            typed_tools = list(tools)
         elif agent:
-            tool_defs = AgentEvalConverter.extract_tools(agent)
+            raw_tools = getattr(agent, "default_options", {}).get("tools", [])
+            typed_tools = [t for t in raw_tools if isinstance(t, FunctionTool)]
+            # Include tools from connected MCP servers
+            seen = {t.name for t in typed_tools}
+            for mcp in getattr(agent, "mcp_tools", []):
+                for t in getattr(mcp, "functions", []):
+                    if isinstance(t, FunctionTool) and t.name not in seen:
+                        typed_tools.append(t)
+                        seen.add(t.name)
 
         return EvalItem(
-            query=query_str,
-            response=response.text or "",
-            conversation=conversation,
-            tool_definitions=tool_defs or None,
+            conversation=all_msgs,
+            tools=typed_tools or None,
             context=context,
             response_id=getattr(response, "response_id", None),
         )
@@ -795,10 +807,10 @@ class _MinimalAgent:
 
 async def evaluate_agent(
     *,
-    agent: Any,
+    agent: Any = None,
     queries: Sequence[str] | None = None,
     responses: AgentResponse[Any] | Sequence[AgentResponse[Any]] | None = None,
-    evaluators: Evaluator | Sequence[Evaluator],
+    evaluators: Evaluator | Callable[..., Any] | Sequence[Evaluator | Callable[..., Any]],
     eval_name: str | None = None,
     context: str | None = None,
     conversation_split: ConversationSplitter | None = None,
@@ -883,8 +895,6 @@ async def evaluate_agent(
                     )
                 items.append(
                     EvalItem(
-                        query="",
-                        response=r.text or "",
                         conversation=[],
                         response_id=response_id,
                     )
@@ -947,7 +957,7 @@ async def evaluate_workflow(
     workflow: Workflow,
     workflow_result: WorkflowRunResult | None = None,
     queries: Sequence[str] | None = None,
-    evaluators: Evaluator | Sequence[Evaluator],
+    evaluators: Evaluator | Callable[..., Any] | Sequence[Evaluator | Callable[..., Any]],
     eval_name: str | None = None,
     include_overall: bool = True,
     include_per_agent: bool = True,
@@ -1153,13 +1163,47 @@ def _build_overall_item(
 
 
 async def _run_evaluators(
-    evaluators: Evaluator | Sequence[Evaluator],
+    evaluators: Evaluator | Sequence[Evaluator | Callable[..., Any]],
     items: Sequence[EvalItem],
     *,
     eval_name: str,
 ) -> list[EvalResults]:
-    """Run one or more evaluators and return a result per provider."""
-    evaluator_list = [evaluators] if isinstance(evaluators, Evaluator) else list(evaluators)
+    """Run one or more evaluators and return a result per provider.
+
+    Bare ``EvalCheck`` callables (including ``@function_evaluator`` decorated
+    functions and helpers like ``keyword_check``) are auto-wrapped in a
+    ``LocalEvaluator`` so they can be passed directly in the evaluators list.
+    """
+    from ._local_eval import LocalEvaluator
+
+    raw_list: list[Any]
+    if isinstance(evaluators, Evaluator):
+        raw_list = [evaluators]
+    elif callable(evaluators):
+        raw_list = [evaluators]
+    else:
+        raw_list = list(evaluators)
+
+    # Auto-wrap bare callables (EvalCheck / @function_evaluator) into LocalEvaluator
+    evaluator_list: list[Evaluator] = []
+    pending_checks: list[Callable[..., Any]] = []
+
+    for item in raw_list:
+        if isinstance(item, Evaluator):
+            # Flush any pending checks as a single LocalEvaluator
+            if pending_checks:
+                evaluator_list.append(LocalEvaluator(*pending_checks))
+                pending_checks = []
+            evaluator_list.append(item)
+        elif callable(item):
+            pending_checks.append(item)
+        else:
+            raise TypeError(
+                f"Expected an Evaluator or callable, got {type(item).__name__}"
+            )
+
+    if pending_checks:
+        evaluator_list.append(LocalEvaluator(*pending_checks))
 
     results: list[EvalResults] = []
     for ev in evaluator_list:
