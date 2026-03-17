@@ -805,6 +805,7 @@ async def evaluate_agent(
     *,
     agent: Any = None,
     queries: Sequence[str] | None = None,
+    expected: Sequence[str] | None = None,
     responses: AgentResponse[Any] | Sequence[AgentResponse[Any]] | None = None,
     evaluators: Evaluator | Callable[..., Any] | Sequence[Evaluator | Callable[..., Any]],
     eval_name: str | None = None,
@@ -825,6 +826,10 @@ async def evaluate_agent(
         agent: An agent-framework agent instance.
         queries: Test queries to run the agent against. Required when
             ``responses`` is not provided.
+        expected: Ground-truth expected outputs, one per query. When
+            provided, must be the same length as ``queries``. Each value
+            is stamped on the corresponding ``EvalItem.expected`` for
+            evaluators that compare against a reference answer.
         responses: Pre-existing ``AgentResponse``(s) to evaluate without
             running the agent.  When provided, ``queries`` must also be
             provided to construct the conversation for evaluation.
@@ -857,9 +862,25 @@ async def evaluate_agent(
             queries=["What's the weather?"],
             evaluators=evals,
         )
+
+    Example — with ground-truth expected answers::
+
+        results = await evaluate_agent(
+            agent=my_agent,
+            queries=["What's 2+2?", "Capital of France?"],
+            expected=["4", "Paris"],
+            evaluators=evals,
+        )
     """
     converter = AgentEvalConverter()
     items: list[EvalItem] = []
+
+    # Validate expected length against queries
+    if expected is not None and queries is not None:
+        if len(expected) != len(queries):
+            raise ValueError(
+                f"Got {len(queries)} queries but {len(expected)} expected values."
+            )
 
     if responses is not None:
         # Evaluate pre-existing responses (don't run the agent)
@@ -895,6 +916,11 @@ async def evaluate_agent(
             )
     else:
         raise ValueError("Provide either 'queries' or 'responses' (or both).")
+
+    # Stamp expected values on items
+    if expected is not None:
+        for item, exp in zip(items, expected):
+            item.expected = exp
 
     # Stamp split strategy on items so evaluators respect it
     if conversation_split is not None:

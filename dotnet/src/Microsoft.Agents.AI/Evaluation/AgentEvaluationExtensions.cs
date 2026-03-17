@@ -22,6 +22,11 @@ public static partial class AgentEvaluationExtensions
     /// <param name="queries">Test queries to send to the agent.</param>
     /// <param name="evaluator">The evaluator to score responses.</param>
     /// <param name="evalName">Display name for this evaluation run.</param>
+    /// <param name="expected">
+    /// Optional ground-truth expected outputs, one per query. When provided,
+    /// must be the same length as <paramref name="queries"/>. Each value is
+    /// stamped on the corresponding <see cref="EvalItem.Expected"/>.
+    /// </param>
     /// <param name="splitter">
     /// Optional conversation splitter to apply to all items.
     /// Use <see cref="ConversationSplitters.LastTurn"/>, <see cref="ConversationSplitters.Full"/>,
@@ -34,10 +39,11 @@ public static partial class AgentEvaluationExtensions
         IEnumerable<string> queries,
         IAgentEvaluator evaluator,
         string evalName = "Agent Framework Eval",
+        IEnumerable<string>? expected = null,
         IConversationSplitter? splitter = null,
         CancellationToken cancellationToken = default)
     {
-        var items = await RunAgentForEvalAsync(agent, queries, splitter, cancellationToken).ConfigureAwait(false);
+        var items = await RunAgentForEvalAsync(agent, queries, expected, splitter, cancellationToken).ConfigureAwait(false);
         return await evaluator.EvaluateAsync(items, evalName, cancellationToken).ConfigureAwait(false);
     }
 
@@ -49,6 +55,9 @@ public static partial class AgentEvaluationExtensions
     /// <param name="evaluator">The MEAI evaluator (e.g., <c>RelevanceEvaluator</c>, <c>CompositeEvaluator</c>).</param>
     /// <param name="chatConfiguration">Chat configuration for the MEAI evaluator (includes the judge model).</param>
     /// <param name="evalName">Display name for this evaluation run.</param>
+    /// <param name="expected">
+    /// Optional ground-truth expected outputs, one per query.
+    /// </param>
     /// <param name="splitter">
     /// Optional conversation splitter to apply to all items.
     /// Use <see cref="ConversationSplitters.LastTurn"/>, <see cref="ConversationSplitters.Full"/>,
@@ -62,11 +71,12 @@ public static partial class AgentEvaluationExtensions
         IEvaluator evaluator,
         ChatConfiguration chatConfiguration,
         string evalName = "Agent Framework Eval",
+        IEnumerable<string>? expected = null,
         IConversationSplitter? splitter = null,
         CancellationToken cancellationToken = default)
     {
         var wrapped = new MeaiEvaluatorAdapter(evaluator, chatConfiguration);
-        return await agent.EvaluateAsync(queries, wrapped, evalName, splitter, cancellationToken).ConfigureAwait(false);
+        return await agent.EvaluateAsync(queries, wrapped, evalName, expected, splitter, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -76,6 +86,9 @@ public static partial class AgentEvaluationExtensions
     /// <param name="queries">Test queries to send to the agent.</param>
     /// <param name="evaluators">The evaluators to score responses.</param>
     /// <param name="evalName">Display name for this evaluation run.</param>
+    /// <param name="expected">
+    /// Optional ground-truth expected outputs, one per query.
+    /// </param>
     /// <param name="splitter">
     /// Optional conversation splitter to apply to all items.
     /// Use <see cref="ConversationSplitters.LastTurn"/>, <see cref="ConversationSplitters.Full"/>,
@@ -88,10 +101,11 @@ public static partial class AgentEvaluationExtensions
         IEnumerable<string> queries,
         IEnumerable<IAgentEvaluator> evaluators,
         string evalName = "Agent Framework Eval",
+        IEnumerable<string>? expected = null,
         IConversationSplitter? splitter = null,
         CancellationToken cancellationToken = default)
     {
-        var items = await RunAgentForEvalAsync(agent, queries, splitter, cancellationToken).ConfigureAwait(false);
+        var items = await RunAgentForEvalAsync(agent, queries, expected, splitter, cancellationToken).ConfigureAwait(false);
 
         var results = new List<AgentEvaluationResults>();
         foreach (var evaluator in evaluators)
@@ -111,6 +125,9 @@ public static partial class AgentEvaluationExtensions
     /// <param name="queries">The queries that produced each response (must match count).</param>
     /// <param name="evaluator">The evaluator to score responses.</param>
     /// <param name="evalName">Display name for this evaluation run.</param>
+    /// <param name="expected">
+    /// Optional ground-truth expected outputs, one per query.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Evaluation results.</returns>
     public static async Task<AgentEvaluationResults> EvaluateAsync(
@@ -119,9 +136,10 @@ public static partial class AgentEvaluationExtensions
         IEnumerable<string> queries,
         IAgentEvaluator evaluator,
         string evalName = "Agent Framework Eval",
+        IEnumerable<string>? expected = null,
         CancellationToken cancellationToken = default)
     {
-        var items = BuildItemsFromResponses(agent, responses, queries);
+        var items = BuildItemsFromResponses(agent, responses, queries, expected);
         return await evaluator.EvaluateAsync(items, evalName, cancellationToken).ConfigureAwait(false);
     }
 
@@ -134,6 +152,9 @@ public static partial class AgentEvaluationExtensions
     /// <param name="evaluator">The MEAI evaluator.</param>
     /// <param name="chatConfiguration">Chat configuration for the MEAI evaluator.</param>
     /// <param name="evalName">Display name for this evaluation run.</param>
+    /// <param name="expected">
+    /// Optional ground-truth expected outputs, one per query.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Evaluation results.</returns>
     public static async Task<AgentEvaluationResults> EvaluateAsync(
@@ -143,24 +164,33 @@ public static partial class AgentEvaluationExtensions
         IEvaluator evaluator,
         ChatConfiguration chatConfiguration,
         string evalName = "Agent Framework Eval",
+        IEnumerable<string>? expected = null,
         CancellationToken cancellationToken = default)
     {
         var wrapped = new MeaiEvaluatorAdapter(evaluator, chatConfiguration);
-        return await agent.EvaluateAsync(responses, queries, wrapped, evalName, cancellationToken).ConfigureAwait(false);
+        return await agent.EvaluateAsync(responses, queries, wrapped, evalName, expected, cancellationToken).ConfigureAwait(false);
     }
 
     private static List<EvalItem> BuildItemsFromResponses(
         AIAgent agent,
         IEnumerable<AgentResponse> responses,
-        IEnumerable<string> queries)
+        IEnumerable<string> queries,
+        IEnumerable<string>? expected)
     {
         var responseList = responses.ToList();
         var queryList = queries.ToList();
+        var expectedList = expected?.ToList();
 
         if (responseList.Count != queryList.Count)
         {
             throw new ArgumentException(
                 $"Got {queryList.Count} queries but {responseList.Count} responses. Counts must match.");
+        }
+
+        if (expectedList != null && expectedList.Count != queryList.Count)
+        {
+            throw new ArgumentException(
+                $"Got {queryList.Count} queries but {expectedList.Count} expected values. Counts must match.");
         }
 
         var items = new List<EvalItem>();
@@ -176,6 +206,11 @@ public static partial class AgentEvaluationExtensions
             messages.AddRange(response.Messages);
 
             var item = BuildEvalItem(query, response, messages, agent);
+            if (expectedList != null)
+            {
+                item.Expected = expectedList[i];
+            }
+
             items.Add(item);
         }
 
@@ -185,15 +220,25 @@ public static partial class AgentEvaluationExtensions
     private static async Task<List<EvalItem>> RunAgentForEvalAsync(
         AIAgent agent,
         IEnumerable<string> queries,
+        IEnumerable<string>? expected,
         IConversationSplitter? splitter,
         CancellationToken cancellationToken)
     {
         var items = new List<EvalItem>();
+        var queryList = queries.ToList();
+        var expectedList = expected?.ToList();
 
-        foreach (var query in queries)
+        if (expectedList != null && expectedList.Count != queryList.Count)
+        {
+            throw new ArgumentException(
+                $"Got {queryList.Count} queries but {expectedList.Count} expected values. Counts must match.");
+        }
+
+        for (int i = 0; i < queryList.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            var query = queryList[i];
             var messages = new List<ChatMessage>
             {
                 new(ChatRole.User, query),
@@ -202,6 +247,11 @@ public static partial class AgentEvaluationExtensions
             var response = await agent.RunAsync(messages, cancellationToken: cancellationToken).ConfigureAwait(false);
             var item = BuildEvalItem(query, response, messages, agent);
             item.Splitter = splitter;
+            if (expectedList != null)
+            {
+                item.Expected = expectedList[i];
+            }
+
             items.Add(item);
         }
 
