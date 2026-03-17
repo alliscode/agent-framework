@@ -18,13 +18,13 @@ Example — built-in checks::
 
 Example — custom function evaluators::
 
-    from agent_framework import LocalEvaluator, function_evaluator, evaluate_agent
+    from agent_framework import LocalEvaluator, evaluator, evaluate_agent
 
-    @function_evaluator
+    @evaluator
     def mentions_weather(query: str, response: str) -> bool:
         return "weather" in response.lower()
 
-    @function_evaluator
+    @evaluator
     def word_overlap(response: str, expected: str) -> float:
         r_words = set(response.lower().split())
         e_words = set(expected.lower().split())
@@ -221,7 +221,7 @@ def _coerce_result(value: Any, check_name: str) -> CheckResult:
     )
 
 
-def function_evaluator(
+def evaluator(
     fn: Callable[..., Any] | None = None,
     *,
     name: str | None = None,
@@ -245,20 +245,20 @@ def function_evaluator(
     Can be used as a decorator (with or without arguments) or called directly::
 
         # Decorator — no args
-        @function_evaluator
+        @evaluator
         def mentions_weather(query: str, response: str) -> bool:
             return "weather" in response.lower()
 
         # Decorator — with name
-        @function_evaluator(name="length_check")
+        @evaluator(name="length_check")
         def is_not_too_long(response: str) -> bool:
             return len(response) < 2000
 
         # Direct wrapping
-        check = function_evaluator(my_scorer, name="my_scorer")
+        check = evaluator(my_scorer, name="my_scorer")
 
         # Async function — handled automatically
-        @function_evaluator
+        @evaluator
         async def llm_judge(query: str, response: str) -> float:
             result = await my_llm_client.score(query, response)
             return result.score
@@ -272,7 +272,7 @@ def function_evaluator(
     """
 
     def _wrap(func: Callable[..., Any]) -> EvalCheck:
-        check_name = name or getattr(func, "__name__", "function_evaluator")
+        check_name = name or getattr(func, "__name__", "evaluator")
         is_async = inspect.iscoroutinefunction(func)
 
         if is_async:
@@ -297,10 +297,14 @@ def function_evaluator(
             _check.__doc__ = func.__doc__
             return _check
 
-    # Support @function_evaluator (no parens) and @function_evaluator(name="x")
+    # Support @evaluator (no parens) and @evaluator(name="x")
     if fn is not None:
         return _wrap(fn)
     return _wrap
+
+
+# Backward-compatible alias
+function_evaluator = evaluator
 
 
 def async_function_evaluator(
@@ -308,8 +312,8 @@ def async_function_evaluator(
     *,
     name: str | None = None,
 ) -> EvalCheck | Callable[[Callable[..., Any]], EvalCheck]:
-    """Deprecated: use :func:`function_evaluator` which handles async automatically."""
-    return function_evaluator(fn, name=name)
+    """Deprecated: use :func:`evaluator` which handles async automatically."""
+    return evaluator(fn, name=name)
 
 
 class LocalEvaluator:
@@ -359,7 +363,7 @@ class LocalEvaluator:
         breakdowns are available in ``per_evaluator``.
 
         Supports both sync and async check functions (from
-        :func:`function_evaluator` and :func:`async_function_evaluator`).
+        :func:`evaluator` and :func:`async_function_evaluator`).
         """
         passed = 0
         failed = 0

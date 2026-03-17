@@ -7,7 +7,7 @@ This sample demonstrates all evaluation patterns available in Agent Framework fo
 | 1 | **Function Evaluators** | Custom checks using C# lambdas via `FunctionEvaluator.Create()` |
 | 2 | **Built-in Checks** | `EvalChecks.KeywordCheck()` and `EvalChecks.ToolCalledCheck()` |
 | 3 | **MEAI Quality Evaluators** | LLM-based scoring with `RelevanceEvaluator`, `CoherenceEvaluator` |
-| 4 | **Foundry Evaluators** | Cloud-based evaluation via `FoundryEvaluator` |
+| 4 | **Foundry Evaluators** | Cloud-based evaluation via `FoundryEvals` |
 | 5 | **Mixed Evaluators** | Combining local checks with cloud evaluation in one call |
 | 6 | **Pre-existing Responses** | Evaluate saved responses without re-running the agent |
 
@@ -35,7 +35,7 @@ var local = new LocalEvaluator(check, keyword, toolCheck);
 var results = await agent.EvaluateAsync(queries, new RelevanceEvaluator(), chatConfig);
 
 // Foundry evaluator uses Azure AI Foundry cloud evaluation
-var foundry = new FoundryEvaluator(chatConfig, Evaluators.Relevance, Evaluators.Coherence);
+var foundry = new FoundryEvals(chatConfig, Evaluators.Relevance, Evaluators.Coherence);
 
 // Evaluate an agent
 AgentEvaluationResults localResults = await agent.EvaluateAsync(queries, local);

@@ -463,19 +463,14 @@ class Evaluator(Protocol):
     Example implementation::
 
         class MyEvaluator:
-            @property
-            def name(self) -> str:
-                return "my-evaluator"
+            name: str = "my-evaluator"
 
             async def evaluate(self, items: Sequence[EvalItem], *, eval_name: str = "Eval") -> EvalResults:
                 # Score each item and return results
                 ...
     """
 
-    @property
-    def name(self) -> str:
-        """Human-readable name of this evaluator."""
-        ...
+    name: str
 
     async def evaluate(
         self,
@@ -1174,7 +1169,7 @@ async def _run_evaluators(
 ) -> list[EvalResults]:
     """Run one or more evaluators and return a result per provider.
 
-    Bare ``EvalCheck`` callables (including ``@function_evaluator`` decorated
+    Bare ``EvalCheck`` callables (including ``@evaluator`` decorated
     functions and helpers like ``keyword_check``) are auto-wrapped in a
     ``LocalEvaluator`` so they can be passed directly in the evaluators list.
     """
@@ -1188,7 +1183,7 @@ async def _run_evaluators(
     else:
         raw_list = list(evaluators)
 
-    # Auto-wrap bare callables (EvalCheck / @function_evaluator) into LocalEvaluator
+    # Auto-wrap bare callables (EvalCheck / @evaluator) into LocalEvaluator
     evaluator_list: list[Evaluator] = []
     pending_checks: list[Callable[..., Any]] = []
 

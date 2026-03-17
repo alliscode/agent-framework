@@ -33,7 +33,7 @@ from agent_framework import (
     Message,
     evaluate_agent,
     evaluate_workflow,
-    function_evaluator,
+    evaluator,
     keyword_check,
     tool_called_check,
 )
@@ -128,13 +128,13 @@ def create_workflow(project_client, deployment):
 
 # ── Simple check: just query + response ──────────────────────────────────────
 
-@function_evaluator
+@evaluator
 def is_helpful(response: str) -> bool:
     """Response should be more than a one-liner."""
     return len(response.split()) > 10
 
 
-@function_evaluator
+@evaluator
 def no_apologies(query: str, response: str) -> bool:
     """Agent shouldn't start with 'I'm sorry' or 'I apologize'."""
     lower = response.lower().strip()
@@ -143,7 +143,7 @@ def no_apologies(query: str, response: str) -> bool:
 
 # ── Scored check: return a float ─────────────────────────────────────────────
 
-@function_evaluator
+@evaluator
 def relevance_keyword_overlap(query: str, response: str) -> float:
     """Score based on how many query words appear in the response."""
     query_words = set(query.lower().split()) - {"the", "a", "in", "to", "is", "what", "how"}
@@ -155,7 +155,7 @@ def relevance_keyword_overlap(query: str, response: str) -> float:
 
 # ── Ground truth check: compare against expected output ──────────────────────
 
-@function_evaluator
+@evaluator
 def mentions_expected_city(response: str, expected: str) -> bool:
     """Response should mention the expected city."""
     return expected.lower() in response.lower()
@@ -163,7 +163,7 @@ def mentions_expected_city(response: str, expected: str) -> bool:
 
 # ── Full context check: inspect conversation and tools ───────────────────────
 
-@function_evaluator
+@evaluator
 def used_available_tools(conversation: list, tool_definitions: list) -> dict:
     """Check that the agent actually called at least one of its tools."""
     available = {t.get("name", "") for t in (tool_definitions or [])}
@@ -183,7 +183,7 @@ def used_available_tools(conversation: list, tool_definitions: list) -> dict:
     }
 
 
-async def demo_function_evaluators(project_client, deployment):
+async def demo_evaluators(project_client, deployment):
     """Evaluate an agent with custom function evaluators."""
     print()
     print("═" * 60)
@@ -520,7 +520,7 @@ async def main():
     deployment = os.environ.get("AZURE_AI_MODEL_DEPLOYMENT_NAME", "gpt-4o")
 
     # Run each section — comment out what you don't need
-    # await demo_function_evaluators(project_client, deployment)
+    # await demo_evaluators(project_client, deployment)
     # await demo_builtin_checks(project_client, deployment)
     # await demo_foundry_agent(project_client, deployment)
     # await demo_foundry_response(project_client, deployment)

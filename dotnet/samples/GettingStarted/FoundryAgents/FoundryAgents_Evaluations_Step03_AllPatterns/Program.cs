@@ -139,7 +139,7 @@ try
     Console.WriteLine("SECTION 4: Foundry Evaluators");
     Console.WriteLine(new string('-', 60));
 
-    var foundryEvaluator = new FoundryEvaluator(
+    var foundryEvaluator = new FoundryEvals(
         chatConfiguration,
         FoundryEvals.Relevance,
         FoundryEvals.Coherence,
@@ -164,7 +164,7 @@ try
             new LocalEvaluator(
                 EvalChecks.KeywordCheck("weather"),
                 FunctionEvaluator.Create("not_empty", (string r) => r.Length > 0)),
-            new FoundryEvaluator(chatConfiguration, FoundryEvals.Relevance),
+            new FoundryEvals(chatConfiguration, FoundryEvals.Relevance),
         });
 
     foreach (AgentEvaluationResults result in mixedResults)

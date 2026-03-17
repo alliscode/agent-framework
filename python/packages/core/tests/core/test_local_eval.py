@@ -1,6 +1,6 @@
 # Copyright (c) Microsoft. All rights reserved.
 
-"""Tests for function_evaluator and async_function_evaluator."""
+"""Tests for evaluator and async_function_evaluator."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from agent_framework._local_eval import (
     CheckResult,
     LocalEvaluator,
     async_function_evaluator,
-    function_evaluator,
+    evaluator,
     keyword_check,
     tool_called_check,
 )
@@ -48,7 +48,7 @@ def _make_item(
 
 class TestTier1SimpleChecks:
     def test_bool_return_true(self):
-        @function_evaluator
+        @evaluator
         def has_temperature(query: str, response: str) -> bool:
             return "°F" in response
 
@@ -57,7 +57,7 @@ class TestTier1SimpleChecks:
         assert result.check_name == "has_temperature"
 
     def test_bool_return_false(self):
-        @function_evaluator
+        @evaluator
         def has_celsius(query: str, response: str) -> bool:
             return "°C" in response
 
@@ -65,7 +65,7 @@ class TestTier1SimpleChecks:
         assert result.passed is False
 
     def test_float_return_passing(self):
-        @function_evaluator
+        @evaluator
         def length_score(response: str) -> float:
             return min(len(response) / 10, 1.0)
 
@@ -74,7 +74,7 @@ class TestTier1SimpleChecks:
         assert "score=" in result.reason
 
     def test_float_return_failing(self):
-        @function_evaluator
+        @evaluator
         def always_low(response: str) -> float:
             return 0.1
 
@@ -83,7 +83,7 @@ class TestTier1SimpleChecks:
 
     def test_response_only(self):
         """Function with only 'response' param should work."""
-        @function_evaluator
+        @evaluator
         def is_short(response: str) -> bool:
             return len(response) < 1000
 
@@ -92,7 +92,7 @@ class TestTier1SimpleChecks:
 
     def test_query_only(self):
         """Function with only 'query' param should work."""
-        @function_evaluator
+        @evaluator
         def is_question(query: str) -> bool:
             return "?" in query
 
@@ -106,7 +106,7 @@ class TestTier1SimpleChecks:
 
 class TestTier2GroundTruth:
     def test_exact_match(self):
-        @function_evaluator
+        @evaluator
         def exact_match(response: str, expected: str) -> bool:
             return response.strip() == expected.strip()
 
@@ -118,7 +118,7 @@ class TestTier2GroundTruth:
 
     def test_expected_defaults_to_empty(self):
         """When expected is None on the item, it should be passed as ''."""
-        @function_evaluator
+        @evaluator
         def check_expected(expected: str) -> bool:
             return expected == ""
 
@@ -126,7 +126,7 @@ class TestTier2GroundTruth:
         assert result.passed is True
 
     def test_similarity_score(self):
-        @function_evaluator
+        @evaluator
         def word_overlap(response: str, expected: str) -> float:
             r_words = set(response.lower().split())
             e_words = set(expected.lower().split())
@@ -145,7 +145,7 @@ class TestTier2GroundTruth:
 
 class TestTier3FullContext:
     def test_conversation_access(self):
-        @function_evaluator
+        @evaluator
         def multi_turn(query: str, response: str, *, conversation: list) -> bool:
             return len(conversation) >= 2
 
@@ -156,7 +156,7 @@ class TestTier3FullContext:
         assert multi_turn(item2).passed is False
 
     def test_tools_access(self):
-        @function_evaluator
+        @evaluator
         def has_tools(tools: list) -> bool:
             return len(tools) > 0
 
@@ -165,7 +165,7 @@ class TestTier3FullContext:
         assert has_tools(item).passed is True
 
     def test_context_access(self):
-        @function_evaluator
+        @evaluator
         def grounded(response: str, context: str) -> bool:
             if not context:
                 return True
@@ -175,7 +175,7 @@ class TestTier3FullContext:
         assert grounded(item).passed is True
 
     def test_all_params(self):
-        @function_evaluator
+        @evaluator
         def full_check(
             query: str,
             response: str,
@@ -196,7 +196,7 @@ class TestTier3FullContext:
 
 class TestReturnTypeCoercion:
     def test_dict_with_score(self):
-        @function_evaluator
+        @evaluator
         def scored(response: str) -> dict:
             return {"score": 0.9, "reason": "good answer"}
 
@@ -205,7 +205,7 @@ class TestReturnTypeCoercion:
         assert result.reason == "good answer"
 
     def test_dict_with_score_below_threshold(self):
-        @function_evaluator
+        @evaluator
         def low_scored(response: str) -> dict:
             return {"score": 0.3}
 
@@ -213,7 +213,7 @@ class TestReturnTypeCoercion:
         assert result.passed is False
 
     def test_dict_with_custom_threshold(self):
-        @function_evaluator
+        @evaluator
         def custom_threshold(response: str) -> dict:
             return {"score": 0.3, "threshold": 0.2}
 
@@ -221,7 +221,7 @@ class TestReturnTypeCoercion:
         assert result.passed is True
 
     def test_dict_with_passed(self):
-        @function_evaluator
+        @evaluator
         def explicit_pass(response: str) -> dict:
             return {"passed": True, "reason": "all good"}
 
@@ -230,7 +230,7 @@ class TestReturnTypeCoercion:
         assert result.reason == "all good"
 
     def test_check_result_passthrough(self):
-        @function_evaluator
+        @evaluator
         def returns_check_result(response: str) -> CheckResult:
             return CheckResult(True, "direct result", "custom")
 
@@ -240,7 +240,7 @@ class TestReturnTypeCoercion:
         assert result.check_name == "custom"
 
     def test_unsupported_return_type(self):
-        @function_evaluator
+        @evaluator
         def bad_return(response: str) -> str:
             return "oops"
 
@@ -248,7 +248,7 @@ class TestReturnTypeCoercion:
             bad_return(_make_item())
 
     def test_int_return(self):
-        @function_evaluator
+        @evaluator
         def int_score(response: str) -> int:
             return 1
 
@@ -262,14 +262,14 @@ class TestReturnTypeCoercion:
 
 class TestDecoratorVariants:
     def test_decorator_no_parens(self):
-        @function_evaluator
+        @evaluator
         def my_check(response: str) -> bool:
             return True
 
         assert my_check(_make_item()).passed is True
 
     def test_decorator_with_name(self):
-        @function_evaluator(name="custom_name")
+        @evaluator(name="custom_name")
         def my_check(response: str) -> bool:
             return True
 
@@ -281,7 +281,7 @@ class TestDecoratorVariants:
         def raw_fn(query: str, response: str) -> bool:
             return len(response) > 0
 
-        check = function_evaluator(raw_fn, name="direct")
+        check = evaluator(raw_fn, name="direct")
         result = check(_make_item())
         assert result.passed is True
         assert result.check_name == "direct"
@@ -293,7 +293,7 @@ class TestDecoratorVariants:
 
 class TestErrorHandling:
     def test_unknown_required_param_raises(self):
-        @function_evaluator
+        @evaluator
         def bad_params(query: str, unknown_param: str) -> bool:
             return True
 
@@ -301,7 +301,7 @@ class TestErrorHandling:
             bad_params(_make_item())
 
     def test_unknown_optional_param_ok(self):
-        @function_evaluator
+        @evaluator
         def optional_unknown(query: str, foo: str = "default") -> bool:
             return foo == "default"
 
@@ -309,9 +309,9 @@ class TestErrorHandling:
         assert result.passed is True
 
     @pytest.mark.asyncio
-    async def test_async_function_works_with_function_evaluator(self):
-        """Using an async function with @function_evaluator should work."""
-        @function_evaluator
+    async def test_async_function_works_with_evaluator(self):
+        """Using an async function with @evaluator should work."""
+        @evaluator
         async def async_fn(response: str) -> bool:
             return True
 
@@ -330,7 +330,7 @@ class TestLocalEvaluatorIntegration:
     @pytest.mark.asyncio
     async def test_mixed_checks(self):
         """Function evaluators mix with built-in checks in LocalEvaluator."""
-        @function_evaluator
+        @evaluator
         def length_ok(response: str) -> bool:
             return len(response) > 5
 
@@ -346,8 +346,8 @@ class TestLocalEvaluatorIntegration:
         assert results.result_counts["failed"] == 0
 
     @pytest.mark.asyncio
-    async def test_function_evaluator_failure_counted(self):
-        @function_evaluator
+    async def test_evaluator_failure_counted(self):
+        @evaluator
         def always_fail(response: str) -> bool:
             return False
 
@@ -357,16 +357,16 @@ class TestLocalEvaluatorIntegration:
         assert results.result_counts["failed"] == 1
 
     @pytest.mark.asyncio
-    async def test_multiple_function_evaluators(self):
-        @function_evaluator
+    async def test_multiple_evaluators(self):
+        @evaluator
         def check_a(response: str) -> float:
             return 0.9
 
-        @function_evaluator
+        @evaluator
         def check_b(query: str, response: str, expected: str) -> bool:
             return True
 
-        @function_evaluator(name="check_c")
+        @evaluator(name="check_c")
         def check_c(response: str, conversation: list) -> dict:
             return {"score": 0.8, "reason": "looks good"}
 
@@ -416,7 +416,7 @@ class TestAutoWrapEvalChecks:
         """Bare EvalCheck callables are auto-wrapped in LocalEvaluator."""
         from agent_framework._eval import _run_evaluators
 
-        @function_evaluator
+        @evaluator
         def is_long(response: str) -> bool:
             return len(response.split()) > 2
 
@@ -430,7 +430,7 @@ class TestAutoWrapEvalChecks:
         """Mix of Evaluator instances and bare checks works."""
         from agent_framework._eval import _run_evaluators
 
-        @function_evaluator
+        @evaluator
         def has_words(response: str) -> bool:
             return len(response.split()) > 0
 
@@ -446,11 +446,11 @@ class TestAutoWrapEvalChecks:
         """Adjacent bare checks are grouped into a single LocalEvaluator."""
         from agent_framework._eval import _run_evaluators
 
-        @function_evaluator
+        @evaluator
         def check_a(response: str) -> bool:
             return True
 
-        @function_evaluator
+        @evaluator
         def check_b(response: str) -> bool:
             return True
 
