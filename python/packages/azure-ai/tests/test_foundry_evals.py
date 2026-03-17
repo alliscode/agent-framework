@@ -813,39 +813,8 @@ class TestFoundryEvals:
         assert "task_adherence" in names
 
     @pytest.mark.asyncio
-    async def test_evaluate_responses_api_path(self) -> None:
-        """Items with response_id and no tool evaluators use the Responses API path."""
-        mock_client = MagicMock()
-
-        mock_eval = MagicMock()
-        mock_eval.id = "eval_fast"
-        mock_client.evals.create.return_value = mock_eval
-
-        mock_run = MagicMock()
-        mock_run.id = "run_fast"
-        mock_client.evals.runs.create.return_value = mock_run
-
-        mock_completed = MagicMock()
-        mock_completed.status = "completed"
-        mock_completed.result_counts = {"passed": 1, "failed": 0}
-        mock_completed.report_url = None
-        mock_completed.per_testing_criteria_results = None
-        mock_client.evals.runs.retrieve.return_value = mock_completed
-
-        items = [
-            EvalItem(conversation=[Message("assistant", ["Answer"])], response_id="resp_xyz"),
-        ]
-
-        fe = FoundryEvals(openai_client=mock_client, model_deployment="gpt-4o")
-        await fe.evaluate(items)
-
-        run_call = mock_client.evals.runs.create.call_args
-        ds = run_call.kwargs["data_source"]
-        assert ds["type"] == "azure_ai_responses"
-
-    @pytest.mark.asyncio
-    async def test_evaluate_dataset_path_when_no_response_id(self) -> None:
-        """Items without response_id use the JSONL dataset path."""
+    async def test_evaluate_uses_dataset_path(self) -> None:
+        """Items use the JSONL dataset path."""
         mock_client = MagicMock()
 
         mock_eval = MagicMock()
@@ -880,7 +849,7 @@ class TestFoundryEvals:
 
     @pytest.mark.asyncio
     async def test_evaluate_with_tool_items_uses_dataset_path(self) -> None:
-        """Items with tool_definitions force the dataset path even with response_id."""
+        """Items with tool_definitions use the dataset path."""
         mock_client = MagicMock()
 
         mock_eval = MagicMock()
@@ -902,7 +871,6 @@ class TestFoundryEvals:
             EvalItem(
                 conversation=[Message("user", ["Do the thing"]), Message("assistant", ["Done"])],
                 tools=[_make_tool("my_tool")],
-                response_id="resp_xyz",
             ),
         ]
 
@@ -1179,86 +1147,11 @@ class TestResolveOpenAIClient:
 
 class TestEvaluateAgentWithResponses:
     @pytest.mark.asyncio
-    async def test_single_response_with_response_id(self) -> None:
-        mock_oai = MagicMock()
-        mock_project = MagicMock()
-        mock_project.get_openai_client.return_value = mock_oai
-
-        mock_eval = MagicMock()
-        mock_eval.id = "eval_resp"
-        mock_oai.evals.create.return_value = mock_eval
-
-        mock_run = MagicMock()
-        mock_run.id = "run_resp"
-        mock_oai.evals.runs.create.return_value = mock_run
-
-        mock_completed = MagicMock()
-        mock_completed.status = "completed"
-        mock_completed.result_counts = {"passed": 1, "failed": 0}
-        mock_completed.report_url = "https://portal.azure.com/eval"
-        mock_completed.per_testing_criteria_results = None
-        mock_oai.evals.runs.retrieve.return_value = mock_completed
-
-        response = AgentResponse(
-            messages=[Message("assistant", ["The weather is sunny."])],
-            response_id="resp_abc123",
-        )
-
-        results = await evaluate_agent(
-            responses=response,
-            evaluators=FoundryEvals(project_client=mock_project, model_deployment="gpt-4o"),
-        )
-
-        assert results[0].status == "completed"
-        assert results[0].all_passed
-
-        # Verify the response ID was passed through
-        run_call = mock_oai.evals.runs.create.call_args
-        ds = run_call.kwargs["data_source"]
-        assert ds["type"] == "azure_ai_responses"
-        content = ds["item_generation_params"]["source"]["content"]
-        assert content[0]["item"]["resp_id"] == "resp_abc123"
-
-    @pytest.mark.asyncio
-    async def test_multiple_responses_with_response_ids(self) -> None:
-        mock_oai = MagicMock()
-
-        mock_eval = MagicMock()
-        mock_eval.id = "eval_multi"
-        mock_oai.evals.create.return_value = mock_eval
-
-        mock_run = MagicMock()
-        mock_run.id = "run_multi"
-        mock_oai.evals.runs.create.return_value = mock_run
-
-        mock_completed = MagicMock()
-        mock_completed.status = "completed"
-        mock_completed.result_counts = {"passed": 2, "failed": 0}
-        mock_completed.report_url = None
-        mock_completed.per_testing_criteria_results = None
-        mock_oai.evals.runs.retrieve.return_value = mock_completed
-
-        responses = [
-            AgentResponse(messages=[Message("assistant", ["Answer 1"])], response_id="resp_1"),
-            AgentResponse(messages=[Message("assistant", ["Answer 2"])], response_id="resp_2"),
-        ]
-
-        results = await evaluate_agent(
-            responses=responses,
-            evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
-        )
-
-        assert results[0].passed == 2
-        run_call = mock_oai.evals.runs.create.call_args
-        content = run_call.kwargs["data_source"]["item_generation_params"]["source"]["content"]
-        assert len(content) == 2
-
-    @pytest.mark.asyncio
-    async def test_missing_response_id_without_query_raises(self) -> None:
+    async def test_responses_without_queries_raises(self) -> None:
         mock_oai = MagicMock()
         response = AgentResponse(messages=[Message("assistant", ["Hello"])])
 
-        with pytest.raises(ValueError, match="does not have a response_id"):
+        with pytest.raises(ValueError, match="Provide 'queries' alongside 'responses'"):
             await evaluate_agent(
                 responses=response,
                 evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
@@ -1404,43 +1297,8 @@ class TestEvaluateAgentWithResponses:
             )
 
     @pytest.mark.asyncio
-    async def test_responses_api_preferred_when_ids_present(self) -> None:
-        """When response_id is present and no query given, uses the fast Responses API path."""
-        mock_oai = MagicMock()
-
-        mock_eval = MagicMock()
-        mock_eval.id = "eval_fast"
-        mock_oai.evals.create.return_value = mock_eval
-
-        mock_run = MagicMock()
-        mock_run.id = "run_fast"
-        mock_oai.evals.runs.create.return_value = mock_run
-
-        mock_completed = MagicMock()
-        mock_completed.status = "completed"
-        mock_completed.result_counts = {"passed": 1, "failed": 0}
-        mock_completed.report_url = None
-        mock_completed.per_testing_criteria_results = None
-        mock_oai.evals.runs.retrieve.return_value = mock_completed
-
-        response = AgentResponse(
-            messages=[Message("assistant", ["Answer"])],
-            response_id="resp_xyz",
-        )
-
-        await evaluate_agent(
-            responses=response,
-            evaluators=FoundryEvals(openai_client=mock_oai, model_deployment="gpt-4o"),
-        )
-
-        # Verify it used the Responses API path (azure_ai_responses), not jsonl
-        run_call = mock_oai.evals.runs.create.call_args
-        ds = run_call.kwargs["data_source"]
-        assert ds["type"] == "azure_ai_responses"
-
-    @pytest.mark.asyncio
     async def test_tool_evaluators_with_query_and_agent_uses_dataset_path(self) -> None:
-        """Tool evaluators with query+agent bypass fast path and use dataset."""
+        """Tool evaluators with query+agent uses dataset path."""
         mock_oai = MagicMock()
 
         mock_eval = MagicMock()
@@ -1460,7 +1318,6 @@ class TestEvaluateAgentWithResponses:
 
         response = AgentResponse(
             messages=[Message("assistant", ["It's sunny"])],
-            response_id="resp_xyz",  # Has response_id, but tool evals need dataset path
         )
 
         agent = MagicMock()

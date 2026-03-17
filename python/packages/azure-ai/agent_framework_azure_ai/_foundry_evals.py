@@ -572,17 +572,6 @@ class FoundryEvals:
         # Filter tool evaluators if items don't have tools
         resolved = _filter_tool_evaluators(resolved, items)
 
-        # Responses API fast path: all items have response_id, no tool evaluators
-        needs_tool_defs = any(_resolve_evaluator(e) in _TOOL_EVALUATORS for e in resolved)
-        all_have_ids = all(item.response_id for item in items)
-
-        if all_have_ids and not needs_tool_defs:
-            return await self._evaluate_via_responses(
-                [item.response_id for item in items],  # type: ignore[misc]
-                resolved,
-                eval_name,
-            )
-
         # Standard JSONL dataset path
         return await self._evaluate_via_dataset(items, resolved, eval_name)
 

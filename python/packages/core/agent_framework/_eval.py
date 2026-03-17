@@ -103,8 +103,6 @@ class EvalItem:
         tools: Typed tool objects (e.g. ``FunctionTool``) for evaluator logic.
         context: Optional grounding context document.
         expected: Optional expected output for ground-truth comparison.
-        response_id: Responses API response ID (for providers that support
-            server-side retrieval).
         split_strategy: Split strategy controlling how ``query`` and
             ``response`` are derived from the conversation. Defaults to
             ``ConversationSplit.LAST_TURN``.
@@ -114,7 +112,6 @@ class EvalItem:
     tools: list[FunctionTool] | None = None
     context: str | None = None
     expected: str | None = None
-    response_id: str | None = None
     split_strategy: ConversationSplitter | None = None
 
     @property
@@ -688,7 +685,6 @@ class AgentEvalConverter:
             conversation=all_msgs,
             tools=typed_tools or None,
             context=context,
-            response_id=getattr(response, "response_id", None),
         )
 
 
@@ -823,17 +819,15 @@ async def evaluate_agent(
 
     If ``responses`` is provided, skips running the agent and evaluates those
     responses directly — but still extracts tool definitions from the agent.
-    In this mode ``queries`` is optional: if omitted, the evaluator will use
-    the response's ``response_id`` (requires a provider that supports
-    server-side retrieval).
+    In this mode ``queries`` is required to construct the conversation.
 
     Args:
         agent: An agent-framework agent instance.
         queries: Test queries to run the agent against. Required when
             ``responses`` is not provided.
         responses: Pre-existing ``AgentResponse``(s) to evaluate without
-            running the agent.  When provided, ``queries`` are used only to
-            populate the eval item's ``query`` field (not to invoke the agent).
+            running the agent.  When provided, ``queries`` must also be
+            provided to construct the conversation for evaluation.
         evaluators: One or more ``Evaluator`` instances.
         eval_name: Display name (defaults to agent name).
         context: Optional context for groundedness evaluation.
@@ -884,21 +878,12 @@ async def evaluate_agent(
                     )
                 )
         else:
-            # No queries — build minimal items with response_id
-            for r in resp_list:
-                response_id = getattr(r, "response_id", None)
-                if response_id is None:
-                    raise ValueError(
-                        "Response does not have a response_id. Provide "
-                        "'queries' so the conversation can be reconstructed "
-                        "for evaluation."
-                    )
-                items.append(
-                    EvalItem(
-                        conversation=[],
-                        response_id=response_id,
-                    )
-                )
+            raise ValueError(
+                "Provide 'queries' alongside 'responses' so the conversation "
+                "can be constructed for evaluation. For Responses API "
+                "evaluation by response ID, use evaluate_responses() from "
+                "the Foundry package."
+            )
     elif queries is not None:
         # Run the agent against test queries
         for query in queries:
@@ -1050,18 +1035,11 @@ async def evaluate_workflow(
             agents_by_id.setdefault(ad.executor_id, []).append(ad)
 
     # Build per-agent items once (shared across providers).
-    # Clear response_id so per-agent evals always use the dataset path.
-    # The Responses API retrieval path doesn't work for agents whose input
-    # is another agent's full conversation (the evaluator can't extract a
-    # clean user query from the stored response).
     agent_items_by_id: dict[str, list[EvalItem]] = {}
     for executor_id, agent_data_list in agents_by_id.items():
-        items = [
+        agent_items_by_id[executor_id] = [
             converter.to_eval_item(query=ad.query, response=ad.response, agent=ad.agent) for ad in agent_data_list
         ]
-        for item in items:
-            item.response_id = None
-        agent_items_by_id[executor_id] = items
 
     if not agent_items_by_id and not overall_items:
         raise ValueError(
