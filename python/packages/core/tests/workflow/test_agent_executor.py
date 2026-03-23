@@ -638,3 +638,383 @@ async def test_checkpoint_restore_works_without_context_mode_in_state() -> None:
     assert cache[0].text == "cached msg"
     # context_mode should remain as configured in the constructor, not changed by restore
     assert executor._context_mode == "last_agent"  # pyright: ignore[reportPrivateUsage]
+
+
+# ---------------------------------------------------------------------------
+# Regression: stale service_session_id between workflow runs
+# ---------------------------------------------------------------------------
+
+
+class _SessionTrackingAgent(BaseAgent):
+    """Agent that simulates the Responses API behaviour of setting service_session_id.
+
+    Records the session ID that was present at the START of each run(), then
+    sets a new one — mimicking what the Responses API client does when it stores
+    the response ID back into the session.
+    """
+
+    def __init__(self, **kwargs: Any):
+        super().__init__(**kwargs)
+        self.observed_session_ids: list[str | None] = []
+
+    @overload
+    def run(
+        self,
+        messages: AgentRunInputs | None = ...,
+        *,
+        stream: Literal[False] = ...,
+        session: AgentSession | None = ...,
+        **kwargs: Any,
+    ) -> Awaitable[AgentResponse[Any]]: ...
+    @overload
+    def run(
+        self,
+        messages: AgentRunInputs | None = ...,
+        *,
+        stream: Literal[True],
+        session: AgentSession | None = ...,
+        **kwargs: Any,
+    ) -> ResponseStream[AgentResponseUpdate, AgentResponse[Any]]: ...
+
+    def run(
+        self,
+        messages: AgentRunInputs | None = None,
+        *,
+        stream: bool = False,
+        session: AgentSession | None = None,
+        **kwargs: Any,
+    ) -> Awaitable[AgentResponse[Any]] | ResponseStream[AgentResponseUpdate, AgentResponse[Any]]:
+        # Record the session ID that was visible when we were called.
+        # In a real Responses API scenario this becomes previous_response_id.
+        self.observed_session_ids.append(session.service_session_id if session else None)
+
+        # Simulate the Responses API client storing its response ID back
+        if session is not None:
+            call_num = len(self.observed_session_ids)
+            session.service_session_id = f"resp_{self.name}_{call_num}"
+
+        async def _run() -> AgentResponse:
+            return AgentResponse(messages=[Message("assistant", [f"Reply from {self.name}"])])
+
+        return _run()
+
+
+@pytest.mark.asyncio
+async def test_workflow_rerun_preserves_session_for_continuation() -> None:
+    """Multiple workflow.run() calls on the same instance are continuations.
+
+    The session's service_session_id should carry over between runs so
+    that the Responses API treats them as a continued conversation (via
+    previous_response_id). The workflow engine resets its own plumbing
+    (superstep counter, message queues, state) but executor session
+    state is preserved.
+    """
+    agent_a = _SessionTrackingAgent(id="A", name="A")
+    agent_b = _SessionTrackingAgent(id="B", name="B")
+
+    exec_a = AgentExecutor(agent_a)
+    exec_b = AgentExecutor(agent_b)
+
+    workflow = WorkflowBuilder(start_executor=exec_a).add_edge(exec_a, exec_b).build()
+
+    # --- First run ---
+    result1 = await workflow.run("Hello")
+    assert result1 is not None
+
+    # First run: both agents start with a fresh session (no service_session_id)
+    assert agent_a.observed_session_ids[0] is None, "Run 1: agent A should start with no session ID"
+    assert agent_b.observed_session_ids[0] is None, "Run 1: agent B should start with no session ID"
+
+    # After the first run, sessions hold the response IDs set during the run
+    assert exec_a._session.service_session_id == "resp_A_1"  # pyright: ignore[reportPrivateUsage]
+    assert exec_b._session.service_session_id == "resp_B_1"  # pyright: ignore[reportPrivateUsage]
+
+    # --- Second run (continuation) ---
+    result2 = await workflow.run("Hello again")
+    assert result2 is not None
+
+    # Second run: agents see the session IDs from run 1 (continuation model)
+    assert agent_a.observed_session_ids[1] == "resp_A_1", (
+        f"Run 2: agent A should see run 1's session ID for continuation, "
+        f"got '{agent_a.observed_session_ids[1]}'"
+    )
+    assert agent_b.observed_session_ids[1] == "resp_B_1", (
+        f"Run 2: agent B should see run 1's session ID for continuation, "
+        f"got '{agent_b.observed_session_ids[1]}'"
+    )
+
+    # After run 2, sessions hold updated response IDs
+    assert exec_a._session.service_session_id == "resp_A_2"  # pyright: ignore[reportPrivateUsage]
+    assert exec_b._session.service_session_id == "resp_B_2"  # pyright: ignore[reportPrivateUsage]
+
+
+class _ToolUsingSessionTrackingAgent(BaseAgent):
+    """Agent that simulates tool calls and Responses API session tracking.
+
+    Like _SessionTrackingAgent but responses include function_call content,
+    mimicking an agent that invokes tools as part of its workflow.
+    """
+
+    def __init__(self, tool_name: str = "get_data", **kwargs: Any):
+        super().__init__(**kwargs)
+        self.tool_name = tool_name
+        self.observed_session_ids: list[str | None] = []
+
+    @overload
+    def run(
+        self,
+        messages: AgentRunInputs | None = ...,
+        *,
+        stream: Literal[False] = ...,
+        session: AgentSession | None = ...,
+        **kwargs: Any,
+    ) -> Awaitable[AgentResponse[Any]]: ...
+    @overload
+    def run(
+        self,
+        messages: AgentRunInputs | None = ...,
+        *,
+        stream: Literal[True],
+        session: AgentSession | None = ...,
+        **kwargs: Any,
+    ) -> ResponseStream[AgentResponseUpdate, AgentResponse[Any]]: ...
+
+    def run(
+        self,
+        messages: AgentRunInputs | None = None,
+        *,
+        stream: bool = False,
+        session: AgentSession | None = None,
+        **kwargs: Any,
+    ) -> Awaitable[AgentResponse[Any]] | ResponseStream[AgentResponseUpdate, AgentResponse[Any]]:
+        self.observed_session_ids.append(session.service_session_id if session else None)
+
+        if session is not None:
+            call_num = len(self.observed_session_ids)
+            session.service_session_id = f"resp_{self.name}_{call_num}"
+
+        call_num = len(self.observed_session_ids)
+        call_id = f"call_{self.name}_{call_num}"
+
+        async def _run() -> AgentResponse:
+            return AgentResponse(
+                messages=[
+                    # Tool call message
+                    Message(
+                        "assistant",
+                        [Content.from_function_call(call_id, self.tool_name, arguments={"query": "test"})],
+                    ),
+                    # Tool result message
+                    Message(
+                        "tool",
+                        [Content.from_function_result(call_id, result=f"Result from {self.name} run {call_num}")],
+                    ),
+                    # Final text response
+                    Message("assistant", [f"Based on {self.tool_name}: answer from {self.name}"]),
+                ]
+            )
+
+        return _run()
+
+
+@pytest.mark.asyncio
+async def test_workflow_rerun_preserves_session_with_tool_calls() -> None:
+    """Continuation works when agents make tool calls.
+
+    Agents that invoke tools produce function_call and function_result
+    content in their responses. The session should still carry over
+    between runs, and each run's tool call IDs are distinct.
+    """
+    agent_a = _ToolUsingSessionTrackingAgent(id="planner", name="planner", tool_name="search")
+    agent_b = _ToolUsingSessionTrackingAgent(id="executor", name="executor", tool_name="run_action")
+
+    exec_a = AgentExecutor(agent_a)
+    exec_b = AgentExecutor(agent_b)
+
+    workflow = WorkflowBuilder(start_executor=exec_a).add_edge(exec_a, exec_b).build()
+
+    # --- First run ---
+    result1 = await workflow.run("Plan a trip to Paris")
+    assert result1 is not None
+
+    assert agent_a.observed_session_ids[0] is None, "Run 1: planner starts fresh"
+    assert agent_b.observed_session_ids[0] is None, "Run 1: executor starts fresh"
+
+    assert exec_a._session.service_session_id == "resp_planner_1"  # pyright: ignore[reportPrivateUsage]
+    assert exec_b._session.service_session_id == "resp_executor_1"  # pyright: ignore[reportPrivateUsage]
+
+    # --- Second run (continuation with tool-using agents) ---
+    result2 = await workflow.run("Now book the flights")
+    assert result2 is not None
+
+    # Both agents see the session from run 1 (continuation)
+    assert agent_a.observed_session_ids[1] == "resp_planner_1", (
+        "Run 2: planner should continue from run 1's session"
+    )
+    assert agent_b.observed_session_ids[1] == "resp_executor_1", (
+        "Run 2: executor should continue from run 1's session"
+    )
+
+    # Sessions updated after run 2
+    assert exec_a._session.service_session_id == "resp_planner_2"  # pyright: ignore[reportPrivateUsage]
+    assert exec_b._session.service_session_id == "resp_executor_2"  # pyright: ignore[reportPrivateUsage]
+
+
+class _InspectingToolAgent(BaseAgent):
+    """Agent that records received messages and simulates tool use.
+
+    Designed for integration tests: records the full message list received
+    on each invocation so tests can verify the message chain flowing through
+    the workflow engine across multiple runs.
+    """
+
+    def __init__(self, tool_name: str = "lookup", **kwargs: Any):
+        super().__init__(**kwargs)
+        self.tool_name = tool_name
+        self.received_messages: list[list[Message]] = []
+        self.observed_session_ids: list[str | None] = []
+        self._call_count = 0
+
+    @overload
+    def run(
+        self,
+        messages: AgentRunInputs | None = ...,
+        *,
+        stream: Literal[False] = ...,
+        session: AgentSession | None = ...,
+        **kwargs: Any,
+    ) -> Awaitable[AgentResponse[Any]]: ...
+    @overload
+    def run(
+        self,
+        messages: AgentRunInputs | None = ...,
+        *,
+        stream: Literal[True],
+        session: AgentSession | None = ...,
+        **kwargs: Any,
+    ) -> ResponseStream[AgentResponseUpdate, AgentResponse[Any]]: ...
+
+    def run(
+        self,
+        messages: AgentRunInputs | None = None,
+        *,
+        stream: bool = False,
+        session: AgentSession | None = None,
+        **kwargs: Any,
+    ) -> Awaitable[AgentResponse[Any]] | ResponseStream[AgentResponseUpdate, AgentResponse[Any]]:
+        self._call_count += 1
+        call = self._call_count
+
+        # Record what we received
+        msg_list = list(messages) if messages else []
+        self.received_messages.append(msg_list)
+        self.observed_session_ids.append(session.service_session_id if session else None)
+
+        # Simulate Responses API updating service_session_id
+        if session is not None:
+            session.service_session_id = f"resp_{self.name}_{call}"
+
+        call_id = f"call_{self.name}_{call}"
+
+        async def _run() -> AgentResponse:
+            return AgentResponse(
+                messages=[
+                    Message(
+                        "assistant",
+                        [Content.from_function_call(call_id, self.tool_name, arguments={"q": f"run{call}"})],
+                    ),
+                    Message(
+                        "tool",
+                        [Content.from_function_result(call_id, result=f"{self.tool_name}_result_{call}")],
+                    ),
+                    Message("assistant", [f"{self.name} final answer (run {call})"]),
+                ]
+            )
+
+        return _run()
+
+
+@pytest.mark.asyncio
+async def test_two_agent_workflow_with_tools_runs_twice_integration() -> None:
+    """Full integration test: 2-agent sequential workflow with tools, run twice.
+
+    Exercises the real workflow engine end-to-end:
+    - Message delivery through edges (str → from_str, AgentExecutorResponse → from_response)
+    - Cache accumulation and clearing within _run_agent_and_emit
+    - Session preservation across runs (continuation model)
+    - Full conversation chain flowing from agent A to agent B
+    - Workflow outputs accessible via get_outputs()
+    """
+    agent_a = _InspectingToolAgent(id="research", name="research", tool_name="web_search")
+    agent_b = _InspectingToolAgent(id="writer", name="writer", tool_name="draft_doc")
+
+    exec_a = AgentExecutor(agent_a)
+    exec_b = AgentExecutor(agent_b)
+
+    workflow = WorkflowBuilder(start_executor=exec_a).add_edge(exec_a, exec_b).build()
+
+    # ===================== First run =====================
+    result1 = await workflow.run("Research AI agents")
+    assert result1 is not None
+    assert result1.get_final_state() == WorkflowRunState.IDLE
+
+    # Agent A received the user message
+    assert len(agent_a.received_messages[0]) == 1
+    assert agent_a.received_messages[0][0].role == "user"
+    assert "Research AI agents" in (agent_a.received_messages[0][0].text or "")
+
+    # Agent B received the full conversation (user msg + A's tool call + tool result + A's reply)
+    b_msgs_run1 = agent_b.received_messages[0]
+    assert len(b_msgs_run1) == 4, f"Expected 4 messages (user + 3 from A), got {len(b_msgs_run1)}"
+    assert b_msgs_run1[0].role == "user"
+    assert b_msgs_run1[1].role == "assistant"  # A's tool call
+    assert b_msgs_run1[2].role == "tool"  # tool result
+    assert b_msgs_run1[3].role == "assistant"  # A's final answer
+
+    # Sessions: both started fresh
+    assert agent_a.observed_session_ids[0] is None
+    assert agent_b.observed_session_ids[0] is None
+
+    # Outputs: both agents produced AgentResponse outputs
+    outputs1 = result1.get_outputs()
+    assert len(outputs1) == 2  # one per agent
+    assert isinstance(outputs1[0], AgentResponse)
+    assert isinstance(outputs1[1], AgentResponse)
+
+    # ===================== Second run (continuation) =====================
+    result2 = await workflow.run("Now summarize the findings")
+    assert result2 is not None
+    assert result2.get_final_state() == WorkflowRunState.IDLE
+
+    # Agent A received the new user message (cache was cleared after run 1)
+    assert len(agent_a.received_messages[1]) == 1
+    assert "summarize the findings" in (agent_a.received_messages[1][0].text or "")
+
+    # Agent B received the full conversation from this run
+    b_msgs_run2 = agent_b.received_messages[1]
+    assert len(b_msgs_run2) == 4, f"Expected 4 messages for run 2, got {len(b_msgs_run2)}"
+    assert b_msgs_run2[0].role == "user"
+    assert "summarize" in (b_msgs_run2[0].text or "")
+
+    # Sessions: both agents see the session from run 1 (continuation)
+    assert agent_a.observed_session_ids[1] == "resp_research_1", (
+        f"Agent A should see run 1's session, got '{agent_a.observed_session_ids[1]}'"
+    )
+    assert agent_b.observed_session_ids[1] == "resp_writer_1", (
+        f"Agent B should see run 1's session, got '{agent_b.observed_session_ids[1]}'"
+    )
+
+    # Sessions updated after run 2
+    assert exec_a._session.service_session_id == "resp_research_2"  # pyright: ignore[reportPrivateUsage]
+    assert exec_b._session.service_session_id == "resp_writer_2"  # pyright: ignore[reportPrivateUsage]
+
+    # Outputs: second run also produced 2 outputs
+    outputs2 = result2.get_outputs()
+    assert len(outputs2) == 2
+    # Verify output content is from run 2 (not stale run 1 data)
+    assert "run 2" in outputs2[0].messages[-1].text  # type: ignore[operator]
+    assert "run 2" in outputs2[1].messages[-1].text  # type: ignore[operator]
+
+    # Both agents were called exactly twice total
+    assert agent_a._call_count == 2
+    assert agent_b._call_count == 2

@@ -639,7 +639,7 @@ class RawAgent(BaseAgent, Generic[OptionsCoT]):  # type: ignore[misc]
                 client=client,
                 name="reasoning-agent",
                 instructions="You are a reasoning assistant.",
-                options={
+                default_options={
                     "temperature": 0.7,
                     "max_tokens": 500,
                     "reasoning_effort": "high",  # OpenAI-specific, IDE will autocomplete!
