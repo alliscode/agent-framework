@@ -51,6 +51,67 @@ while True:
         break
 ```
 
+## Optional Features
+
+All optional — off by default. Mix and match as needed.
+
+### Turn Budget (`max_turns`)
+
+Limit conversation length. The agent sees a countdown and plans accordingly. When turns run out, the form auto-submits (if all required fields are done) or abandons with partial data.
+
+```python
+form = GuidedConversationProvider(
+    InsuranceClaim,
+    max_turns=10,
+)
+
+# Check remaining turns from your loop:
+remaining = form.turns_remaining(session)  # int or None
+```
+
+### Conversation Flow (`conversation_flow`)
+
+Free-form pacing guidance injected as instructions. Tells the agent what order to ask questions in, how to group topics, etc. No enforcement — purely advisory.
+
+```python
+form = GuidedConversationProvider(
+    MedicalIntake,
+    conversation_flow=(
+        "Start with easy demographics (name, DOB, phone). "
+        "Then visit reason and chief complaint with follow-ups. "
+        "Medical history next. Optional fields last."
+    ),
+)
+```
+
+### Final Review Pass (`final_update`)
+
+Two-phase submit: the first `submit_form` call triggers a review ("check for any fields you missed"), the second actually completes. Helps catch values mentioned in conversation but not recorded.
+
+```python
+form = GuidedConversationProvider(
+    MedicalIntake,
+    final_update=True,
+)
+# No changes to your loop — it's handled inside the tools.
+```
+
+### State Persistence (`save_state` / `load_state`)
+
+Serialize form state to JSON for storage/resume. You pick the backend (file, DB, Redis).
+
+```python
+# Save
+json_str = form.save_state(session)
+Path("state.json").write_text(json_str)
+
+# Load (e.g., after process restart)
+json_str = Path("state.json").read_text()
+session = agent.create_session()
+form.load_state(session, json_str)
+# Continue the conversation where you left off
+```
+
 ## Architecture
 
 ```
@@ -63,6 +124,8 @@ while True:
 │            update_form, get_form_status,   │
 │            submit_form                    │
 │        ↳ injects progress instructions    │
+│        ↳ injects conversation flow        │
+│        ↳ injects turn budget              │
 │        ↳ manages FormState in session     │
 │    - InMemoryHistoryProvider (auto)       │
 │                                           │
@@ -80,17 +143,26 @@ while True:
 | `FormState[T]` | Internal: introspects Pydantic model, tracks filled/missing fields, evidence |
 | `FormResult[T]` | Output: the completed form data, evidence, and status |
 
-### How It Works
+### Constructor Parameters
 
-1. **Setup**: `GuidedConversationProvider` introspects the Pydantic model to learn field names, types, required/optional status, and descriptions. It creates form tools bound to the session state.
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `form_type` | `type[T]` | *required* | Pydantic model defining the form schema |
+| `source_id` | `str` | `"guided_conversation"` | Provider identifier in session state |
+| `max_turns` | `int \| None` | `None` | Maximum conversation turns (None = unlimited) |
+| `conversation_flow` | `str \| None` | `None` | Free-form pacing guidance for the agent |
+| `final_update` | `bool` | `False` | Enable two-phase submit with review pass |
 
-2. **Each turn** (all automatic via `before_run()`):
-   - Progress summary is injected into the agent's context (what's filled, what's missing)
-   - Three form tools are injected (`update_form`, `get_form_status`, `submit_form`)
-   - The agent responds conversationally and calls `update_form` when it extracts values
-   - Values are validated and coerced using Pydantic's `TypeAdapter` — invalid values are rejected with helpful errors
+### Public Methods
 
-3. **Completion**: When all required fields are filled, the agent summarizes and calls `submit_form`, which validates the complete model. Your loop detects this via `form.is_complete(session)`.
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `is_complete(session)` | `bool` | Whether the form has been submitted |
+| `get_result(session)` | `FormResult[T]` | Form data, evidence, status, validation errors |
+| `get_form_state(session)` | `FormState[T] \| None` | Raw form state for inspection |
+| `turns_remaining(session)` | `int \| None` | Remaining turns (None if no limit) |
+| `save_state(session)` | `str` | Serialize form state to JSON |
+| `load_state(session, data)` | `None` | Restore form state from JSON |
 
 ## File Structure
 
@@ -108,11 +180,11 @@ guided_conversation/
 export AZURE_AI_PROJECT_ENDPOINT="..."
 export AZURE_AI_MODEL_DEPLOYMENT_NAME="gpt-4o"
 
-# Run the insurance claim example (7 fields, simple)
+# Insurance claim — demonstrates max_turns + conversation_flow
 cd python/samples/guided-conversation
 python example_insurance.py
 
-# Run the medical intake example (19 fields, complex)
+# Medical intake — demonstrates final_update + conversation_flow
 python example_medical_intake.py
 ```
 
@@ -120,6 +192,5 @@ python example_medical_intake.py
 
 - **Nested models**: Support Pydantic models with nested sub-models (sub-forms)
 - **Workflow upgrade**: Migrate to `Workflow` + `Executor` for checkpointing/suspend-resume
-- **Confirmation step**: Built-in review step before final submission
 - **Multi-valued fields**: Better handling of list fields (witnesses, items, etc.)
 - **Streaming**: Stream agent responses for better UX in long-running turns

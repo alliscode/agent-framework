@@ -23,6 +23,19 @@ Usage:
         if form.is_complete(session):
             result = form.get_result(session)
             break
+
+Optional features (all off by default):
+
+    form = GuidedConversationProvider(
+        InsuranceClaim,
+        max_turns=10,                          # Turn budget
+        conversation_flow="Start with name…",  # Pacing guidance
+        final_update=True,                     # Review pass before completion
+    )
+
+    # State persistence (caller chooses storage):
+    json_str = form.save_state(session)
+    form.load_state(session, json_str)
 """
 
 from __future__ import annotations
@@ -71,6 +84,16 @@ Your goal is to naturally collect all required fields through conversation.
 - If the user wants to correct a previously recorded value, use `update_form` again to overwrite it.
 """
 
+REVIEW_INSTRUCTIONS = """
+## Final Review Required
+
+You just attempted to submit the form. Before it can be finalized, please:
+1. Review the entire conversation from the beginning.
+2. Check if there are any field values the user mentioned that you haven't recorded yet.
+3. Use `update_form` to record any values you missed.
+4. Then call `submit_form` again to finalize.
+"""
+
 
 class GuidedConversationProvider(BaseContextProvider, Generic[T]):
     """A context provider that adds guided form-filling to any Agent.
@@ -80,6 +103,11 @@ class GuidedConversationProvider(BaseContextProvider, Generic[T]):
     - Inject dynamic progress instructions before each turn
     - Track form completion state in session.state
     - Validate and coerce field values using Pydantic
+
+    All optional features are off by default:
+    - ``max_turns``: Limit conversation length; auto-submits/abandons when exhausted
+    - ``conversation_flow``: Free-form pacing guidance injected as instructions
+    - ``final_update``: Two-phase submit with a review pass before completion
 
     Example:
         >>> form = GuidedConversationProvider(InsuranceClaim)
@@ -94,10 +122,17 @@ class GuidedConversationProvider(BaseContextProvider, Generic[T]):
         self,
         form_type: type[T],
         source_id: str = "guided_conversation",
+        *,
+        max_turns: int | None = None,
+        conversation_flow: str | None = None,
+        final_update: bool = False,
     ) -> None:
         super().__init__(source_id=source_id)
         self._form_type = form_type
-        self._tools = _create_form_tools(form_type, source_id)
+        self._max_turns = max_turns
+        self._conversation_flow = conversation_flow
+        self._final_update = final_update
+        self._tools = _create_form_tools(form_type, source_id, final_update=final_update)
 
     async def before_run(
         self,
@@ -114,11 +149,54 @@ class GuidedConversationProvider(BaseContextProvider, Generic[T]):
 
         form_state: FormState = state[FORM_STATE_KEY]
 
+        # Increment turn counter
+        form_state.turn_count += 1
+
+        # Check if turns are exhausted
+        if self._max_turns is not None and form_state.turn_count > self._max_turns:
+            if not form_state.submitted:
+                if form_state.is_complete:
+                    # All required fields filled — auto-submit
+                    try:
+                        form_state.build(self._form_type)
+                        form_state.submitted = True
+                        logger.info("Turn budget exhausted — auto-submitted (all required fields filled).")
+                    except Exception:
+                        form_state.submitted = True
+                        logger.warning("Turn budget exhausted — auto-submitted with validation warnings.")
+                else:
+                    # Missing required fields — abandon
+                    form_state.submitted = True
+                    logger.info("Turn budget exhausted — form abandoned with partial data.")
+            return  # Don't inject tools/instructions after exhaustion
+
         # Inject tools
         context.tools.extend(self._tools)
 
-        # Inject progress instructions
+        # Inject guidance instructions
         context.instructions.append(GUIDANCE_INSTRUCTIONS)
+
+        # Inject conversation flow guidance (optional)
+        if self._conversation_flow:
+            context.instructions.append(
+                f"## Conversation Flow\n\n{self._conversation_flow}"
+            )
+
+        # Inject turn budget info (optional)
+        if self._max_turns is not None:
+            remaining = self._max_turns - form_state.turn_count + 1
+            context.instructions.append(
+                f"## Turn Budget\n\n"
+                f"You have used {form_state.turn_count} of {self._max_turns} turns. "
+                f"{remaining} turn(s) remaining (including this one). "
+                f"Plan your questions to complete the form within this budget."
+            )
+
+        # Inject review instructions if pending submission (final_update)
+        if form_state.pending_submission:
+            context.instructions.append(REVIEW_INSTRUCTIONS)
+
+        # Inject progress summary
         context.instructions.append(form_state.progress_summary())
 
     # -- Public API for checking state from the outer loop --
@@ -142,6 +220,40 @@ class GuidedConversationProvider(BaseContextProvider, Generic[T]):
             return FormResult(status="in_progress")
         return FormResult.from_form_state(form_state, self._form_type)
 
+    def turns_remaining(self, session: AgentSession) -> int | None:
+        """Get the number of turns remaining, or None if no limit is set."""
+        if self._max_turns is None:
+            return None
+        form_state = self.get_form_state(session)
+        if form_state is None:
+            return self._max_turns
+        return max(0, self._max_turns - form_state.turn_count)
+
+    # -- State persistence --
+
+    def save_state(self, session: AgentSession) -> str:
+        """Serialize the form state to a JSON string.
+
+        The caller decides when and where to persist this (file, DB, Redis, etc.).
+        """
+        form_state = self.get_form_state(session)
+        if form_state is None:
+            raise ValueError("No form state found in session. Has the conversation started?")
+        return form_state.model_dump_json()
+
+    def load_state(self, session: AgentSession, data: str) -> None:
+        """Restore form state from a JSON string.
+
+        Re-initializes TypeAdapter validators that don't survive serialization.
+        """
+        form_state = FormState.model_validate_json(data)
+        form_state.restore_validators(self._form_type)
+
+        # Ensure the provider's state dict exists in the session
+        if self.source_id not in session.state:
+            session.state[self.source_id] = {}
+        session.state[self.source_id][FORM_STATE_KEY] = form_state
+
 
 # -- Tool creation (private to this module) --
 
@@ -158,7 +270,12 @@ def _get_form_state_from_context(
     return None
 
 
-def _create_form_tools(form_type: type[BaseModel], source_id: str) -> list[FunctionTool]:
+def _create_form_tools(
+    form_type: type[BaseModel],
+    source_id: str,
+    *,
+    final_update: bool = False,
+) -> list[FunctionTool]:
     """Create the three form tools, bound to a specific provider source_id."""
     field_descriptions = _build_field_descriptions(form_type)
 
@@ -235,6 +352,15 @@ def _create_form_tools(form_type: type[BaseModel], source_id: str) -> list[Funct
         if not form_state.is_complete:
             missing = ", ".join(form_state.missing_required)
             return f"Cannot submit: missing required fields: {missing}"
+
+        # Two-phase submit when final_update is enabled
+        if final_update and not form_state.pending_submission:
+            form_state.pending_submission = True
+            return (
+                "Before finalizing: review the entire conversation and use update_form "
+                "for any field values mentioned by the user that you haven't recorded yet. "
+                "Then call submit_form again to complete."
+            )
 
         try:
             form_state.build(form_type)

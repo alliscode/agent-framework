@@ -65,6 +65,8 @@ class FormState(BaseModel, Generic[T]):
     field_metadata: dict[str, FieldInfo] = Field(default_factory=dict)
     collected: dict[str, FieldEntry] = Field(default_factory=dict)
     submitted: bool = False
+    turn_count: int = 0
+    pending_submission: bool = False
     _model_type: type | None = None
     _field_validators: dict[str, TypeAdapter] = {}
 
@@ -102,6 +104,18 @@ class FormState(BaseModel, Generic[T]):
         state._model_type = model_type
         state._field_validators = field_validators
         return state
+
+    def restore_validators(self, model_type: type[T]) -> None:
+        """Re-initialize TypeAdapter validators after deserialization.
+
+        TypeAdapter objects don't survive JSON round-trips, so call this
+        after loading state from JSON to restore per-field validation.
+        """
+        self._model_type = model_type
+        self._field_validators = {}
+        for name, field in model_type.model_fields.items():
+            if field.annotation is not None:
+                self._field_validators[name] = TypeAdapter(field.annotation)
 
     # -- Query methods --
 

@@ -173,12 +173,21 @@ async def main() -> None:
     credential = AzureCliCredential()
     client = AzureOpenAIResponsesClient(
         project_endpoint=os.environ["AZURE_AI_PROJECT_ENDPOINT"],
-        deployment_name=os.environ["AZURE_OPENAI_RESPONSES_DEPLOYMENT_NAME"],
+        deployment_name=os.environ["AZURE_AI_MODEL_DEPLOYMENT_NAME"],
         credential=credential,
     )
 
-    # 1. Create the guided conversation provider
-    form = GuidedConversationProvider(MedicalIntake)
+    # 1. Create the guided conversation provider with final review pass
+    form = GuidedConversationProvider(
+        MedicalIntake,
+        final_update=True,
+        conversation_flow=(
+            "Start with easy demographics (name, DOB, phone). "
+            "Then ask about the visit reason and chief complaint with follow-ups. "
+            "Move to medical history (medications, allergies, conditions). "
+            "Finish with optional fields (lifestyle, emergency contact, insurance)."
+        ),
+    )
 
     # 2. Attach it to a standard Agent
     agent = Agent(

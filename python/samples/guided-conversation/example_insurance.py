@@ -55,8 +55,16 @@ async def main() -> None:
         credential=credential,
     )
 
-    # 1. Create the guided conversation provider
-    form_filler = GuidedConversationProvider(InsuranceClaim)
+    # 1. Create the guided conversation provider with optional features
+    form = GuidedConversationProvider(
+        InsuranceClaim,
+        max_turns=15,
+        conversation_flow=(
+            "Start with policyholder identification (name, policy number), "
+            "then move to incident details (date, description, police report), "
+            "and finally ask about optional information (damage estimate, witnesses)."
+        ),
+    )
 
     # 2. Attach it to a standard Agent — no new concepts
     agent = Agent(
@@ -66,7 +74,7 @@ async def main() -> None:
             "Help the user file their auto insurance claim. Be understanding — "
             "they may be stressed. Ask clear questions and confirm important details."
         ),
-        context_providers=[form_filler],
+        context_providers=[form],
     )
 
     # 3. Kick off the conversation — agent speaks first
@@ -76,7 +84,7 @@ async def main() -> None:
     )
     print(f"Agent: {response.text}\n")
 
-    while not form_filler.is_complete(session):
+    while not form.is_complete(session):
         user_input = input("You: ").strip()
         if not user_input:
             continue
@@ -87,8 +95,13 @@ async def main() -> None:
         response = await agent.run(user_input, session=session)
         print(f"\nAgent: {response.text}\n")
 
+        # Show remaining turns if budget is set
+        remaining = form.turns_remaining(session)
+        if remaining is not None and remaining <= 3:
+            print(f"  ⏱ {remaining} turn(s) remaining\n")
+
     # 4. Print results
-    result = form_filler.get_result(session)
+    result = form.get_result(session)
     print("\n" + "=" * 60)
     print(f"Form Status: {result.status.value}")
 
