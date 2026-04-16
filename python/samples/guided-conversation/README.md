@@ -32,7 +32,7 @@ class ContactInfo(BaseModel):
 # 2. Create the provider and attach it to any Agent
 form = GuidedConversationProvider(ContactInfo)
 agent = Agent(
-    client=OpenAIChatClient(model_id="gpt-4o"),
+    client=OpenAIChatClient(model="gpt-4o"),
     instructions="You are a friendly receptionist.",
     context_providers=[form],
 )
@@ -176,9 +176,9 @@ guided_conversation/
 ## Running the Examples
 
 ```bash
-# Set environment variables
-export AZURE_AI_PROJECT_ENDPOINT="..."
-export AZURE_AI_MODEL_DEPLOYMENT_NAME="gpt-4o"
+# Set environment variables (or use a .env file)
+export FOUNDRY_PROJECT_ENDPOINT="..."
+export FOUNDRY_MODEL="gpt-4o"
 
 # Insurance claim — demonstrates max_turns + conversation_flow
 cd python/samples/guided-conversation

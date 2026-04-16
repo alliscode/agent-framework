@@ -8,12 +8,11 @@ medical intake form. Shows how GuidedConversationProvider handles many fields,
 mixed required/optional, and domain-specific conversational guidelines.
 
 Environment variables:
-  AZURE_AI_PROJECT_ENDPOINT                — Your Azure AI Foundry project endpoint
-  AZURE_OPENAI_RESPONSES_DEPLOYMENT_NAME   — Model deployment name (e.g. gpt-4o)
+  FOUNDRY_PROJECT_ENDPOINT     — Your Azure AI Foundry project endpoint
+  FOUNDRY_MODEL                — Model deployment name (e.g. gpt-4o)
 """
 
 import asyncio
-import os
 from enum import Enum
 from typing import Annotated
 
@@ -21,7 +20,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 from agent_framework import Agent
-from agent_framework.azure import AzureOpenAIResponsesClient
+from agent_framework.foundry import FoundryChatClient
 from azure.identity import AzureCliCredential
 
 from guided_conversation import GuidedConversationProvider
@@ -170,11 +169,8 @@ class MedicalIntake(BaseModel):
 
 
 async def main() -> None:
-    credential = AzureCliCredential()
-    client = AzureOpenAIResponsesClient(
-        project_endpoint=os.environ["AZURE_AI_PROJECT_ENDPOINT"],
-        deployment_name=os.environ["AZURE_AI_MODEL_DEPLOYMENT_NAME"],
-        credential=credential,
+    client = FoundryChatClient(
+        credential=AzureCliCredential(),
     )
 
     # 1. Create the guided conversation provider with final review pass

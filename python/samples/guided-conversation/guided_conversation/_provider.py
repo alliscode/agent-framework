@@ -45,8 +45,7 @@ from typing import TYPE_CHECKING, Any, Generic
 
 from pydantic import BaseModel
 
-from agent_framework import BaseContextProvider, FunctionTool
-from agent_framework._middleware import FunctionInvocationContext
+from agent_framework import ContextProvider, FunctionInvocationContext, FunctionTool
 
 from ._form_state import FormResult, FormState
 
@@ -56,9 +55,7 @@ except ImportError:
     from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
-    from agent_framework import AgentSession
-    from agent_framework._agents import SupportsAgentRun
-    from agent_framework._sessions import SessionContext
+    from agent_framework import AgentSession, SessionContext, SupportsAgentRun
 
 logger = logging.getLogger("guided_conversation")
 
@@ -95,7 +92,7 @@ You just attempted to submit the form. Before it can be finalized, please:
 """
 
 
-class GuidedConversationProvider(BaseContextProvider, Generic[T]):
+class GuidedConversationProvider(ContextProvider, Generic[T]):
     """A context provider that adds guided form-filling to any Agent.
 
     Attach this to an Agent's context_providers and it will:

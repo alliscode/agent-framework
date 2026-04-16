@@ -8,18 +8,17 @@ to a standard Agent. The provider injects tools and progress instructions
 so the agent knows what data to collect and tracks progress automatically.
 
 Environment variables:
-  AZURE_AI_PROJECT_ENDPOINT              — Your Azure AI Foundry project endpoint
-  AZURE_AI_MODEL_DEPLOYMENT_NAME         — Model deployment name (e.g. gpt-4o)
+  FOUNDRY_PROJECT_ENDPOINT     — Your Azure AI Foundry project endpoint
+  FOUNDRY_MODEL                — Model deployment name (e.g. gpt-4o)
 """
 
 import asyncio
-import os
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 from agent_framework import Agent
-from agent_framework.azure import AzureOpenAIResponsesClient
+from agent_framework.foundry import FoundryChatClient
 from azure.identity import AzureCliCredential
 
 from guided_conversation import GuidedConversationProvider
@@ -48,11 +47,8 @@ class InsuranceClaim(BaseModel):
 
 
 async def main() -> None:
-    credential = AzureCliCredential()
-    client = AzureOpenAIResponsesClient(
-        project_endpoint=os.environ["AZURE_AI_PROJECT_ENDPOINT"],
-        deployment_name=os.environ["AZURE_AI_MODEL_DEPLOYMENT_NAME"],
-        credential=credential,
+    client = FoundryChatClient(
+        credential=AzureCliCredential(),
     )
 
     # 1. Create the guided conversation provider with optional features
