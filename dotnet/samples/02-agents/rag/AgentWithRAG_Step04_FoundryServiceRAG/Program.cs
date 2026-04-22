@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // Foundry Service RAG — Built-in RAG with Microsoft Foundry
 //

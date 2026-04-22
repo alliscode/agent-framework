@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // Agent Orchestration Chaining — Durable Task Hosting
 // Demonstrates chaining sequential invocations of the same agent within a Durable Task

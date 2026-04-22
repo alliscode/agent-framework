@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // Foundry Agent with Hosted MCP Tools — Server-side MCP tool execution
 //

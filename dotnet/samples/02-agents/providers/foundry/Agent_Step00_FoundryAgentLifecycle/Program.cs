@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // Foundry Agent Lifecycle — Create, use, and clean up a FoundryAgent
 //

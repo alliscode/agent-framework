@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // Sample that shows how to create an Agent Framework agent that is hosted using the M365 Agent SDK.
 // The agent can then be consumed from various M365 channels.

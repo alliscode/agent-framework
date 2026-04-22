@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // This sample demonstrates how to implement reliable streaming for durable agents using Redis Streams.
 // It reads prompts from stdin and streams agent responses to stdout in real-time.

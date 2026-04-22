@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // Agent Orchestration Chaining — Azure Functions Hosting
 // Demonstrates chaining sequential agent invocations within a Durable Task orchestration,

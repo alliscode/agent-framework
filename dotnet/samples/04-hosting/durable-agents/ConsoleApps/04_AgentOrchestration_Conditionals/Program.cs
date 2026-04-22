@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // Multi-Agent Conditional Orchestration — Durable Task Hosting
 // Demonstrates conditional branching in a Durable Task orchestration with two agents:

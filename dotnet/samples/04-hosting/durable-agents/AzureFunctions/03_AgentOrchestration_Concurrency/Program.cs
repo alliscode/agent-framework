@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // Multi-Agent Concurrent Orchestration — Azure Functions Hosting
 // Demonstrates running multiple agents concurrently within a Durable Task orchestration,

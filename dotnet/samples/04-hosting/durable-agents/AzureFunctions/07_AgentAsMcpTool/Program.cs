@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // This sample demonstrates how to configure AI agents to be accessible as MCP tools.
 // When using AddAIAgent and enabling MCP tool triggers, the Functions host will automatically

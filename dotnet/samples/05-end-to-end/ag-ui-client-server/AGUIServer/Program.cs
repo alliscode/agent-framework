@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // AG-UI Server — hosts an AI agent with tools exposed via the AG-UI protocol.
 // Demonstrates streaming agent responses to AG-UI compatible clients.

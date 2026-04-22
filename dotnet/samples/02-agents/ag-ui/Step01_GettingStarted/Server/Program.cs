@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // AG-UI Getting Started — Server-side agent with AG-UI protocol
 //

@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // This sample shows how to represent an A2A agent as a set of function tools, where each function tool
 // corresponds to a skill of the A2A agent, and register these function tools with another AI agent so

@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // Long-Running Tools — Durable Task Hosting
 // Demonstrates agents with tools that start long-running background workflows.

@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // Single Agent Sample — Durable Task Hosting
 // Demonstrates hosting a single AI agent in a console app using the Durable Task Scheduler.

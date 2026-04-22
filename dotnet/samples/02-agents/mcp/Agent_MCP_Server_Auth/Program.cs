@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // MCP Server with OAuth Authentication — Connect to a protected MCP server
 //

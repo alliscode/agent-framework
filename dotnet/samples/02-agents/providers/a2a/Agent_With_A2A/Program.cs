@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // Agent with A2A — Connect to an existing Agent-to-Agent protocol agent
 //

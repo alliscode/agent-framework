@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // Single Agent Sample — Azure Functions Hosting
 // Demonstrates hosting a single AI agent as an Azure Function using the Durable Task Scheduler.

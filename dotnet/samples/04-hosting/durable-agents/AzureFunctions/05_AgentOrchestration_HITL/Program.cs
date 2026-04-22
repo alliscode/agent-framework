@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // Human-in-the-Loop Orchestration — Azure Functions Hosting
 // Demonstrates the HITL pattern with content generation and approval workflows,

@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // Neo4j Graph RAG — Knowledge graph retrieval-augmented generation
 //

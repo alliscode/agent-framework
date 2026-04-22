@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 #pragma warning disable CS0618 // Type or member is obsolete - sample uses deprecated PersistentAgentsClientExtensions
 

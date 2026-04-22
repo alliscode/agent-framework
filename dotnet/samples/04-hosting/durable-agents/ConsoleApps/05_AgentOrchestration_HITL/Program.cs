@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // Human-in-the-Loop Orchestration — Durable Task Hosting
 // Demonstrates the HITL pattern: a WriterAgent generates content, then waits for human
