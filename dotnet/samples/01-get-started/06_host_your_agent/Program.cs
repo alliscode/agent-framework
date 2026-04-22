@@ -1,6 +1,11 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to host an AI agent with Azure Functions (DurableAgents).
+// Host Your Agent — Azure Functions hosting
+//
+// This sample shows the .NET hosting pattern:
+// - Create an agent with Azure OpenAI
+// - Register it with DurableAgents
+// - Run with Azure Functions Core Tools (func start)
 //
 // Prerequisites:
 //   - Azure Functions Core Tools
@@ -25,21 +30,21 @@ var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
     ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
-// Set up an AI agent following the standard Microsoft Agent Framework pattern.
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
+// <create_agent>
 AIAgent agent = new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential())
     .GetChatClient(deploymentName)
     .AsAIAgent(
         instructions: "You are a helpful assistant hosted in Azure Functions.",
         name: "HostedAgent");
+// </create_agent>
 
+// <host_agent>
 // Configure the function app to host the AI agent.
-// This will automatically generate HTTP API endpoints for the agent.
+// This automatically generates HTTP API endpoints for the agent.
 using IHost app = FunctionsApplication
     .CreateBuilder(args)
     .ConfigureFunctionsWebApplication()
     .ConfigureDurableAgents(options => options.AddAIAgent(agent, timeToLive: TimeSpan.FromHours(1)))
     .Build();
 app.Run();
+// </host_agent>

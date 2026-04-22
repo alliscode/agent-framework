@@ -5,31 +5,34 @@ using Microsoft.Agents.AI.Workflows;
 namespace WorkflowExecutorsAndEdgesSample;
 
 /// <summary>
-/// This sample introduces the concepts of executors and edges in a workflow.
+/// First Workflow — Chain executors with edges
 ///
-/// Workflows are built from executors (processing units) connected by edges (data flow paths).
-/// In this example, we create a simple text processing pipeline that:
-/// 1. Takes input text and converts it to uppercase using an UppercaseExecutor
-/// 2. Takes the uppercase text and reverses it using a ReverseTextExecutor
+/// This sample builds a minimal workflow with two steps:
+/// 1. Convert text to uppercase (lambda-bound executor)
+/// 2. Reverse the text (class-based executor)
 ///
-/// The executors are connected sequentially, so data flows from one to the next in order.
+/// No external services are required.
 /// For input "Hello, World!", the workflow produces "!DLROW ,OLLEH".
 /// </summary>
 public static class Program
 {
     private static async Task Main()
     {
-        // Create the executors
+        // <create_workflow>
+        // Step 1: An executor that converts text to uppercase
         Func<string, string> uppercaseFunc = s => s.ToUpperInvariant();
         var uppercase = uppercaseFunc.BindAsExecutor("UppercaseExecutor");
 
+        // Step 2: A class-based executor that reverses the string
         ReverseTextExecutor reverse = new();
 
-        // Build the workflow by connecting executors sequentially
+        // Build the workflow: uppercase → reverse_text
         WorkflowBuilder builder = new(uppercase);
         builder.AddEdge(uppercase, reverse).WithOutputFrom(reverse);
         var workflow = builder.Build();
+        // </create_workflow>
 
+        // <run_workflow>
         // Execute the workflow with input data
         await using Run run = await InProcessExecution.RunAsync(workflow, "Hello, World!");
         foreach (WorkflowEvent evt in run.NewEvents)
@@ -39,25 +42,17 @@ public static class Program
                 Console.WriteLine($"{executorComplete.ExecutorId}: {executorComplete.Data}");
             }
         }
+        // </run_workflow>
     }
 }
 
 /// <summary>
-/// Second executor: reverses the input text and completes the workflow.
+/// Step 2 executor: reverses the input text.
 /// </summary>
 internal sealed class ReverseTextExecutor() : Executor<string, string>("ReverseTextExecutor")
 {
-    /// <summary>
-    /// Processes the input message by reversing the text.
-    /// </summary>
-    /// <param name="message">The input text to reverse</param>
-    /// <param name="context">Workflow context for accessing workflow services and adding events</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests.
-    /// The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>The input text reversed</returns>
     public override ValueTask<string> HandleAsync(string message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
-        // Because we do not suppress it, the returned result will be yielded as an output from this executor.
         return ValueTask.FromResult(string.Concat(message.Reverse()));
     }
 }

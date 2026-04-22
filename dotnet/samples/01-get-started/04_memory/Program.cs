@@ -1,10 +1,13 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to add a basic custom memory component to an agent.
-// The memory component subscribes to all messages added to the conversation and
-// extracts the user's name and age if provided.
-// The component adds a prompt to ask for this information if it is not already known
-// and provides it to the model before each invocation if known.
+// Agent Memory with Context Providers and Session State
+//
+// Context providers inject dynamic context into each agent call. This sample
+// shows a provider that stores user info in session state and personalizes
+// responses — the info persists across turns via the session.
+//
+// The .NET version also demonstrates serialization/deserialization of sessions
+// and transferring memory to new sessions.
 
 using System.Text;
 using System.Text.Json;
@@ -18,73 +21,65 @@ using SampleApp;
 var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 ChatClient chatClient = new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())
     .GetChatClient(deploymentName);
 
-// Create the agent and provide a factory to add our custom memory component to
-// all sessions created by the agent. Here each new memory component will have its own
-// user info object, so each session will have its own memory.
-// In real world applications/services, where the user info would be persisted in a database,
-// and preferably shared between multiple sessions used by the same user, ensure that the
-// factory reads the user id from the current context and scopes the memory component
-// and its storage to that user id.
+// <create_agent>
+// Create the agent with a memory provider that stores user info across turns.
 AIAgent agent = chatClient.AsAIAgent(new ChatClientAgentOptions()
 {
-    ChatOptions = new() { Instructions = "You are a friendly assistant. Always address the user by their name." },
+    ChatOptions = new() { Instructions = "You are a friendly assistant." },
     AIContextProviders = [new UserInfoMemory(chatClient.AsIChatClient())]
 });
+// </create_agent>
 
-// Create a new session for the conversation.
+// <run_with_memory>
 AgentSession session = await agent.CreateSessionAsync();
 
-Console.WriteLine(">> Use session with blank memory\n");
-
-// Invoke the agent and output the text result.
+// The provider doesn't know the user yet — it will ask for their name
 Console.WriteLine(await agent.RunAsync("Hello, what is the square root of 9?", session));
-Console.WriteLine(await agent.RunAsync("My name is Ruaidhrí", session));
+
+// Now provide the name — the provider stores it in session state
+Console.WriteLine(await agent.RunAsync("My name is Alice", session));
 Console.WriteLine(await agent.RunAsync("I am 20 years old", session));
 
-// We can serialize the session. The serialized state will include the state of the memory component.
-JsonElement sesionElement = await agent.SerializeSessionAsync(session);
+// Subsequent calls are personalized — info persists via session state
+Console.WriteLine(await agent.RunAsync("What is my name and age?", session));
 
-Console.WriteLine("\n>> Use deserialized session with previously created memories\n");
+// Inspect session state to see what the provider stored
+var userInfo = agent.GetService<UserInfoMemory>()?.GetUserInfo(session);
+Console.WriteLine($"\n[Session State] User Name: {userInfo?.UserName}");
+Console.WriteLine($"[Session State] User Age: {userInfo?.UserAge}");
+// </run_with_memory>
 
-// Later we can deserialize the session and continue the conversation with the previous memory component state.
-var deserializedSession = await agent.DeserializeSessionAsync(sesionElement);
+// --- .NET extras: session serialization and transfer ---
+
+// Serialize the session — state is included, so it can be persisted or transferred
+JsonElement sessionElement = await agent.SerializeSessionAsync(session);
+
+// Deserialize and continue the conversation with previous memory
+Console.WriteLine("\n>> Deserialized session:");
+var deserializedSession = await agent.DeserializeSessionAsync(sessionElement);
 Console.WriteLine(await agent.RunAsync("What is my name and age?", deserializedSession));
 
-Console.WriteLine("\n>> Read memories using memory component\n");
-
-// It's possible to access the memory component via the agent's GetService method.
-var userInfo = agent.GetService<UserInfoMemory>()?.GetUserInfo(deserializedSession);
-
-// Output the user info that was captured by the memory component.
-Console.WriteLine($"MEMORY - User Name: {userInfo?.UserName}");
-Console.WriteLine($"MEMORY - User Age: {userInfo?.UserAge}");
-
-Console.WriteLine("\n>> Use new session with previously created memories\n");
-
-// It is also possible to set the memories using a memory component on an individual session.
-// This is useful if we want to start a new session, but have it share the same memories as a previous session.
+// Transfer memory to a brand-new session
+Console.WriteLine("\n>> New session with transferred memory:");
 var newSession = await agent.CreateSessionAsync();
-if (userInfo is not null && agent.GetService<UserInfoMemory>() is UserInfoMemory newSessionMemory)
+if (userInfo is not null && agent.GetService<UserInfoMemory>() is UserInfoMemory memory)
 {
-    newSessionMemory.SetUserInfo(newSession, userInfo);
+    memory.SetUserInfo(newSession, userInfo);
 }
-
-// Invoke the agent and output the text result.
-// This time the agent should remember the user's name and use it in the response.
 Console.WriteLine(await agent.RunAsync("What is my name and age?", newSession));
 
 namespace SampleApp
 {
+    // <context_provider>
     /// <summary>
-    /// Sample memory component that can remember a user's name and age.
+    /// A context provider that remembers user info in session state.
+    /// Before each call, it injects personalization instructions (or asks for missing info).
+    /// After each call, it extracts and stores the user's name and age.
     /// </summary>
     internal sealed class UserInfoMemory : AIContextProvider
     {
@@ -112,7 +107,7 @@ namespace SampleApp
         {
             var userInfo = this._sessionState.GetOrInitializeState(context.Session);
 
-            // Try and extract the user name and age from the message if we don't have it already and it's a user message.
+            // Extract user name and age from the conversation if not already known
             if ((userInfo.UserName is null || userInfo.UserAge is null) && context.RequestMessages.Any(x => x.Role == ChatRole.User))
             {
                 var result = await this._chatClient.GetResponseAsync<UserInfo>(
@@ -134,17 +129,16 @@ namespace SampleApp
         {
             var userInfo = this._sessionState.GetOrInitializeState(context.Session);
 
+            // Inject personalization instructions based on stored user info
             StringBuilder instructions = new();
-
-            // If we don't already know the user's name and age, add instructions to ask for them, otherwise just provide what we have to the context.
             instructions
                 .AppendLine(
                     userInfo.UserName is null ?
-                        "Ask the user for their name and politely decline to answer any questions until they provide it." :
-                        $"The user's name is {userInfo.UserName}.")
+                        "You don't know the user's name yet. Ask for it politely." :
+                        $"The user's name is {userInfo.UserName}. Always address them by name.")
                 .AppendLine(
                     userInfo.UserAge is null ?
-                        "Ask the user for their age and politely decline to answer any questions until they provide it." :
+                        "You don't know the user's age yet. Ask for it politely." :
                         $"The user's age is {userInfo.UserAge}.");
 
             return new ValueTask<AIContext>(new AIContext
@@ -153,6 +147,7 @@ namespace SampleApp
             });
         }
     }
+    // </context_provider>
 
     internal sealed class UserInfo
     {
