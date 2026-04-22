@@ -34,13 +34,13 @@ Start with `01-get-started/` and work through the numbered files:
 
 Some additional samples of note include:
 
-- [Agents](./02-agents/Agents/README.md): Basic steps to get started with the agent framework.
+- [Agents](./02-agents/agents/README.md): Basic steps to get started with the agent framework.
   These samples demonstrate the fundamental concepts and functionalities of the agent framework when using the
   `AIAgent` and can be used with any underlying service that provides an `AIAgent` implementation.
-- [Agent Providers](./02-agents/AgentProviders/README.md): Shows how to create an AIAgent instance for a selection of providers.
-- [Agent Telemetry](./02-agents/AgentOpenTelemetry/README.md): Demo which showcases the integration of OpenTelemetry with the Microsoft Agent Framework using Azure OpenAI and .NET Aspire Dashboard for telemetry visualization.
-- [Durable Agents - Azure Functions](./04-hosting/DurableAgents/AzureFunctions/README.md): Samples for using the Microsoft Agent Framework with Azure Functions via the durable task extension.
-- [Durable Agents - Console Apps](./04-hosting/DurableAgents/ConsoleApps/README.md): Samples demonstrating durable agents in console applications.
+- [Agent Providers](./02-agents/providers/README.md): Shows how to create an AIAgent instance for a selection of providers.
+- [Agent Telemetry](./02-agents/observability/README.md): Demo which showcases the integration of OpenTelemetry with the Microsoft Agent Framework using Azure OpenAI and .NET Aspire Dashboard for telemetry visualization.
+- [Durable Agents - Azure Functions](./04-hosting/durable-agents/AzureFunctions/README.md): Samples for using the Microsoft Agent Framework with Azure Functions via the durable task extension.
+- [Durable Agents - Console Apps](./04-hosting/durable-agents/ConsoleApps/README.md): Samples demonstrating durable agents in console applications.
 
 ## Migration from Semantic Kernel
 

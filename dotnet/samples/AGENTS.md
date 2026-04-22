@@ -15,46 +15,55 @@ dotnet/samples/
 │   ├── 05_first_workflow/             # Build a workflow with executors and edges
 │   └── 06_host_your_agent/            # Host your agent via Azure Functions
 ├── 02-agents/                         # Deep-dive concept samples
-│   ├── Agents/                        # Core agent patterns (tools, structured output,
+│   ├── agents/                        # Core agent patterns (tools, structured output,
 │   │                                  #   conversations, middleware, plugins, MCP, etc.)
-│   ├── AgentProviders/                # One project per provider (Azure OpenAI, OpenAI,
+│   ├── providers/                     # One project per provider (Azure OpenAI, OpenAI,
 │   │                                  #   Anthropic, Gemini, Ollama, ONNX, Foundry, etc.)
-│   ├── AgentOpenTelemetry/            # OpenTelemetry integration
-│   ├── AgentSkills/                   # Agent skills patterns
-│   ├── AgentWithAnthropic/            # Anthropic-specific samples
-│   ├── AgentWithMemory/               # Memory providers (chat history, Mem0, Foundry)
-│   ├── AgentWithOpenAI/               # OpenAI-specific samples
-│   ├── AgentWithRAG/                  # RAG patterns (text, vector store, Foundry)
-│   ├── AGUI/                          # AG-UI protocol samples
-│   ├── DeclarativeAgents/             # Declarative agent definitions
-│   ├── DevUI/                         # DevUI samples
-│   ├── AgentsWithFoundry/             # Microsoft Foundry samples (FoundryAgent + AsAIAgent extensions)
-│   └── ModelContextProtocol/          # MCP server/client patterns
+│   ├── observability/                 # OpenTelemetry integration
+│   ├── skills/                        # Agent skills patterns
+│   ├── anthropic/                     # Anthropic-specific samples
+│   ├── context-providers/             # Memory providers (chat history, Mem0, Foundry)
+│   ├── openai/                        # OpenAI-specific samples
+│   ├── rag/                           # RAG patterns (text, vector store, Foundry)
+│   ├── ag-ui/                         # AG-UI protocol samples
+│   ├── declarative/                   # Declarative agent definitions
+│   ├── devui/                         # DevUI samples
+│   ├── foundry/                       # Microsoft Foundry samples (FoundryAgent + AsAIAgent extensions)
+│   ├── evaluation/                    # Evaluation samples
+│   └── mcp/                           # MCP server/client patterns
 ├── 03-workflows/                      # Workflow patterns
-│   ├── _StartHere/                    # Introductory workflow samples
-│   ├── Agents/                        # Agents in workflows
-│   ├── Checkpoint/                    # Checkpointing & resume
-│   ├── Concurrent/                    # Concurrent execution
-│   ├── ConditionalEdges/              # Conditional routing
-│   ├── Declarative/                   # YAML-based workflows
-│   ├── HumanInTheLoop/                # HITL patterns
-│   ├── Loop/                          # Loop patterns
-│   ├── Observability/                 # Workflow telemetry
-│   ├── SharedStates/                  # State isolation
-│   └── Visualization/                 # Workflow visualization
+│   ├── _start-here/                   # Introductory workflow samples
+│   ├── agents/                        # Agents in workflows
+│   ├── checkpoint/                    # Checkpointing & resume
+│   ├── control-flow/                  # Conditional routing & loops
+│   ├── declarative/                   # YAML-based workflows
+│   ├── evaluation/                    # Workflow evaluation
+│   ├── human-in-the-loop/             # HITL patterns
+│   ├── observability/                 # Workflow telemetry
+│   ├── orchestrations/                # Orchestration patterns
+│   ├── parallelism/                   # Concurrent execution
+│   ├── resources/                     # Shared resources
+│   ├── state-management/              # State isolation
+│   └── visualization/                 # Workflow visualization
 ├── 04-hosting/                        # Deployment & hosting
-│   ├── A2A/                           # Agent-to-Agent protocol
-│   └── DurableAgents/                 # Durable task framework
-│       ├── AzureFunctions/            #   Azure Functions hosting
-│       └── ConsoleApps/               #   Console app hosting
+│   ├── a2a/                           # Agent-to-Agent protocol
+│   ├── durable-agents/                # Durable task framework agents
+│   │   ├── AzureFunctions/            #   Azure Functions hosting
+│   │   └── ConsoleApps/               #   Console app hosting
+│   ├── durable-workflows/             # Durable task framework workflows
+│   │   ├── AzureFunctions/            #   Azure Functions hosting
+│   │   └── ConsoleApps/               #   Console app hosting
+│   └── foundry-hosted-agents/         # Hosted Foundry agent scenarios
 ├── 05-end-to-end/                     # Complete applications
-│   ├── A2AClientServer/               # A2A client/server demo
-│   ├── AgentWebChat/                  # Aspire-based web chat
-│   ├── AgentWithPurview/              # Purview integration
-│   ├── AGUIClientServer/              # AG-UI client/server demo
-│   ├── AGUIWebChat/                   # AG-UI web chat
-│   ├── HostedAgents/                  # Hosted agent scenarios
-│   └── M365Agent/                     # Microsoft 365 agent
+│   ├── a2a-client-server/             # A2A client/server demo
+│   ├── ag-ui-client-server/           # AG-UI client/server demo
+│   ├── ag-ui-web-chat/                # AG-UI web chat
+│   ├── agent-web-chat/                # Aspire-based web chat
+│   ├── aspnet-agent-authorization/    # Auth client/server
+│   ├── devui-aspire-integration/      # DevUI/Aspire integration
+│   ├── evaluation/                    # Evaluation demos
+│   ├── m365-agent/                    # Microsoft 365 agent
+│   └── purview-agent/                 # Purview integration
 ```
 
 ## Design principles
