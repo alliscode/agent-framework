@@ -1,5 +1,14 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Concurrent Fan-Out / Fan-In — Multiple agents process the same input in parallel
+//
+// A dispatcher fans out the same question to a Physicist agent and a Chemist agent.
+// Both answer independently and in parallel, then an aggregator fans in their
+// responses and combines them into a single consolidated report.
+//
+// Prerequisites:
+// - An Azure OpenAI chat completion deployment must be configured.
+
 using System.Text;
 using Azure.AI.Projects;
 using Azure.Identity;
@@ -9,37 +18,18 @@ using Microsoft.Extensions.AI;
 
 namespace WorkflowConcurrentSample;
 
-/// <summary>
-/// This sample introduces concurrent execution using "fan-out" and "fan-in" patterns.
-///
-/// Unlike sequential workflows where executors run one after another, this workflow
-/// runs multiple executors in parallel to process the same input simultaneously.
-///
-/// The workflow structure:
-/// 1. StartExecutor sends the same question to two AI agents concurrently (fan-out)
-/// 2. Physicist Agent and Chemist Agent answer independently and in parallel
-/// 3. AggregationExecutor collects both responses and combines them (fan-in)
-///
-/// This pattern is useful when you want multiple perspectives on the same input,
-/// or when you can break work into independent parallel tasks for better performance.
-/// </summary>
-/// <remarks>
-/// Pre-requisites:
-/// - Foundational samples should be completed first.
-/// - An Azure OpenAI chat completion deployment must be configured.
-/// </remarks>
 public static class Program
 {
     private static async Task Main()
     {
-        // Set up the Azure AI Project client
+        // Step 1: Set up the Azure AI Project client
         var endpoint = Environment.GetEnvironmentVariable("AZURE_AI_PROJECT_ENDPOINT")
             ?? throw new InvalidOperationException("AZURE_AI_PROJECT_ENDPOINT is not set.");
         var deploymentName = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
         var chatClient = new AIProjectClient(new Uri(endpoint), new AzureCliCredential())
                             .ProjectOpenAIClient.GetChatClient(deploymentName).AsIChatClient();
 
-        // Create the executors
+        // Step 2: Create the expert agents and helper executors
         var physicist = new ChatClientAgent(
             chatClient,
             name: "Physicist",
@@ -55,14 +45,14 @@ public static class Program
         var startExecutor = new ConcurrentStartExecutor();
         var aggregationExecutor = new ConcurrentAggregationExecutor();
 
-        // Build the workflow by adding executors and connecting them
+        // Step 3: Build the workflow with fan-out/fan-in pattern
         var workflow = new WorkflowBuilder(startExecutor)
             .AddFanOutEdge(startExecutor, [physicist, chemist])
             .AddFanInBarrierEdge([physicist, chemist], aggregationExecutor)
             .WithOutputFrom(aggregationExecutor)
             .Build();
 
-        // Execute the workflow in streaming mode
+        // Step 4: Execute the workflow in streaming mode
         await using StreamingRun run = await InProcessExecution.RunStreamingAsync(workflow, input: "What is temperature?");
         await foreach (WorkflowEvent evt in run.WatchStreamAsync())
         {
@@ -93,50 +83,29 @@ public static class Program
     }
 }
 
-/// <summary>
-/// Executor that starts the concurrent processing by sending messages to the agents.
-/// </summary>
+// Executor: broadcasts the user's question and a turn token to all connected agents.
 [SendsMessage(typeof(ChatMessage))]
 [SendsMessage(typeof(TurnToken))]
 internal sealed partial class ConcurrentStartExecutor() :
     Executor("ConcurrentStartExecutor")
 {
-    /// <summary>
-    /// Starts the concurrent processing by sending messages to the agents.
-    /// </summary>
-    /// <param name="message">The user message to process</param>
-    /// <param name="context">Workflow context for accessing workflow services and adding events</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests.
-    /// The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>A task representing the asynchronous operation</returns>
     [MessageHandler]
     public async ValueTask HandleAsync(string message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
-        // Broadcast the message to all connected agents. Receiving agents will queue
-        // the message but will not start processing until they receive a turn token.
+        // Broadcast the message to all connected agents
         await context.SendMessageAsync(new ChatMessage(ChatRole.User, message), cancellationToken: cancellationToken);
-        // Broadcast the turn token to kick off the agents.
+        // Broadcast the turn token to kick off the agents
         await context.SendMessageAsync(new TurnToken(emitEvents: false), cancellationToken: cancellationToken);
     }
 }
 
-/// <summary>
-/// Executor that aggregates the results from the concurrent agents.
-/// </summary>
+// Executor: collects responses from all agents and yields a combined report.
 [YieldsOutput(typeof(string))]
 internal sealed partial class ConcurrentAggregationExecutor() :
     Executor<List<ChatMessage>>("ConcurrentAggregationExecutor")
 {
     private readonly List<ChatMessage> _messages = [];
 
-    /// <summary>
-    /// Handles incoming messages from the agents and aggregates their responses.
-    /// </summary>
-    /// <param name="message">The messages from the agent</param>
-    /// <param name="context">Workflow context for accessing workflow services and adding events</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests.
-    /// The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>A task representing the asynchronous operation</returns>
     public override async ValueTask HandleAsync(List<ChatMessage> message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         this._messages.AddRange(message);

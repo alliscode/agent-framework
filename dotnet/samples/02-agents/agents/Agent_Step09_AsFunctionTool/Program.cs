@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use a Azure OpenAI AI agent as a function tool.
+// Agent as Function Tool — Use one agent as a tool for another
+//
+// This sample shows how to create an AI agent and expose it as a
+// function tool that another agent can call.
 
 using System.ComponentModel;
 using Azure.AI.OpenAI;
@@ -17,9 +20,6 @@ static string GetWeather([Description("The location to get the weather for.")] s
     => $"The weather in {location} is cloudy with a high of 15°C.";
 
 // Create the chat client and agent, and provide the function tool to the agent.
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIAgent weatherAgent = new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())

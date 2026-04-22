@@ -1,4 +1,15 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
+
+// Agent Observability — OpenTelemetry tracing, metrics, and logging
+//
+// This sample shows how to observe an agent using OpenTelemetry.
+// It configures tracing (spans), metrics (counters, histograms), and
+// structured logging, then runs an interactive agent chat loop that
+// emits telemetry to an OTLP endpoint (e.g. Aspire Dashboard).
+//
+// Prerequisites:
+// - An OpenTelemetry-compatible backend (e.g. Aspire Dashboard at localhost:4317)
+// - Optionally, an Application Insights connection string
 
 using System.ComponentModel;
 using System.Diagnostics;
@@ -109,9 +120,6 @@ static async Task<string> GetWeatherAsync([Description("The location to get the 
     return $"The weather in {location} is cloudy with a high of 15°C.";
 }
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 using var instrumentedChatClient = new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential())
     .GetChatClient(deploymentName)
         .AsIChatClient() // Converts a native OpenAI SDK ChatClient into a Microsoft.Extensions.AI.IChatClient

@@ -1,5 +1,20 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Multi-Selection Routing — Fan out to multiple branches based on analysis
+//
+// Extending the switch-case pattern, this workflow can trigger multiple executors
+// simultaneously based on data characteristics:
+// - Legitimate emails: Email Assistant (always) + Email Summary (if long)
+// - Spam emails: Handle Spam executor only
+// - Uncertain emails: Handle Uncertain executor only
+// - Database logging for both short emails and summarized long emails
+//
+// This pattern is useful for workflows needing parallel processing based on
+// data characteristics, such as triggering different analytics pipelines.
+//
+// Prerequisites:
+// - An Azure OpenAI chat completion deployment that supports structured outputs.
+
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.AI.OpenAI;
@@ -10,44 +25,22 @@ using Microsoft.Extensions.AI;
 
 namespace WorkflowMultiSelectionSample;
 
-/// <summary>
-/// This sample introduces multi-selection routing where one executor can trigger multiple downstream executors.
-///
-/// Extending the switch-case pattern from the previous sample, the workflow can now
-/// trigger multiple executors simultaneously when certain conditions are met.
-///
-/// Key features:
-/// - For legitimate emails: triggers Email Assistant (always) + Email Summary (if email is long)
-/// - For spam emails: triggers Handle Spam executor only
-/// - For uncertain emails: triggers Handle Uncertain executor only
-/// - Database logging happens for both short emails and summarized long emails
-///
-/// This pattern is powerful for workflows that need parallel processing based on data characteristics,
-/// such as triggering different analytics pipelines or multiple notification systems.
-/// </summary>
-/// <remarks>
-/// Pre-requisites:
-/// - Foundational samples should be completed first.
-/// - Shared state is used in this sample to persist email data between executors.
-/// - An Azure OpenAI chat completion deployment that supports structured outputs must be configured.
-/// </remarks>
 public static class Program
 {
     private const int LongEmailThreshold = 100;
 
     private static async Task Main()
     {
-        // Set up the Azure OpenAI client
+        // Step 1: Set up the Azure OpenAI client
         var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
         var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
         var chatClient = new AzureOpenAIClient(new Uri(endpoint), new AzureCliCredential()).GetChatClient(deploymentName).AsIChatClient();
 
-        // Create agents
+        // Step 2: Create agents and executors
         AIAgent emailAnalysisAgent = GetEmailAnalysisAgent(chatClient);
         AIAgent emailAssistantAgent = GetEmailAssistantAgent(chatClient);
         AIAgent emailSummaryAgent = GetEmailSummaryAgent(chatClient);
 
-        // Create executors
         var emailAnalysisExecutor = new EmailAnalysisExecutor(emailAnalysisAgent);
         var emailAssistantExecutor = new EmailAssistantExecutor(emailAssistantAgent);
         var emailSummaryExecutor = new EmailSummaryExecutor(emailSummaryAgent);
@@ -56,7 +49,7 @@ public static class Program
         var handleUncertainExecutor = new HandleUncertainExecutor();
         var databaseAccessExecutor = new DatabaseAccessExecutor();
 
-        // Build the workflow by adding executors and connecting them
+        // Step 3: Build the workflow with multi-selection fan-out
         WorkflowBuilder builder = new(emailAnalysisExecutor);
         builder.AddFanOutEdge(
             emailAnalysisExecutor,
@@ -68,23 +61,21 @@ public static class Program
             ],
             GetTargetAssigner()
         )
-        // After the email assistant writes a response, it will be sent to the send email executor
         .AddEdge(emailAssistantExecutor, sendEmailExecutor)
-        // Save the analysis result to the database if summary is not needed
+        // Save analysis to database: short emails go directly, long emails go via summary
         .AddEdge<AnalysisResult>(
             emailAnalysisExecutor,
             databaseAccessExecutor,
             condition: analysisResult => analysisResult?.EmailLength <= LongEmailThreshold)
-        // Save the analysis result to the database with summary
         .AddEdge(emailSummaryExecutor, databaseAccessExecutor)
         .WithOutputFrom(handleUncertainExecutor, handleSpamExecutor, sendEmailExecutor);
 
         var workflow = builder.Build();
 
-        // Read a email from a text file
+        // Step 4: Read the email input
         string email = Resources.Read("email.txt");
 
-        // Execute the workflow
+        // Step 5: Execute the workflow
         await using StreamingRun run = await InProcessExecution.RunStreamingAsync(workflow, new ChatMessage(ChatRole.User, email));
         await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
         await foreach (WorkflowEvent evt in run.WatchStreamAsync())
@@ -112,10 +103,7 @@ public static class Program
         }
     }
 
-    /// <summary>
-    /// Creates a partitioner for routing messages based on the analysis result.
-    /// </summary>
-    /// <returns>A function that takes an analysis result and returns the target partitions.</returns>
+    /// <summary>Creates a target assigner for multi-selection routing based on spam decision.</summary>
     private static Func<AnalysisResult?, int, IEnumerable<int>> GetTargetAssigner()
     {
         return (analysisResult, targetCount) =>
@@ -146,10 +134,7 @@ public static class Program
         };
     }
 
-    /// <summary>
-    /// Create an email analysis agent.
-    /// </summary>
-    /// <returns>A ChatClientAgent configured for email analysis</returns>
+    /// <summary>Creates an email analysis agent.</summary>
     private static ChatClientAgent GetEmailAnalysisAgent(IChatClient chatClient) =>
         new(chatClient, new ChatClientAgentOptions()
         {
@@ -160,10 +145,7 @@ public static class Program
             }
         });
 
-    /// <summary>
-    /// Creates an email assistant agent.
-    /// </summary>
-    /// <returns>A ChatClientAgent configured for email assistance</returns>
+    /// <summary>Creates an email assistant agent.</summary>
     private static ChatClientAgent GetEmailAssistantAgent(IChatClient chatClient) =>
         new(chatClient, new ChatClientAgentOptions()
         {
@@ -174,10 +156,7 @@ public static class Program
             }
         });
 
-    /// <summary>
-    /// Creates an agent that summarizes emails.
-    /// </summary>
-    /// <returns>A ChatClientAgent configured for email summarization</returns>
+    /// <summary>Creates an email summary agent.</summary>
     private static ChatClientAgent GetEmailSummaryAgent(IChatClient chatClient) =>
         new(chatClient, new ChatClientAgentOptions()
         {
@@ -194,9 +173,7 @@ internal static class EmailStateConstants
     public const string EmailStateScope = "EmailState";
 }
 
-/// <summary>
-/// Represents the possible decisions for spam detection.
-/// </summary>
+// Three-way spam decision enum.
 public enum SpamDecision
 {
     NotSpam,
@@ -204,9 +181,7 @@ public enum SpamDecision
     Uncertain
 }
 
-/// <summary>
-/// Represents the result of email analysis.
-/// </summary>
+// Structured result from the email analysis agent.
 public sealed class AnalysisResult
 {
     [JsonPropertyName("spam_decision")]
@@ -226,9 +201,7 @@ public sealed class AnalysisResult
     public string EmailId { get; set; } = string.Empty;
 }
 
-/// <summary>
-/// Represents an email.
-/// </summary>
+// In-memory record of the email content stored in shared state.
 internal sealed class Email
 {
     [JsonPropertyName("email_id")]
@@ -238,17 +211,11 @@ internal sealed class Email
     public string EmailContent { get; set; } = string.Empty;
 }
 
-/// <summary>
-/// Executor that analyzes emails using an AI agent.
-/// </summary>
+// Executor: analyzes emails with the AI agent and stores them in shared state.
 internal sealed class EmailAnalysisExecutor : Executor<ChatMessage, AnalysisResult>
 {
     private readonly AIAgent _emailAnalysisAgent;
 
-    /// <summary>
-    /// Creates a new instance of the <see cref="EmailAnalysisExecutor"/> class.
-    /// </summary>
-    /// <param name="emailAnalysisAgent">The AI agent used for email analysis</param>
     public EmailAnalysisExecutor(AIAgent emailAnalysisAgent) : base("EmailAnalysisExecutor")
     {
         this._emailAnalysisAgent = emailAnalysisAgent;
@@ -275,26 +242,18 @@ internal sealed class EmailAnalysisExecutor : Executor<ChatMessage, AnalysisResu
     }
 }
 
-/// <summary>
-/// Represents the response from the email assistant.
-/// </summary>
+// Structured response from the email assistant agent.
 public sealed class EmailResponse
 {
     [JsonPropertyName("response")]
     public string Response { get; set; } = string.Empty;
 }
 
-/// <summary>
-/// Executor that assists with email responses using an AI agent.
-/// </summary>
+// Executor: drafts a professional reply for non-spam emails.
 internal sealed class EmailAssistantExecutor : Executor<AnalysisResult, EmailResponse>
 {
     private readonly AIAgent _emailAssistantAgent;
 
-    /// <summary>
-    /// Creates a new instance of the <see cref="EmailAssistantExecutor"/> class.
-    /// </summary>
-    /// <param name="emailAssistantAgent">The AI agent used for email assistance</param>
     public EmailAssistantExecutor(AIAgent emailAssistantAgent) : base("EmailAssistantExecutor")
     {
         this._emailAssistantAgent = emailAssistantAgent;
@@ -318,28 +277,18 @@ internal sealed class EmailAssistantExecutor : Executor<AnalysisResult, EmailRes
     }
 }
 
-/// <summary>
-/// Executor that sends emails.
-/// </summary>
+// Terminal executor: simulates sending the drafted reply.
 [YieldsOutput(typeof(string))]
 internal sealed class SendEmailExecutor() : Executor<EmailResponse>("SendEmailExecutor")
 {
-    /// <summary>
-    /// Simulate the sending of an email.
-    /// </summary>
     public override async ValueTask HandleAsync(EmailResponse message, IWorkflowContext context, CancellationToken cancellationToken = default) =>
         await context.YieldOutputAsync($"Email sent: {message.Response}", cancellationToken);
 }
 
-/// <summary>
-/// Executor that handles spam messages.
-/// </summary>
+// Terminal executor: marks the email as spam.
 [YieldsOutput(typeof(string))]
 internal sealed class HandleSpamExecutor() : Executor<AnalysisResult>("HandleSpamExecutor")
 {
-    /// <summary>
-    /// Simulate the handling of a spam message.
-    /// </summary>
     public override async ValueTask HandleAsync(AnalysisResult message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         if (message.spamDecision == SpamDecision.Spam)
@@ -353,15 +302,10 @@ internal sealed class HandleSpamExecutor() : Executor<AnalysisResult>("HandleSpa
     }
 }
 
-/// <summary>
-/// Executor that handles uncertain messages.
-/// </summary>
+// Terminal executor: flags uncertain emails for human review.
 [YieldsOutput(typeof(string))]
 internal sealed class HandleUncertainExecutor() : Executor<AnalysisResult>("HandleUncertainExecutor")
 {
-    /// <summary>
-    /// Simulate the handling of an uncertain spam decision.
-    /// </summary>
     public override async ValueTask HandleAsync(AnalysisResult message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         if (message.spamDecision == SpamDecision.Uncertain)
@@ -376,26 +320,18 @@ internal sealed class HandleUncertainExecutor() : Executor<AnalysisResult>("Hand
     }
 }
 
-/// <summary>
-/// Represents the response from the email summary agent.
-/// </summary>
+// Structured response from the email summary agent.
 public sealed class EmailSummary
 {
     [JsonPropertyName("summary")]
     public string Summary { get; set; } = string.Empty;
 }
 
-/// <summary>
-/// Executor that summarizes emails using an AI agent.
-/// </summary>
+// Executor: summarizes long emails using the AI agent.
 internal sealed class EmailSummaryExecutor : Executor<AnalysisResult, AnalysisResult>
 {
     private readonly AIAgent _emailSummaryAgent;
 
-    /// <summary>
-    /// Creates a new instance of the <see cref="EmailSummaryExecutor"/> class.
-    /// </summary>
-    /// <param name="emailSummaryAgent">The AI agent used for email summarization</param>
     public EmailSummaryExecutor(AIAgent emailSummaryAgent) : base("EmailSummaryExecutor")
     {
         this._emailSummaryAgent = emailSummaryAgent;
@@ -415,15 +351,10 @@ internal sealed class EmailSummaryExecutor : Executor<AnalysisResult, AnalysisRe
     }
 }
 
-/// <summary>
-/// A custom workflow event for database operations.
-/// </summary>
-/// <param name="message">The message associated with the event</param>
+// Custom workflow event for database operations.
 internal sealed class DatabaseEvent(string message) : WorkflowEvent(message) { }
 
-/// <summary>
-/// Executor that handles database access.
-/// </summary>
+// Executor: simulates persisting the analysis result to a database.
 internal sealed class DatabaseAccessExecutor() : Executor<AnalysisResult>("DatabaseAccessExecutor")
 {
     public override async ValueTask HandleAsync(AnalysisResult message, IWorkflowContext context, CancellationToken cancellationToken = default)

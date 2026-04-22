@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use an AI agent with reasoning capabilities.
+// OpenAI Reasoning — Extended thinking with OpenAI
+//
+// This sample shows how to create an AI agent with reasoning
+// capabilities using OpenAI.
 
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;

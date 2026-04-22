@@ -1,8 +1,11 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to use Qdrant with a custom schema to add retrieval augmented generation (RAG) capabilities to an AI agent.
-// While the sample is using Qdrant, it can easily be replaced with any other vector store that implements the Microsoft.Extensions.VectorData abstractions.
-// The TextSearchProvider runs a search against the vector store before each model invocation and injects the results into the model context.
+// Custom Vector Store RAG — RAG with Qdrant and custom schema
+//
+// This sample shows how to use Qdrant with a custom schema for RAG.
+// While using Qdrant, it can be replaced with any vector store that
+// implements Microsoft.Extensions.VectorData abstractions. The provider
+// searches before each model invocation and injects results into context.
 
 using Azure.AI.OpenAI;
 using Azure.Identity;
@@ -19,9 +22,6 @@ var embeddingDeploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_E
 var afOverviewUrl = "https://raw.githubusercontent.com/MicrosoftDocs/semantic-kernel-docs/refs/heads/main/agent-framework/overview/index.md";
 var afMigrationUrl = "https://raw.githubusercontent.com/MicrosoftDocs/semantic-kernel-docs/refs/heads/main/agent-framework/migration-guide/from-semantic-kernel/index.md";
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AzureOpenAIClient azureOpenAIClient = new(
     new Uri(endpoint),
     new DefaultAzureCredential());

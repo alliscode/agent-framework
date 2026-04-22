@@ -1,7 +1,12 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// Simplest possible agent evaluation: create a Foundry agent, run it against
-// test questions, and use Foundry quality evaluators to score the responses.
+// Simple Agent Evaluation — Score responses with Foundry quality evaluators
+//
+// Demonstrates the simplest evaluation workflow:
+// 1. Create an agent
+// 2. Run it against test queries with Foundry quality evaluators (relevance, coherence)
+// 3. Print scores — use in CI to catch regressions
+//
 // For custom domain-specific checks, see the Evaluation_CustomEvals sample.
 
 using Azure.AI.Projects;
@@ -10,12 +15,10 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI.Evaluation;
 using FoundryEvals = Microsoft.Agents.AI.Foundry.FoundryEvals;
 
+// --- Configuration ---
 string endpoint = Environment.GetEnvironmentVariable("AZURE_AI_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("AZURE_AI_PROJECT_ENDPOINT is not set.");
 string deploymentName = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIProjectClient projectClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
 AIAgent agent = projectClient.AsAIAgent(

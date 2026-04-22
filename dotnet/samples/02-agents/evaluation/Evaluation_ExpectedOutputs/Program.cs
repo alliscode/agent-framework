@@ -1,6 +1,11 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
-// This sample demonstrates evaluating agent responses against expected outputs.
+// Evaluate with Expected Outputs — Ground-truth comparison
+//
+// Demonstrates evaluating agent responses against expected outputs:
+// 1. Provide expected outputs alongside queries
+// 2. Use built-in checks (ContainsExpected, NonEmpty) for verification
+// 3. Compare agent responses to known-correct answers
 
 using Azure.AI.Projects;
 using Azure.Identity;

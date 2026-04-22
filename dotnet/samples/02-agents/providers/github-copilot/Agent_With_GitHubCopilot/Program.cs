@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create a GitHub Copilot agent with shell command permissions.
+// GitHub Copilot — Agent using GitHub Copilot as backend
+//
+// This sample shows how to create an AI agent using GitHub Copilot
+// as the backend provider.
 
 using GitHub.Copilot.SDK;
 using Microsoft.Agents.AI;

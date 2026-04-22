@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to use the Computer Use tool with AIProjectClient.AsAIAgent(...).
+// Computer Use — Interact with a virtual desktop
+//
+// This sample shows how to use the Computer Use tool with
+// AIProjectClient.AsAIAgent(...).
 
 using Azure.AI.Projects;
 using Azure.Identity;

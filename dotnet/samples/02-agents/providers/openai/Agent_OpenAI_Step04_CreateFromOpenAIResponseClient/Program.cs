@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample demonstrates how to create OpenAIResponseClientAgent directly from an ResponsesClient instance.
+// OpenAI from Response Client — Create agent from OpenAI Response client
+//
+// This sample shows how to create an AI agent from an OpenAI
+// Response client instance.
 
 using OpenAI;
 using OpenAI.Responses;

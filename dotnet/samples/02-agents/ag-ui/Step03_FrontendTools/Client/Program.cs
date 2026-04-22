@@ -1,5 +1,10 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// AG-UI Frontend Tools — Client with frontend tool execution
+//
+// This sample shows how to execute tools on the client side when
+// requested by the AG-UI server.
+
 using System.ComponentModel;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.AGUI;

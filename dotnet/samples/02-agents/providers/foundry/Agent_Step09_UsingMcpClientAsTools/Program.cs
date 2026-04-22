@@ -1,7 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
+// MCP Client Tools — Connect to an MCP server and use its tools
+//
 // This sample shows how to use MCP client tools with an agent.
-// It connects to the Microsoft Learn MCP server via HTTP and uses its tools.
+// It connects to the Microsoft Learn MCP server via HTTP.
 
 using Azure.AI.Projects;
 using Azure.Identity;
@@ -27,9 +29,6 @@ Console.WriteLine($"MCP tools available: {string.Join(", ", mcpTools.Select(t =>
 
 List<AITool> agentTools = [.. mcpTools.Cast<AITool>()];
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIProjectClient aiProjectClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
 AIAgent agent = aiProjectClient.AsAIAgent(deploymentName,

@@ -1,36 +1,32 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Checkpoint and Resume — Save and restore workflow state
+//
+// This sample shows how to checkpoint a long-running workflow and resume from
+// a saved point. Key concepts:
+// - Super Steps: A workflow executes in stages. Each super step runs one or more
+//   executors and completes when all finish.
+// - Checkpoints: Automatically saved at the end of each super step when a
+//   checkpoint manager is provided.
+// - Resume: Restore a checkpoint and continue execution from that saved state.
+//
+// Prerequisites:
+// - No external services required.
+
 using Microsoft.Agents.AI.Workflows;
 
 namespace WorkflowCheckpointAndResumeSample;
 
-/// <summary>
-/// This sample introduces the concepts of check points and shows how to save and restore
-/// the state of a workflow using checkpoints.
-/// This sample demonstrates checkpoints, which allow you to save and restore a workflow's state.
-/// Key concepts:
-/// - Super Steps: A workflow executes in stages called "super steps". Each super step runs
-///   one or more executors and completes when all those executors finish their work.
-/// - Checkpoints: The system automatically saves the workflow's state at the end of each
-///   super step. You can use these checkpoints to resume the workflow from any saved point.
-/// - Resume: If needed, you can restore a checkpoint and continue execution from that state.
-/// </summary>
-/// <remarks>
-/// Pre-requisites:
-/// - Foundational samples should be completed first.
-/// </remarks>
 public static class Program
 {
     private static async Task Main()
     {
-        // Create the workflow
+        // Step 1: Create the workflow and checkpoint manager
         var workflow = WorkflowFactory.BuildWorkflow();
-
-        // Create checkpoint manager
         var checkpointManager = CheckpointManager.Default;
         var checkpoints = new List<CheckpointInfo>();
 
-        // Execute the workflow and save checkpoints
+        // Step 2: Execute the workflow and collect checkpoints
         await using StreamingRun checkpointedRun = await InProcessExecution.RunStreamingAsync(workflow, NumberSignal.Init, checkpointManager);
         await foreach (WorkflowEvent evt in checkpointedRun.WatchStreamAsync())
         {
@@ -78,7 +74,7 @@ public static class Program
         }
         Console.WriteLine($"Number of checkpoints created: {checkpoints.Count}");
 
-        // Restoring from a checkpoint and resuming execution
+        // Step 3: Restore from a checkpoint and resume execution
         const int CheckpointIndex = 5;
         Console.WriteLine($"\n\nRestoring from the {CheckpointIndex + 1}th checkpoint.");
         CheckpointInfo savedCheckpoint = checkpoints[CheckpointIndex];

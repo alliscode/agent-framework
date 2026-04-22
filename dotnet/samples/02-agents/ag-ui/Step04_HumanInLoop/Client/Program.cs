@@ -1,5 +1,10 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// AG-UI Human in the Loop — Client handling approval requests
+//
+// This sample shows how to handle human-in-the-loop approval
+// requests from an AG-UI server.
+
 using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.AGUI;

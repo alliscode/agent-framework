@@ -1,12 +1,13 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample demonstrates how the ChatClientAgent persists chat history after each individual
-// call to the AI service, using the RequirePerServiceCallChatHistoryPersistence option.
+// In-Function Loop Checkpointing — Persist chat history per service call
+//
+// This sample demonstrates how the ChatClientAgent persists chat history after
+// each individual call to the AI service, using RequirePerServiceCallChatHistoryPersistence.
 // When an agent uses tools, FunctionInvokingChatClient may loop multiple times
-// (service call → tool execution → service call), and intermediate messages (tool calls and
-// results) are persisted after each service call. This allows you to inspect or recover them
-// even if the process is interrupted mid-loop, but may also result in chat history that is not
-// yet finalized (e.g., tool calls without results) being persisted, which may be undesirable in some cases.
+// (service call → tool execution → service call), and intermediate messages are
+// persisted after each service call. This lets you inspect or recover them even if
+// the process is interrupted mid-loop.
 //
 // To use end-of-run persistence instead (atomic run semantics), remove the
 // RequirePerServiceCallChatHistoryPersistence = true setting (or set it to false). End-of-run
@@ -26,9 +27,6 @@ var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? th
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 var store = Environment.GetEnvironmentVariable("AZURE_OPENAI_RESPONSES_STORE") ?? "false";
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AzureOpenAIClient openAIClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
 // Define multiple tools so the model makes several tool calls in a single run.

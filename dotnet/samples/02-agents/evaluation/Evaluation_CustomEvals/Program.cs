@@ -1,19 +1,21 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample demonstrates writing custom evaluation functions for domain-specific
-// checks. Custom evaluators run locally — no cloud evaluator service needed.
+// Custom Evaluation Checks — Write domain-specific evaluators
+//
+// This sample demonstrates writing custom evaluation functions for
+// domain-specific checks. Custom evaluators run locally — no cloud
+// evaluator service needed.
+//
 // For LLM-based quality scoring (relevance, coherence), see Evaluation_SimpleEval.
 
 using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 
+// --- Configuration ---
 string endpoint = Environment.GetEnvironmentVariable("AZURE_AI_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("AZURE_AI_PROJECT_ENDPOINT is not set.");
 string deploymentName = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIProjectClient projectClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
 AIAgent agent = projectClient.AsAIAgent(

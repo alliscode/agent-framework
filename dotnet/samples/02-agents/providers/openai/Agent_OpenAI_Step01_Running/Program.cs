@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use a simple AI agent with OpenAI as the backend.
+// Running with OpenAI — Basic agent using OpenAI
+//
+// This sample shows how to create and run a simple AI agent using
+// OpenAI as the backend provider.
 
 using System.ClientModel;
 using Microsoft.Agents.AI;

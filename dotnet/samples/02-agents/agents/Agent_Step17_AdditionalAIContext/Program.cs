@@ -1,9 +1,12 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to inject additional AI context into a ChatClientAgent using custom AIContextProvider components that are attached to the agent.
-// Multiple providers can be attached to an agent, and they will be called in sequence, each receiving the accumulated context from the previous one.
-// This mechanism can be used for various purposes, such as injecting RAG search results or memories into the agent's context.
-// Also note that Agent Framework already provides built-in AIContextProviders for many of these scenarios.
+// Additional AI Context — Inject context via custom AIContextProviders
+//
+// This sample shows how to inject additional AI context into a ChatClientAgent
+// using custom AIContextProvider components. Multiple providers can be attached
+// and are called in sequence, each receiving accumulated context from the previous.
+// This mechanism is useful for injecting RAG results, memories, or other context.
+// Agent Framework also provides built-in AIContextProviders for many scenarios.
 
 #pragma warning disable CA1869 // Cache and reuse 'JsonSerializerOptions' instances
 
@@ -33,9 +36,6 @@ Func<Task<string[]>> loadNextThreeCalendarEvents = async () =>
 };
 
 // Create an agent with an AI context provider attached that aggregates two other providers:
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIAgent agent = new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())

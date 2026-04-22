@@ -1,5 +1,10 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// AG-UI Getting Started — Client connecting to an AG-UI server
+//
+// This sample shows how to connect to an AG-UI server and interact
+// with the agent.
+
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.AGUI;
 using Microsoft.Extensions.AI;

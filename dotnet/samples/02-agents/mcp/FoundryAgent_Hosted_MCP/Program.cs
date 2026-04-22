@@ -1,8 +1,12 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use a simple AI agent with Microsoft Foundry Agents as the backend, that uses a Hosted MCP Tool.
-// In this case the Microsoft Foundry Agents service will invoke any MCP tools as required. MCP tools are not invoked by the Agent Framework.
-// The sample first shows how to use MCP tools with auto approval, and then how to set up a tool that requires approval before it can be invoked and how to approve such a tool.
+// Foundry Agent with Hosted MCP Tools — Server-side MCP tool execution
+//
+// This sample shows how to use Hosted MCP Tools with Microsoft Foundry Agents.
+// The Foundry service invokes MCP tools server-side — the Agent Framework does
+// not call them directly. Two modes are demonstrated:
+// 1. Auto-approval — tools execute without user confirmation
+// 2. Required approval — human-in-the-loop approval before each tool call
 
 using Azure.AI.Projects;
 using Azure.AI.Projects.Agents;
@@ -11,17 +15,13 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OpenAI.Responses;
 
+// --- Configuration ---
 var endpoint = Environment.GetEnvironmentVariable("AZURE_AI_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("AZURE_AI_PROJECT_ENDPOINT is not set.");
 var model = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
-// Get a client to create/retrieve server side agents with.
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 var aiProjectClient = new AIProjectClient(new Uri(endpoint), new DefaultAzureCredential());
 
-// **** MCP Tool with Auto Approval ****
-// *************************************
+// --- 1. MCP Tool with Auto Approval ---
 
 // Create an MCP tool definition that the agent can use.
 // In this case we allow the tool to always be called without approval.
@@ -49,8 +49,7 @@ Console.WriteLine(await agent.RunAsync("Please summarize the Azure AI Agent docu
 // Cleanup for sample purposes.
 aiProjectClient.AgentAdministrationClient.DeleteAgent(agent.Name);
 
-// **** MCP Tool with Approval Required ****
-// *****************************************
+// --- 2. MCP Tool with Approval Required ---
 
 // Create an MCP tool definition that the agent can use.
 // In this case we require approval before the tool can be called.

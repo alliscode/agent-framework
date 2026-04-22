@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use a simple AI agent with OpenAI Responses as the backend.
+// Agent with OpenAI Responses — Quick-start with Responses API
+//
+// This sample shows how to create a simple AI agent using
+// the OpenAI Responses API.
 
 using Microsoft.Agents.AI;
 using OpenAI;

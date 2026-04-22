@@ -1,12 +1,14 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample demonstrates how to use a CompactionProvider with a compaction pipeline
-// as an AIContextProvider for an agent's in-run context management. The pipeline chains multiple
-// compaction strategies from gentle to aggressive:
-//   1. ToolResultCompactionStrategy - Collapses old tool-call groups into concise summaries
-//   2. SummarizationCompactionStrategy - LLM-compresses older conversation spans
-//   3. SlidingWindowCompactionStrategy - Keeps only the most recent N user turns
-//   4. TruncationCompactionStrategy - Emergency token-budget backstop
+// Compaction Pipeline — Progressive context management strategies
+//
+// This sample demonstrates how to use a CompactionProvider with a compaction
+// pipeline as an AIContextProvider for in-run context management. The pipeline
+// chains multiple compaction strategies from gentle to aggressive:
+//   1. ToolResultCompactionStrategy — Collapses old tool-call groups into summaries
+//   2. SummarizationCompactionStrategy — LLM-compresses older conversation spans
+//   3. SlidingWindowCompactionStrategy — Keeps only the most recent N user turns
+//   4. TruncationCompactionStrategy — Emergency token-budget backstop
 
 using System.ComponentModel;
 using Azure.AI.OpenAI;
@@ -18,9 +20,6 @@ using Microsoft.Extensions.AI;
 var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AzureOpenAIClient openAIClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
 // Create a chat client for the agent and a separate one for the summarization strategy.

@@ -1,8 +1,11 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
 #pragma warning disable CA1869 // Cache and reuse 'JsonSerializerOptions' instances
 
-// This sample shows how to create and use a simple AI agent with a conversation that can be persisted to disk.
+// Persisted Conversations — Save and restore chat history to disk
+//
+// This sample shows how to persist an agent conversation to disk
+// so it can be resumed across process restarts.
 
 using System.Text.Json;
 using Azure.AI.OpenAI;
@@ -14,9 +17,6 @@ var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? th
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
 // Create the agent
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIAgent agent = new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())

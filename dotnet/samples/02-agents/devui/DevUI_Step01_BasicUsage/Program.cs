@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample demonstrates basic usage of the DevUI in an ASP.NET Core application with AI agents.
+// DevUI Basic Usage — Interactive debug UI for AI agents
+//
+// This sample demonstrates basic usage of the DevUI in an ASP.NET Core
+// application with AI agents.
 
 using System.ComponentModel;
 using Azure.AI.OpenAI;
@@ -46,9 +49,6 @@ internal static class Program
         var endpoint = builder.Configuration["AZURE_OPENAI_ENDPOINT"] ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
         var deploymentName = builder.Configuration["AZURE_OPENAI_DEPLOYMENT_NAME"] ?? "gpt-5.4-mini";
 
-        // WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-        // In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-        // latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
         var chatClient = new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential())
             .GetChatClient(deploymentName)
             .AsIChatClient();

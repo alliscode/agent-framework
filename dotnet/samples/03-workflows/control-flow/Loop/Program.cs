@@ -1,37 +1,36 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Simple Loop — Number guessing game with feedback loop
+//
+// A number guessing game using a workflow with looping behavior. Two executors
+// are connected in a feedback loop:
+// 1. GuessNumberExecutor makes a guess (binary search).
+// 2. JudgeExecutor evaluates the guess and provides Above/Below/Match feedback.
+// The workflow continues until the correct number is guessed.
+//
+// Prerequisites:
+// - No external services required.
+
 using Microsoft.Agents.AI.Workflows;
 
 namespace WorkflowLoopSample;
 
-/// <summary>
-/// This sample demonstrates a simple number guessing game using a workflow with looping behavior.
-///
-/// The workflow consists of two executors that are connected in a feedback loop:
-/// 1. GuessNumberExecutor: Makes a guess based on the current known bounds.
-/// 2. JudgeExecutor: Evaluates the guess and provides feedback.
-/// The workflow continues until the correct number is guessed.
-/// </summary>
-/// <remarks>
-/// Pre-requisites:
-/// - Foundational samples should be completed first.
-/// </remarks>
 public static class Program
 {
     private static async Task Main()
     {
-        // Create the executors
+        // Step 1: Create the executors
         GuessNumberExecutor guessNumberExecutor = new("GuessNumber", 1, 100);
         JudgeExecutor judgeExecutor = new("Judge", 42);
 
-        // Build the workflow by connecting executors in a loop
+        // Step 2: Build the workflow — connect executors in a feedback loop
         var workflow = new WorkflowBuilder(guessNumberExecutor)
             .AddEdge(guessNumberExecutor, judgeExecutor)
             .AddEdge(judgeExecutor, guessNumberExecutor)
             .WithOutputFrom(judgeExecutor)
             .Build();
 
-        // Execute the workflow
+        // Step 3: Execute the workflow
         await using StreamingRun run = await InProcessExecution.RunStreamingAsync(workflow, NumberSignal.Init);
         await foreach (WorkflowEvent evt in run.WatchStreamAsync())
         {
@@ -55,9 +54,7 @@ public static class Program
     }
 }
 
-/// <summary>
-/// Signals used for communication between GuessNumberExecutor and JudgeExecutor.
-/// </summary>
+// Signals used for communication between GuessNumberExecutor and JudgeExecutor.
 internal enum NumberSignal
 {
     Init,
@@ -65,28 +62,13 @@ internal enum NumberSignal
     Below,
 }
 
-/// <summary>
-/// Executor that makes a guess based on the current bounds.
-/// </summary>
+// Executor: makes a binary-search guess based on the current known bounds.
 [SendsMessage(typeof(int))]
 internal sealed class GuessNumberExecutor : Executor<NumberSignal>
 {
-    /// <summary>
-    /// The lower bound of the guessing range.
-    /// </summary>
     public int LowerBound { get; private set; }
-
-    /// <summary>
-    /// The upper bound of the guessing range.
-    /// </summary>
     public int UpperBound { get; private set; }
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="GuessNumberExecutor"/> class.
-    /// </summary>
-    /// <param name="id">A unique identifier for the executor.</param>
-    /// <param name="lowerBound">The initial lower bound of the guessing range.</param>
-    /// <param name="upperBound">The initial upper bound of the guessing range.</param>
     public GuessNumberExecutor(string id, int lowerBound, int upperBound) : base(id)
     {
         this.LowerBound = lowerBound;
@@ -114,9 +96,7 @@ internal sealed class GuessNumberExecutor : Executor<NumberSignal>
     }
 }
 
-/// <summary>
-/// Executor that judges the guess and provides feedback.
-/// </summary>
+// Executor: judges the guess and provides feedback or yields the final result.
 [SendsMessage(typeof(NumberSignal))]
 [YieldsOutput(typeof(string))]
 internal sealed class JudgeExecutor : Executor<int>
@@ -124,11 +104,6 @@ internal sealed class JudgeExecutor : Executor<int>
     private readonly int _targetNumber;
     private int _tries;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="JudgeExecutor"/> class.
-    /// </summary>
-    /// <param name="id">A unique identifier for the executor.</param>
-    /// <param name="targetNumber">The number to be guessed.</param>
     public JudgeExecutor(string id, int targetNumber) : base(id)
     {
         this._targetNumber = targetNumber;

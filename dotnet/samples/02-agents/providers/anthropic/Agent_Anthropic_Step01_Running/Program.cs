@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use a simple AI agent with Anthropic as the backend.
+// Running with Anthropic — Basic agent using Anthropic Claude
+//
+// This sample shows how to create and run a simple AI agent using
+// Anthropic as the backend provider.
 
 using Anthropic;
 using Anthropic.Core;

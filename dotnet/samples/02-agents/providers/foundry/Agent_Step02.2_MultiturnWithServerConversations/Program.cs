@@ -1,8 +1,10 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
+// Server-Side Conversations — Persist conversations on the Foundry service
+//
 // This sample shows how to use server-side conversations with a FoundryAgent.
-// Server-side conversations persist on the Foundry service and are visible in the Foundry Project UI.
-// Use this when you need conversation history to be stored and accessible server-side.
+// Server-side conversations persist on the Foundry service and are visible
+// in the Foundry Project UI.
 
 using Azure.AI.Extensions.OpenAI;
 using Azure.AI.Projects;
@@ -12,9 +14,6 @@ using Microsoft.Agents.AI;
 string endpoint = Environment.GetEnvironmentVariable("AZURE_AI_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("AZURE_AI_PROJECT_ENDPOINT is not set.");
 string deploymentName = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIProjectClient aiProjectClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
 ChatClientAgent agent = aiProjectClient

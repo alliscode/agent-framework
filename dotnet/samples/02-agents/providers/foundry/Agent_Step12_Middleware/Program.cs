@@ -1,9 +1,11 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows multiple middleware layers working together with a ChatClientAgent:
-// agent run (PII filtering and guardrails),
-// function invocation (logging and result overrides), and human-in-the-loop
-// approval workflows for sensitive function calls.
+// Middleware — Chain multiple middleware layers on an agent
+//
+// This sample shows multiple middleware layers working together:
+// agent run (PII filtering and guardrails), function invocation
+// (logging and result overrides), and human-in-the-loop approval
+// workflows for sensitive function calls.
 
 using System.ComponentModel;
 using System.Text.RegularExpressions;
@@ -23,9 +25,6 @@ static string GetDateTime()
 string endpoint = Environment.GetEnvironmentVariable("AZURE_AI_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("AZURE_AI_PROJECT_ENDPOINT is not set.");
 string deploymentName = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIProjectClient aiProjectClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
 AITool dateTimeTool = AIFunctionFactory.Create(GetDateTime, name: nameof(GetDateTime));

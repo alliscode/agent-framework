@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to use the built in RAG capabilities that the Foundry service provides when using AI Agents provided by Foundry.
+// Foundry Service RAG — Built-in RAG with Microsoft Foundry
+//
+// This sample shows how to use the built-in RAG capabilities that the
+// Foundry service provides when using AI Agents.
 
 using System.ClientModel;
 using Azure.AI.Projects;
@@ -17,9 +20,6 @@ var endpoint = Environment.GetEnvironmentVariable("AZURE_AI_PROJECT_ENDPOINT") ?
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
 // Create an AI Project client and get an OpenAI client that works with the foundry service.
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIProjectClient aiProjectClient = new(
     new Uri(endpoint),
     new DefaultAzureCredential());

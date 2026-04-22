@@ -1,8 +1,10 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample demonstrates how to use the Memory Search Tool with AI Agents.
-// The Memory Search Tool enables agents to recall information from previous conversations,
-// supporting user profile persistence and chat summaries across sessions.
+// Memory Search — Recall information from previous conversations
+//
+// This sample demonstrates how to use the Memory Search Tool with
+// AI Agents. It enables agents to recall information from previous
+// conversations, supporting user profile persistence and chat summaries.
 
 using Azure.AI.Extensions.OpenAI;
 using Azure.AI.Projects;
@@ -30,9 +32,6 @@ const string AgentName = "MemorySearchAgent";
 string userScope = $"user_{Environment.MachineName}";
 
 MemorySearchPreviewTool memorySearchTool = new(memoryStoreName, userScope) { UpdateDelayInSecs = 0 };
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIProjectClient aiProjectClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
 // Create agent using the RAPI path with the MemorySearch tool

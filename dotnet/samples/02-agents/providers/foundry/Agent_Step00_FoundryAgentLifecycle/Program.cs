@@ -1,8 +1,10 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create, use, and clean up a FoundryAgent backed by a server-side
-// versioned agent in Microsoft Foundry. It demonstrates the full lifecycle:
-// create agent version -> wrap as FoundryAgent -> run -> delete.
+// Foundry Agent Lifecycle — Create, use, and clean up a FoundryAgent
+//
+// This sample shows how to create, use, and clean up a FoundryAgent backed
+// by a server-side versioned agent in Microsoft Foundry. It demonstrates
+// the full lifecycle: create agent version -> wrap as FoundryAgent -> run -> delete.
 
 using Azure.AI.Projects;
 using Azure.AI.Projects.Agents;

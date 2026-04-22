@@ -1,8 +1,11 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
 #pragma warning disable CS0618 // Type or member is obsolete - sample uses deprecated PersistentAgentsClientExtensions
 
-// This sample shows how to create a Microsoft Foundry Agent with the Deep Research Tool.
+// Deep Research — Foundry Agent with the Deep Research Tool
+//
+// This sample shows how to create a Microsoft Foundry Agent with the
+// Deep Research Tool for in-depth analysis.
 
 using Azure.AI.Agents.Persistent;
 using Azure.Identity;
@@ -17,9 +20,6 @@ var bingConnectionId = Environment.GetEnvironmentVariable("AZURE_AI_BING_CONNECT
 PersistentAgentsAdministrationClientOptions persistentAgentsClientOptions = new();
 persistentAgentsClientOptions.Retry.NetworkTimeout = TimeSpan.FromMinutes(20);
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 // Get a client to create/retrieve server side agents with.
 PersistentAgentsClient persistentAgentsClient = new(endpoint, new DefaultAzureCredential(), persistentAgentsClientOptions);
 

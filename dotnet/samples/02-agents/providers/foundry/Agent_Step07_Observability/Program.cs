@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to add OpenTelemetry observability to an agent.
+// Observability — Add OpenTelemetry tracing to an agent
+//
+// This sample shows how to add OpenTelemetry observability
+// to a Foundry-backed AI agent.
 
 using Azure.AI.Projects;
 using Azure.Identity;
@@ -24,9 +27,6 @@ if (!string.IsNullOrWhiteSpace(applicationInsightsConnectionString))
 }
 using var tracerProvider = tracerProviderBuilder.Build();
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIProjectClient aiProjectClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
 AIAgent agent = aiProjectClient

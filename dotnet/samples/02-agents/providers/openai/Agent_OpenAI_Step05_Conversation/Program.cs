@@ -1,9 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample demonstrates how to maintain conversation state using the OpenAIResponseClientAgent
-// and AgentSession. By passing the same session to multiple agent invocations, the agent
-// automatically maintains the conversation history, allowing the AI model to understand
-// context from previous exchanges.
+// OpenAI Conversation — Multi-turn conversations with OpenAI
+//
+// This sample shows how to run multi-turn conversations with
+// an OpenAI-backed AI agent.
 
 using System.ClientModel;
 using System.ClientModel.Primitives;

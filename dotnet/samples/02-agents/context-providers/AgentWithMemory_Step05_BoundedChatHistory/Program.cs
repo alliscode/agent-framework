@@ -1,9 +1,11 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create a bounded chat history provider that keeps a configurable number of
-// recent messages in session state and automatically overflows older messages to a vector store.
-// When the agent is invoked, it searches the vector store for relevant older messages and
-// prepends them as a "memory" context message before the recent session history.
+// Bounded Chat History — Sliding window with vector store overflow
+//
+// This sample shows how to create a bounded chat history provider that keeps
+// a configurable number of recent messages in session state and automatically
+// overflows older messages to a vector store. On invocation, it searches the
+// vector store for relevant older messages and prepends them as context.
 
 using Azure.AI.OpenAI;
 using Azure.Identity;
@@ -18,9 +20,6 @@ var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? th
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 var embeddingDeploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME") ?? "text-embedding-3-large";
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 var credential = new DefaultAzureCredential();
 
 // Create a vector store to store overflow chat messages.

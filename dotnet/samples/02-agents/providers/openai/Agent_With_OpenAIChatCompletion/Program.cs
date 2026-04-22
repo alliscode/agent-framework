@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use a simple AI agent with OpenAI Chat Completion as the backend.
+// Agent with OpenAI Chat Completion — Quick-start with OpenAI
+//
+// This sample shows how to create a simple AI agent using
+// OpenAI Chat Completion as the backend.
 
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;

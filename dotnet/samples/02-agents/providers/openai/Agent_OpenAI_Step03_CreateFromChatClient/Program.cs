@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample demonstrates how to create an AI agent directly from an OpenAI.Chat.ChatClient instance using OpenAIChatClientAgent.
+// OpenAI from Chat Client — Create agent from IChatClient
+//
+// This sample shows how to create an AI agent from an existing
+// IChatClient instance using OpenAI.
 
 using OpenAI;
 using OpenAI.Chat;

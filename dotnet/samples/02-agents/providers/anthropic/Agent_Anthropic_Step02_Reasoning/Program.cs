@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use an AI agent with reasoning capabilities.
+// Anthropic Reasoning — Extended thinking with Claude
+//
+// This sample shows how to create an AI agent with reasoning
+// capabilities using Anthropic's extended thinking feature.
 
 using Anthropic;
 using Anthropic.Core;

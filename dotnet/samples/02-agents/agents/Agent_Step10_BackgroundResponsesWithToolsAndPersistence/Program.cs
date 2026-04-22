@@ -1,8 +1,11 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample demonstrates how to use background responses with ChatClientAgent and Azure OpenAI Responses for long-running operations.
-// It shows polling for completion using continuation tokens, function calling during background operations,
-// and persisting/restoring agent state between polling cycles.
+// Background Responses with Tools — Long-running operations with persistence
+//
+// This sample demonstrates how to use background responses with ChatClientAgent
+// for long-running operations. It shows polling for completion using continuation
+// tokens, function calling during background operations, and persisting/restoring
+// agent state between polling cycles.
 
 #pragma warning disable CA1050 // Declare types in namespaces
 
@@ -19,9 +22,6 @@ var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT
 
 var stateStore = new Dictionary<string, JsonElement?>();
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIAgent agent = new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())

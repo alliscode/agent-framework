@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use a simple AI agent with an existing A2A agent.
+// Agent with A2A — Connect to an existing Agent-to-Agent protocol agent
+//
+// This sample shows how to create and use an AI agent that connects
+// to an existing A2A (Agent-to-Agent) agent.
 
 using A2A;
 using Microsoft.Agents.AI;

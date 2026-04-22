@@ -1,8 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows all the required steps to create a fully custom agent implementation.
-// In this case the agent doesn't use AI at all, and simply parrots back the user input in upper case.
-// You can however, build a fully custom agent that uses AI in any way you want.
+// Custom Implementation — Build your own chat client
+//
+// This sample demonstrates how to implement a custom IChatClient
+// and use it with the Agent Framework.
 
 using System.Runtime.CompilerServices;
 using System.Text.Json;

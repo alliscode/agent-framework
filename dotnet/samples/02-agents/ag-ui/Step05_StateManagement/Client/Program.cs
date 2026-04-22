@@ -1,5 +1,10 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// AG-UI State Management — Client with shared state
+//
+// This sample shows how to manage shared state on the client
+// side when working with an AG-UI server.
+
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Agents.AI;

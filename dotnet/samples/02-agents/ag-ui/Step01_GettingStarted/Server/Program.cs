@@ -1,4 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
+
+// AG-UI Getting Started — Server-side agent with AG-UI protocol
+//
+// This sample shows how to set up an ASP.NET Core server that exposes
+// an AI agent via the AG-UI protocol.
 
 using Azure.AI.OpenAI;
 using Azure.Identity;
@@ -18,9 +23,6 @@ string deploymentName = builder.Configuration["AZURE_OPENAI_DEPLOYMENT_NAME"]
     ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not set.");
 
 // Create the AI agent
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 ChatClient chatClient = new AzureOpenAIClient(
         new Uri(endpoint),
         new DefaultAzureCredential())

@@ -1,32 +1,29 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Human-in-the-Loop Basic — RequestPort for external interaction
+//
+// This sample introduces RequestPort and ExternalRequest to enable human-in-the-loop
+// workflows. A request port acts like an executor: when it receives a message, it
+// emits a RequestInfoEvent to the external world, then waits for a response.
+//
+// The sample implements a number guessing game where the human guesses a target
+// number and the workflow provides Above/Below/Match feedback.
+//
+// Prerequisites:
+// - No external services required.
+
 using Microsoft.Agents.AI.Workflows;
 
 namespace WorkflowHumanInTheLoopBasicSample;
 
-/// <summary>
-/// This sample introduces the concept of RequestPort and ExternalRequest to enable
-/// human-in-the-loop interaction scenarios.
-/// A request port can be used as if it were an executor in the workflow graph. Upon receiving
-/// a message, the request port generates an RequestInfoEvent that gets emitted to the external world.
-/// The external world can then respond to the request by sending an ExternalResponse back to
-/// the workflow.
-/// The sample implements a simple number guessing game where the external user tries to guess
-/// a pre-defined target number. The workflow consists of a single JudgeExecutor that judges
-/// the user's guesses and provides feedback.
-/// </summary>
-/// <remarks>
-/// Pre-requisites:
-/// - Foundational samples should be completed first.
-/// </remarks>
 public static class Program
 {
     private static async Task Main()
     {
-        // Create the workflow
+        // Step 1: Create the workflow
         var workflow = WorkflowFactory.BuildWorkflow();
 
-        // Execute the workflow
+        // Step 2: Execute the workflow and handle human interaction
         await using StreamingRun handle = await InProcessExecution.RunStreamingAsync(workflow, NumberSignal.Init);
         await foreach (WorkflowEvent evt in handle.WatchStreamAsync())
         {

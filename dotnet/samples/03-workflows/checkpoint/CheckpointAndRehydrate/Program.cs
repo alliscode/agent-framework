@@ -1,37 +1,32 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Checkpoint and Rehydrate — Resume a workflow on a fresh instance
+//
+// Similar to CheckpointAndResume, but instead of restoring the same run,
+// this sample rehydrates a completely new workflow instance from a saved
+// checkpoint. This simulates recovery across process restarts.
+//
+// Key concepts:
+// - Super Steps: Workflow executes in stages; checkpoints are saved after each.
+// - Rehydration: Create a new workflow and resume from a saved checkpoint.
+//
+// Prerequisites:
+// - No external services required.
+
 using Microsoft.Agents.AI.Workflows;
 
 namespace WorkflowCheckpointAndRehydrateSample;
 
-/// <summary>
-/// This sample introduces the concepts of check points and shows how to save and restore
-/// the state of a workflow using checkpoints.
-/// This sample demonstrates checkpoints, which allow you to save and restore a workflow's state.
-/// Key concepts:
-/// - Super Steps: A workflow executes in stages called "super steps". Each super step runs
-///   one or more executors and completes when all those executors finish their work.
-/// - Checkpoints: The system automatically saves the workflow's state at the end of each
-///   super step. You can use these checkpoints to resume the workflow from any saved point.
-/// - Rehydration: You can rehydrate a new workflow instance from a saved checkpoint, allowing
-///   you to continue execution from that point.
-/// </summary>
-/// <remarks>
-/// Pre-requisites:
-/// - Foundational samples should be completed first.
-/// </remarks>
 public static class Program
 {
     private static async Task Main()
     {
-        // Create the workflow
+        // Step 1: Create the workflow and checkpoint manager
         var workflow = WorkflowFactory.BuildWorkflow();
-
-        // Create checkpoint manager
         var checkpointManager = CheckpointManager.Default;
         var checkpoints = new List<CheckpointInfo>();
 
-        // Execute the workflow and save checkpoints
+        // Step 2: Execute the workflow and collect checkpoints
         await using StreamingRun checkpointedRun = await InProcessExecution
             .RunStreamingAsync(workflow, NumberSignal.Init, checkpointManager);
 
@@ -81,7 +76,7 @@ public static class Program
         }
         Console.WriteLine($"Number of checkpoints created: {checkpoints.Count}");
 
-        // Rehydrate a new workflow instance from a saved checkpoint and continue execution
+        // Step 3: Rehydrate a new workflow instance from a saved checkpoint
         var newWorkflow = WorkflowFactory.BuildWorkflow();
         const int CheckpointIndex = 5;
         Console.WriteLine($"\n\nHydrating a new workflow instance from the {CheckpointIndex + 1}th checkpoint.");

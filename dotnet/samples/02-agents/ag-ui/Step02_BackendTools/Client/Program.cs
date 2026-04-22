@@ -1,5 +1,10 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// AG-UI Backend Tools — Client calling backend tools
+//
+// This sample shows how to interact with an AG-UI server that
+// exposes backend tools.
+
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.AGUI;
 using Microsoft.Extensions.AI;

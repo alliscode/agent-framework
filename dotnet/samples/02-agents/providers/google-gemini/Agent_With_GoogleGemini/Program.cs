@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use an AI agent with Google Gemini
+// Google Gemini — Agent using Google Gemini as backend
+//
+// This sample shows how to create an AI agent using Google Gemini
+// as the backend provider.
 
 using Google.GenAI;
 using Microsoft.Agents.AI;

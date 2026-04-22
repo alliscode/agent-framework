@@ -1,13 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to use plugins with an AI agent. Plugin classes can
-// depend on other services that need to be injected. In this sample, the
-// AgentPlugin class uses the WeatherProvider and CurrentTimeProvider classes
-// to get weather and current time information. Both services are registered
-// in the service collection and injected into the plugin.
-// Plugin classes may have many methods, but only some are intended to be used
-// as AI functions. The AsAITools method of the plugin class shows how to specify
-// which methods should be exposed to the AI agent.
+// Plugins — Use plugin classes with dependency injection
+//
+// This sample shows how to use plugins with an AI agent. Plugin classes
+// depend on injected services like WeatherProvider and CurrentTimeProvider.
 
 using Azure.AI.Projects;
 using Azure.Identity;
@@ -30,9 +26,6 @@ services.AddSingleton<AgentPlugin>(); // The plugin depends on WeatherProvider a
 
 IServiceProvider serviceProvider = services.BuildServiceProvider();
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIProjectClient aiProjectClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
 // Create a ChatClientAgent with the options-based constructor to pass services.

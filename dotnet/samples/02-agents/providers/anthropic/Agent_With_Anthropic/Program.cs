@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use an AI agent with Anthropic as the backend.
+// Agent with Anthropic — Quick-start using Anthropic Claude
+//
+// This sample shows how to create a simple AI agent using
+// Anthropic Claude as the backend provider.
 
 using Anthropic;
 using Anthropic.Foundry;
@@ -17,9 +20,6 @@ string? apiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
 const string JokerInstructions = "You are good at telling jokes.";
 const string JokerName = "JokerAgent";
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 using AnthropicClient client = (resource is null)
     ? new AnthropicClient() { ApiKey = apiKey ?? throw new InvalidOperationException("ANTHROPIC_API_KEY is required when no ANTHROPIC_RESOURCE is provided") }  // If no resource is provided, use Anthropic public API
     : (apiKey is not null)

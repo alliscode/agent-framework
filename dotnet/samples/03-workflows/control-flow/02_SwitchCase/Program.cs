@@ -1,5 +1,19 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Switch-Case Routing — Three-way email classification
+//
+// Building on the edge condition sample, this workflow adds a third decision path
+// for ambiguous cases where spam detection is uncertain. Emails are routed three ways:
+// 1. Not Spam → Email Assistant → Send Email
+// 2. Spam → Handle Spam Executor
+// 3. Uncertain → Handle Uncertain Executor (default case)
+//
+// The switch-case pattern provides cleaner syntax than multiple individual edge
+// conditions, especially for workflows with many possible outcomes.
+//
+// Prerequisites:
+// - An Azure OpenAI chat completion deployment that supports structured outputs.
+
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.AI.OpenAI;
@@ -10,48 +24,26 @@ using Microsoft.Extensions.AI;
 
 namespace WorkflowSwitchCaseSample;
 
-/// <summary>
-/// This sample introduces conditional routing using switch-case logic for complex decision trees.
-///
-/// Building on the previous email automation examples, this workflow adds a third decision path
-/// to handle ambiguous cases where spam detection is uncertain. Now the workflow can route emails
-/// three ways based on the detection result:
-///
-/// 1. Not Spam → Email Assistant → Send Email
-/// 2. Spam → Handle Spam Executor
-/// 3. Uncertain → Handle Uncertain Executor (default case)
-///
-/// The switch-case pattern provides cleaner syntax than multiple individual edge conditions,
-/// especially when dealing with multiple possible outcomes. This approach scales well for
-/// workflows that need to handle many different scenarios.
-/// </summary>
-/// <remarks>
-/// Pre-requisites:
-/// - Foundational samples should be completed first.
-/// - Shared state is used in this sample to persist email data between executors.
-/// - An Azure OpenAI chat completion deployment that supports structured outputs must be configured.
-/// </remarks>
 public static class Program
 {
     private static async Task Main()
     {
-        // Set up the Azure OpenAI client
+        // Step 1: Set up the Azure OpenAI client
         var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
         var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
         var chatClient = new AzureOpenAIClient(new Uri(endpoint), new AzureCliCredential()).GetChatClient(deploymentName).AsIChatClient();
 
-        // Create agents
+        // Step 2: Create agents and executors
         AIAgent spamDetectionAgent = GetSpamDetectionAgent(chatClient);
         AIAgent emailAssistantAgent = GetEmailAssistantAgent(chatClient);
 
-        // Create executors
         var spamDetectionExecutor = new SpamDetectionExecutor(spamDetectionAgent);
         var emailAssistantExecutor = new EmailAssistantExecutor(emailAssistantAgent);
         var sendEmailExecutor = new SendEmailExecutor();
         var handleSpamExecutor = new HandleSpamExecutor();
         var handleUncertainExecutor = new HandleUncertainExecutor();
 
-        // Build the workflow by adding executors and connecting them
+        // Step 3: Build the workflow with switch-case routing
         WorkflowBuilder builder = new(spamDetectionExecutor);
         builder.AddSwitch(spamDetectionExecutor, switchBuilder =>
             switchBuilder
@@ -67,16 +59,15 @@ public static class Program
                 handleUncertainExecutor
             )
         )
-        // After the email assistant writes a response, it will be sent to the send email executor
         .AddEdge(emailAssistantExecutor, sendEmailExecutor)
         .WithOutputFrom(handleSpamExecutor, sendEmailExecutor, handleUncertainExecutor);
 
         var workflow = builder.Build();
 
-        // Read a email from a text file
+        // Step 4: Read the email input
         string email = Resources.Read("ambiguous_email.txt");
 
-        // Execute the workflow
+        // Step 5: Execute the workflow
         await using StreamingRun run = await InProcessExecution.RunStreamingAsync(workflow, new ChatMessage(ChatRole.User, email));
         await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
         await foreach (WorkflowEvent evt in run.WatchStreamAsync())
@@ -100,17 +91,10 @@ public static class Program
         }
     }
 
-    /// <summary>
-    /// Creates a condition for routing messages based on the expected spam detection result.
-    /// </summary>
-    /// <param name="expectedDecision">The expected spam detection decision</param>
-    /// <returns>A function that evaluates whether a message meets the expected result</returns>
+    /// <summary>Creates a routing condition matching the expected spam decision.</summary>
     private static Func<object?, bool> GetCondition(SpamDecision expectedDecision) => detectionResult => detectionResult is DetectionResult result && result.spamDecision == expectedDecision;
 
-    /// <summary>
-    /// Creates a spam detection agent.
-    /// </summary>
-    /// <returns>A ChatClientAgent configured for spam detection</returns>
+    /// <summary>Creates a spam detection agent.</summary>
     private static ChatClientAgent GetSpamDetectionAgent(IChatClient chatClient) =>
         new(chatClient, new ChatClientAgentOptions()
         {
@@ -121,10 +105,7 @@ public static class Program
             }
         });
 
-    /// <summary>
-    /// Creates an email assistant agent.
-    /// </summary>
-    /// <returns>A ChatClientAgent configured for email assistance</returns>
+    /// <summary>Creates an email assistant agent.</summary>
     private static ChatClientAgent GetEmailAssistantAgent(IChatClient chatClient) =>
         new(chatClient, new ChatClientAgentOptions()
         {
@@ -136,17 +117,13 @@ public static class Program
         });
 }
 
-/// <summary>
-/// Constants for shared email state.
-/// </summary>
+// Shared state scope for email data.
 internal static class EmailStateConstants
 {
     public const string EmailStateScope = "EmailState";
 }
 
-/// <summary>
-/// Represents the possible decisions for spam detection.
-/// </summary>
+// Three-way spam decision enum.
 public enum SpamDecision
 {
     NotSpam,
@@ -154,9 +131,7 @@ public enum SpamDecision
     Uncertain
 }
 
-/// <summary>
-/// Represents the result of spam detection.
-/// </summary>
+// Structured result from the spam detection agent.
 public sealed class DetectionResult
 {
     [JsonPropertyName("spam_decision")]
@@ -170,9 +145,7 @@ public sealed class DetectionResult
     public string EmailId { get; set; } = string.Empty;
 }
 
-/// <summary>
-/// Represents an email.
-/// </summary>
+// In-memory record of the email content stored in shared state.
 internal sealed class Email
 {
     [JsonPropertyName("email_id")]
@@ -182,17 +155,11 @@ internal sealed class Email
     public string EmailContent { get; set; } = string.Empty;
 }
 
-/// <summary>
-/// Executor that detects spam using an AI agent.
-/// </summary>
+// Executor: invokes the spam detection agent and stores email in shared state.
 internal sealed class SpamDetectionExecutor : Executor<ChatMessage, DetectionResult>
 {
     private readonly AIAgent _spamDetectionAgent;
 
-    /// <summary>
-    /// Creates a new instance of the <see cref="SpamDetectionExecutor"/> class.
-    /// </summary>
-    /// <param name="spamDetectionAgent">The AI agent used for spam detection</param>
     public SpamDetectionExecutor(AIAgent spamDetectionAgent) : base("SpamDetectionExecutor")
     {
         this._spamDetectionAgent = spamDetectionAgent;
@@ -218,26 +185,18 @@ internal sealed class SpamDetectionExecutor : Executor<ChatMessage, DetectionRes
     }
 }
 
-/// <summary>
-/// Represents the response from the email assistant.
-/// </summary>
+// Structured response from the email assistant agent.
 public sealed class EmailResponse
 {
     [JsonPropertyName("response")]
     public string Response { get; set; } = string.Empty;
 }
 
-/// <summary>
-/// Executor that assists with email responses using an AI agent.
-/// </summary>
+// Executor: drafts a professional reply for non-spam emails.
 internal sealed class EmailAssistantExecutor : Executor<DetectionResult, EmailResponse>
 {
     private readonly AIAgent _emailAssistantAgent;
 
-    /// <summary>
-    /// Creates a new instance of the <see cref="EmailAssistantExecutor"/> class.
-    /// </summary>
-    /// <param name="emailAssistantAgent">The AI agent used for email assistance</param>
     public EmailAssistantExecutor(AIAgent emailAssistantAgent) : base("EmailAssistantExecutor")
     {
         this._emailAssistantAgent = emailAssistantAgent;
@@ -261,28 +220,18 @@ internal sealed class EmailAssistantExecutor : Executor<DetectionResult, EmailRe
     }
 }
 
-/// <summary>
-/// Executor that sends emails.
-/// </summary>
+// Terminal executor: simulates sending the drafted reply.
 [YieldsOutput(typeof(string))]
 internal sealed class SendEmailExecutor() : Executor<EmailResponse>("SendEmailExecutor")
 {
-    /// <summary>
-    /// Simulate the sending of an email.
-    /// </summary>
     public override async ValueTask HandleAsync(EmailResponse message, IWorkflowContext context, CancellationToken cancellationToken = default) =>
         await context.YieldOutputAsync($"Email sent: {message.Response}", cancellationToken);
 }
 
-/// <summary>
-/// Executor that handles spam messages.
-/// </summary>
+// Terminal executor: marks the email as spam.
 [YieldsOutput(typeof(string))]
 internal sealed class HandleSpamExecutor() : Executor<DetectionResult>("HandleSpamExecutor")
 {
-    /// <summary>
-    /// Simulate the handling of a spam message.
-    /// </summary>
     public override async ValueTask HandleAsync(DetectionResult message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         if (message.spamDecision == SpamDecision.Spam)
@@ -296,15 +245,10 @@ internal sealed class HandleSpamExecutor() : Executor<DetectionResult>("HandleSp
     }
 }
 
-/// <summary>
-/// Executor that handles uncertain emails.
-/// </summary>
+// Terminal executor: flags uncertain emails for human review.
 [YieldsOutput(typeof(string))]
 internal sealed class HandleUncertainExecutor() : Executor<DetectionResult>("HandleUncertainExecutor")
 {
-    /// <summary>
-    /// Simulate the handling of an uncertain spam decision.
-    /// </summary>
     public override async ValueTask HandleAsync(DetectionResult message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         if (message.spamDecision == SpamDecision.Uncertain)

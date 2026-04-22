@@ -1,11 +1,13 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to use the FoundryMemoryProvider to persist and recall memories for an agent.
-// The sample stores conversation messages in a Microsoft Foundry memory store and retrieves relevant
-// memories for subsequent invocations, even across new sessions.
+// Memory with Foundry — Persist and recall memories via Microsoft Foundry
 //
-// Note: Memory extraction in Microsoft Foundry is asynchronous and takes time. This sample demonstrates
-// a simple polling approach to wait for memory updates to complete before querying.
+// This sample shows how to use the FoundryMemoryProvider to persist and recall
+// memories for an agent. It stores conversation messages in a Microsoft Foundry
+// memory store and retrieves relevant memories across sessions.
+//
+// Note: Memory extraction in Foundry is asynchronous. This sample demonstrates
+// a simple polling approach to wait for memory updates to complete.
 
 using System.Text.Json;
 using Azure.AI.Projects;
@@ -19,9 +21,6 @@ string deploymentName = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLO
 string embeddingModelName = Environment.GetEnvironmentVariable("AZURE_AI_EMBEDDING_DEPLOYMENT_NAME") ?? "text-embedding-ada-002";
 
 // Create an AIProjectClient for Foundry with Azure Identity authentication.
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 DefaultAzureCredential credential = new();
 AIProjectClient projectClient = new(new Uri(foundryEndpoint), credential);
 

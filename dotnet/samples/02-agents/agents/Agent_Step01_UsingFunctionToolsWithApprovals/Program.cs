@@ -1,9 +1,12 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample demonstrates how to use a ChatClientAgent with function tools that require a human in the loop for approvals.
-// It shows both non-streaming and streaming agent interactions using menu-related tools.
-// If the agent is hosted in a service, with a remote user, combine this sample with the Persisted Conversations sample to persist the chat history
-// while the agent is waiting for user input.
+// Function Tools with Approvals — Human-in-the-loop tool execution
+//
+// This sample demonstrates how to use function tools that require human
+// approval before execution. It shows both non-streaming and streaming
+// agent interactions using menu-related tools.
+// If the agent is hosted in a service, combine this with the Persisted
+// Conversations sample to persist chat history while waiting for user input.
 
 using System.ComponentModel;
 using Azure.AI.OpenAI;
@@ -23,9 +26,6 @@ static string GetWeather([Description("The location to get the weather for.")] s
 
 // Create the chat client and agent.
 // Note that we are wrapping the function tool with ApprovalRequiredAIFunction to require user approval before invoking it.
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIAgent agent = new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())

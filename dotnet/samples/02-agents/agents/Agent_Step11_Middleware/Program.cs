@@ -1,5 +1,7 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
+// Middleware — Chain multiple middleware layers on an agent
+//
 // This sample shows multiple middleware layers working together with Azure OpenAI:
 // chat client (global/per-request), agent run (PII filtering and guardrails),
 // function invocation (logging and result overrides), human-in-the-loop
@@ -18,9 +20,6 @@ var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? th
 var deploymentName = System.Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
 // Get a client to create/retrieve server side agents with
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 var azureOpenAIClient = new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential())
     .GetChatClient(deploymentName);
 

@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use AI agents with Microsoft Foundry Agents as the backend.
+// Azure AI Project — Agent using Azure AI Foundry project
+//
+// This sample shows how to create an AI agent using the Azure AI
+// Foundry project client.
 
 using Azure.AI.Projects;
 using Azure.AI.Projects.Agents;
@@ -14,9 +17,6 @@ var deploymentName = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYME
 const string JokerName = "JokerAgent";
 
 // Get a client to create/retrieve/delete server side agents with Microsoft Foundry Agents.
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 var aiProjectClient = new AIProjectClient(new Uri(endpoint), new DefaultAzureCredential());
 
 // Define the agent you want to create. (Prompt Agent in this case)

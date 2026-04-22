@@ -1,4 +1,8 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
+
+// AG-UI Backend Tools — Server with backend tool execution
+//
+// This sample shows how to expose backend tools via the AG-UI protocol.
 
 using System.ComponentModel;
 using System.Text.Json.Serialization;
@@ -74,9 +78,6 @@ AITool[] tools =
 ];
 
 // Create the AI agent with tools
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 ChatClient chatClient = new AzureOpenAIClient(
         new Uri(endpoint),
         new DefaultAzureCredential())

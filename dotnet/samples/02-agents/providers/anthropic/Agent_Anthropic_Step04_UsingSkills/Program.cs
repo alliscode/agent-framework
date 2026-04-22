@@ -1,11 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample demonstrates how to use Anthropic-managed Skills with an AI agent.
-// Skills are pre-built capabilities provided by Anthropic that can be used with the Claude API.
-// This sample shows how to:
-// 1. List available Anthropic-managed skills
-// 2. Use the pptx skill to create PowerPoint presentations
-// 3. Download and save generated files
+// Anthropic with Skills — Agent Skills with Claude
+//
+// This sample demonstrates how to use Agent Skills with an
+// Anthropic-backed AI agent.
 
 using Anthropic;
 using Anthropic.Core;

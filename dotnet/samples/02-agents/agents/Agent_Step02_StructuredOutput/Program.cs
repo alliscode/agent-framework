@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to configure ChatClientAgent to produce structured output.
+// Structured Output — Configure agents to return typed JSON
+//
+// This sample shows how to configure a ChatClientAgent to produce
+// structured output using JSON schema constraints.
 
 using System.ComponentModel;
 using System.Text.Json;
@@ -17,9 +20,6 @@ string endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ??
 string deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
 // Create chat client to be used by chat client agents.
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 ChatClient chatClient = new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())

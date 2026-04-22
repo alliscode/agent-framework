@@ -1,5 +1,14 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Agent Workflow Patterns — Sequential, concurrent, handoffs, and group chat
+//
+// This sample uses AgentWorkflowBuilder to compose AI agents into common multi-agent
+// patterns: sequential pipelines, concurrent fan-out, handoff routing, and round-robin
+// group chat. Choose a pattern interactively to see agents collaborate.
+//
+// Prerequisites:
+// - An Azure OpenAI chat completion deployment must be configured.
+
 using System.Text.Json;
 using Azure.AI.OpenAI;
 using Azure.Identity;
@@ -9,24 +18,16 @@ using Microsoft.Extensions.AI;
 
 namespace WorkflowAgentsInWorkflowsSample;
 
-/// <summary>
-/// This sample introduces the use of AI agents as executors within a workflow,
-/// using <see cref="AgentWorkflowBuilder"/> to compose the agents into one of
-/// several common patterns.
-/// </summary>
-/// <remarks>
-/// Pre-requisites:
-/// - An Azure OpenAI chat completion deployment must be configured.
-/// </remarks>
 public static class Program
 {
     private static async Task Main()
     {
-        // Set up the Azure OpenAI client.
+        // Step 1: Set up the Azure OpenAI client
         var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
         var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
         var client = new AzureOpenAIClient(new Uri(endpoint), new AzureCliCredential()).GetChatClient(deploymentName).AsIChatClient();
 
+        // Step 2: Choose a workflow pattern and run it
         Console.Write("Choose workflow type ('sequential', 'concurrent', 'handoffs', 'groupchat'): ");
         switch (Console.ReadLine())
         {

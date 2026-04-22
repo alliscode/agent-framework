@@ -1,7 +1,10 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use a simple AI agent that stores chat messages in a vector store using the ChatHistoryMemoryProvider.
-// It can then use the chat history from prior conversations to inform responses in new conversations.
+// Chat History Memory — Store and recall conversation history with vector search
+//
+// This sample shows how to create an agent that stores chat messages in a
+// vector store using ChatHistoryMemoryProvider. It can then use chat history
+// from prior conversations to inform responses in new conversations.
 
 using Azure.AI.OpenAI;
 using Azure.Identity;
@@ -20,9 +23,6 @@ var embeddingDeploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_E
 // Replace this with a vector store implementation of your choice that can persist the chat history long term.
 VectorStore vectorStore = new InMemoryVectorStore(new InMemoryVectorStoreOptions()
 {
-    // WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-    // In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-    // latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
     EmbeddingGenerator = new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential())
         .GetEmbeddingClient(embeddingDeploymentName)
         .AsIEmbeddingGenerator()

@@ -1,39 +1,30 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Checkpoint + Human-in-the-Loop — Pause, checkpoint, and resume with human input
+//
+// A number guessing game where the human provides guesses based on feedback.
+// Workflow state is checkpointed at the end of each super step, allowing it
+// to be restored and resumed later. Each RequestPort request/response cycle
+// takes two super steps (request out, response in), creating two checkpoints
+// per human interaction.
+//
+// Prerequisites:
+// - Familiarity with HumanInTheLoopBasic and CheckpointAndResume samples.
+
 using Microsoft.Agents.AI.Workflows;
 
 namespace WorkflowCheckpointWithHumanInTheLoopSample;
 
-/// <summary>
-/// This sample demonstrates how to create a workflow with human-in-the-loop interaction and
-/// checkpointing support. The workflow plays a number guessing game where the user provides
-/// guesses based on feedback from the workflow. The workflow state is checkpointed at the end
-/// of each super step, allowing it to be restored and resumed later.
-/// Each RequestPort request and response cycle takes two super steps:
-/// 1. The RequestPort sends a RequestInfoEvent to request input from the external world.
-/// 2. The external world sends a response back to the RequestPort.
-/// Thus, two checkpoints are created for each human-in-the-loop interaction.
-/// </summary>
-/// <remarks>
-/// Pre-requisites:
-/// - Foundational samples should be completed first.
-/// - This sample builds upon the HumanInTheLoopBasic sample. It's recommended to go through that
-///   sample first to understand the basics of human-in-the-loop workflows.
-/// - This sample also builds upon the CheckpointAndResume sample. It's recommended to
-///   go through that sample first to understand the basics of checkpointing and resuming workflows.
-/// </remarks>
 public static class Program
 {
     private static async Task Main()
     {
-        // Create the workflow
+        // Step 1: Create the workflow and checkpoint manager
         var workflow = WorkflowFactory.BuildWorkflow();
-
-        // Create checkpoint manager
         var checkpointManager = CheckpointManager.Default;
         var checkpoints = new List<CheckpointInfo>();
 
-        // Execute the workflow and save checkpoints
+        // Step 2: Execute the workflow and collect checkpoints
         await using StreamingRun checkpointedRun = await InProcessExecution
             .RunStreamingAsync(workflow, new SignalWithNumber(NumberSignal.Init), checkpointManager)
             ;
@@ -81,7 +72,7 @@ public static class Program
         }
         Console.WriteLine($"Number of checkpoints created: {checkpoints.Count}");
 
-        // Restoring from a checkpoint and resuming execution
+        // Step 3: Restore from a checkpoint and resume execution
         const int CheckpointIndex = 1;
         Console.WriteLine($"\n\nRestoring from the {CheckpointIndex + 1}th checkpoint.");
         CheckpointInfo savedCheckpoint = checkpoints[CheckpointIndex];

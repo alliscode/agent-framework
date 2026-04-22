@@ -1,5 +1,21 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Map-Reduce Word Count — Fan-out/fan-in over file-backed intermediate results
+//
+// The workflow splits a large text into chunks, maps words to counts in parallel,
+// shuffles intermediate pairs to reducers, then reduces to per-word totals.
+//
+// Key concepts:
+// - Partition input once and coordinate parallel mappers with shared state.
+// - Pass file paths instead of large payloads between executors.
+// - Use fan-out/fan-in edges to express parallelism and joins.
+// - Persist intermediate results to disk to bound memory usage.
+// - Visualize the workflow graph using ToDotString/ToMermaidString.
+//
+// Prerequisites:
+// - Write access to a temp directory.
+// - A source text file to process.
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -11,26 +27,6 @@ using Microsoft.Agents.AI.Workflows;
 
 namespace WorkflowMapReduceSample;
 
-/// <summary>
-/// Sample: Map-Reduce Word Count with Fan-Out and Fan-In over File-Backed Intermediate Results
-///
-/// The workflow splits a large text into chunks, maps words to counts in parallel,
-/// shuffles intermediate pairs to reducers, then reduces to per-word totals.
-/// It also demonstrates workflow visualization for graph visualization.
-///
-/// Purpose:
-/// Show how to:
-/// - Partition input once and coordinate parallel mappers with shared state.
-/// - Implement map, shuffle, and reduce executors that pass file paths instead of large payloads.
-/// - Use fan-out and fan-in edges to express parallelism and joins.
-/// - Persist intermediate results to disk to bound memory usage for large inputs.
-/// - Visualize the workflow graph using ToDotString and ToMermaidString and export to SVG.
-/// </summary>
-/// <remarks>
-/// Pre-requisites:
-/// - Write access to a temp directory.
-/// - A source text file to process.
-/// </remarks>
 public static class Program
 {
     private static async Task Main()
@@ -39,14 +35,7 @@ public static class Program
         await RunWorkflowAsync(workflow);
     }
 
-    /// <summary>
-    /// Builds a map-reduce workflow using a fan-out/fan-in pattern with mappers, reducers, and other executors.
-    /// </summary>
-    /// <remarks>This method constructs a workflow consisting of multiple stages, including splitting,
-    /// mapping, shuffling, reducing, and completion. The workflow is designed to process data in parallel using a
-    /// fan-out/fan-in architecture. The resulting workflow is ready for execution and includes all necessary
-    /// dependencies between the executors.</remarks>
-    /// <returns>A <see cref="Workflow"/> instance representing the constructed workflow.</returns>
+    /// <summary>Builds the map-reduce workflow using fan-out/fan-in pattern.</summary>
     public static Workflow BuildWorkflow()
     {
         // Step 1: Create the mappers and the input splitter
@@ -70,18 +59,10 @@ public static class Program
             .Build();
     }
 
-    /// <summary>
-    /// Executes the specified workflow asynchronously using a predefined input text and processes its output events.
-    /// </summary>
-    /// <remarks>This method reads input text from a file located in the "resources" directory. If the file is
-    /// not found,  a default sample text is used. The workflow is executed with the input text, and its events are
-    /// streamed  and processed in real-time. If the workflow produces output files, their paths and contents are
-    /// displayed.</remarks>
-    /// <param name="workflow">The workflow to execute. This defines the sequence of operations to be performed.</param>
-    /// <returns>A task that represents the asynchronous operation.</returns>
+    /// <summary>Runs the workflow with sample text and streams output events.</summary>
     private static async Task RunWorkflowAsync(Workflow workflow)
     {
-        // Step 1: Read the input text
+        // Read the input text
         var resourcesPath = Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "..", "..", "resources");
         var textFilePath = Path.Combine(resourcesPath, "long_text.txt");
 
@@ -97,7 +78,7 @@ public static class Program
             rawText = "The quick brown fox jumps over the lazy dog. The dog was very lazy. The fox was very quick.";
         }
 
-        // Step 2: Run the workflow
+        // Run the workflow
         Console.WriteLine("\n=== RUNNING WORKFLOW ===\n");
         await using StreamingRun run = await InProcessExecution.RunStreamingAsync(workflow, input: rawText);
         await foreach (WorkflowEvent evt in run.WatchStreamAsync())
@@ -137,9 +118,7 @@ public static class Program
 
 #region Executors
 
-/// <summary>
-/// Splits data into roughly equal chunks based on the number of mapper nodes.
-/// </summary>
+// Splits data into roughly equal chunks based on the number of mapper nodes.
 [SendsMessage(typeof(SplitComplete))]
 internal sealed class Split(string[] mapperIds, string id) :
     Executor<string>(id)
@@ -147,9 +126,7 @@ internal sealed class Split(string[] mapperIds, string id) :
     private readonly string[] _mapperIds = mapperIds;
     private static readonly string[] s_lineSeparators = ["\r\n", "\r", "\n"];
 
-    /// <summary>
-    /// Tokenize input and assign contiguous index ranges to each mapper via shared state.
-    /// </summary>
+    /// <summary>Tokenize input and assign contiguous index ranges to each mapper via shared state.</summary>
     public override async ValueTask HandleAsync(string message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         // Ensure temp directory exists
@@ -196,15 +173,11 @@ internal sealed class Split(string[] mapperIds, string id) :
     }
 }
 
-/// <summary>
-/// Maps each token to a count of 1 and writes pairs to a per-mapper file.
-/// </summary>
+// Maps each token to a count of 1 and writes pairs to a per-mapper file.
 [SendsMessage(typeof(MapComplete))]
 internal sealed class Mapper(string id) : Executor<SplitComplete>(id)
 {
-    /// <summary>
-    /// Read the assigned slice, emit (word, 1) pairs, and persist to disk.
-    /// </summary>
+    /// <summary>Read the assigned slice, emit (word, 1) pairs, and persist to disk.</summary>
     public override async ValueTask HandleAsync(SplitComplete message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         var dataToProcess = await context.ReadStateAsync<string[]>(MapReduceConstants.DataToProcessKey, scopeName: MapReduceConstants.StateScope, cancellationToken);
@@ -223,9 +196,7 @@ internal sealed class Mapper(string id) : Executor<SplitComplete>(id)
     }
 }
 
-/// <summary>
-/// Groups intermediate pairs by key and partitions them across reducers.
-/// </summary>
+// Groups intermediate pairs by key and partitions them across reducers.
 [SendsMessage(typeof(ShuffleComplete))]
 internal sealed class Shuffler(string[] reducerIds, string[] mapperIds, string id) :
     Executor<MapComplete>(id)
@@ -234,9 +205,7 @@ internal sealed class Shuffler(string[] reducerIds, string[] mapperIds, string i
     private readonly string[] _mapperIds = mapperIds;
     private readonly List<MapComplete> _mapResults = [];
 
-    /// <summary>
-    /// Aggregate mapper outputs and write one partition file per reducer.
-    /// </summary>
+    /// <summary>Aggregate mapper outputs and write one partition file per reducer.</summary>
     public override async ValueTask HandleAsync(MapComplete message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         this._mapResults.Add(message);
@@ -263,9 +232,7 @@ internal sealed class Shuffler(string[] reducerIds, string[] mapperIds, string i
         await Task.WhenAll(tasks);
     }
 
-    /// <summary>
-    /// Load all mapper files, group by key, sort keys, and partition for reducers.
-    /// </summary>
+    /// <summary>Load all mapper files, group by key, sort, and partition for reducers.</summary>
     private async Task<List<List<(string key, List<int> values)>>> PreprocessAsync(List<MapComplete> data)
     {
         // Load all intermediate pairs
@@ -323,15 +290,11 @@ internal sealed class Shuffler(string[] reducerIds, string[] mapperIds, string i
     }
 }
 
-/// <summary>
-/// Sums grouped counts per key for its assigned partition.
-/// </summary>
+// Sums grouped counts per key for its assigned partition.
 [SendsMessage(typeof(ReduceComplete))]
 internal sealed class Reducer(string id) : Executor<ShuffleComplete>(id)
 {
-    /// <summary>
-    /// Read one shuffle partition and reduce it to totals.
-    /// </summary>
+    /// <summary>Read one shuffle partition and reduce it to totals.</summary>
     public override async ValueTask HandleAsync(ShuffleComplete message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         if (message.ReducerId != this.Id)
@@ -365,16 +328,12 @@ internal sealed class Reducer(string id) : Executor<ShuffleComplete>(id)
     }
 }
 
-/// <summary>
-/// Joins all reducer outputs and yields the final output.
-/// </summary>
+// Joins all reducer outputs and yields the final output.
 [YieldsOutput(typeof(List<string>))]
 internal sealed class CompletionExecutor(string id) :
     Executor<List<ReduceComplete>>(id)
 {
-    /// <summary>
-    /// Collect reducer output file paths and yield final output.
-    /// </summary>
+    /// <summary>Collect reducer output file paths and yield final output.</summary>
     public override async ValueTask HandleAsync(List<ReduceComplete> message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         var filePaths = message.ConvertAll(r => r.FilePath);
@@ -386,31 +345,23 @@ internal sealed class CompletionExecutor(string id) :
 
 #region Events
 
-/// <summary>
-/// Marker event published when splitting finishes. Triggers map executors.
-/// </summary>
+// Marker event: splitting finished, triggers map executors.
 internal sealed class SplitComplete : WorkflowEvent;
 
-/// <summary>
-/// Signal that a mapper wrote its intermediate pairs to file.
-/// </summary>
+// Signal: a mapper wrote its intermediate pairs to file.
 internal sealed class MapComplete(string FilePath) : WorkflowEvent
 {
     public string FilePath { get; } = FilePath;
 }
 
-/// <summary>
-/// Signal that a shuffle partition file is ready for a specific reducer.
-/// </summary>
+// Signal: a shuffle partition file is ready for a specific reducer.
 internal sealed class ShuffleComplete(string FilePath, string ReducerId) : WorkflowEvent
 {
     public string FilePath { get; } = FilePath;
     public string ReducerId { get; } = ReducerId;
 }
 
-/// <summary>
-/// Signal that a reducer wrote final counts for its partition.
-/// </summary>
+// Signal: a reducer wrote final counts for its partition.
 internal sealed class ReduceComplete(string FilePath) : WorkflowEvent
 {
     public string FilePath { get; } = FilePath;
@@ -420,11 +371,7 @@ internal sealed class ReduceComplete(string FilePath) : WorkflowEvent
 
 #region Helpers
 
-/// <summary>
-/// Provides constant values used in the MapReduce workflow.
-/// </summary>
-/// <remarks>This class contains keys and paths that are utilized throughout the MapReduce process, including
-/// identifiers for data processing and temporary storage locations.</remarks>
+// Constants for shared state keys and temp directory paths.
 internal static class MapReduceConstants
 {
     public static string DataToProcessKey = "data_to_be_processed";

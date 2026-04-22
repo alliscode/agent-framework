@@ -1,8 +1,11 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to use the Mem0Provider to persist and recall memories for an agent.
-// The sample stores conversation messages in a Mem0 service and retrieves relevant memories
-// for subsequent invocations, even across new sessions.
+// Memory with Mem0 — Persist and recall memories via Mem0 service
+//
+// This sample shows how to use the Mem0Provider to persist and recall
+// memories for an agent. It stores conversation messages in a Mem0 service
+// and retrieves relevant memories for subsequent invocations, even across
+// new sessions.
 
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -24,9 +27,6 @@ using HttpClient mem0HttpClient = new();
 mem0HttpClient.BaseAddress = new Uri(mem0ServiceUri);
 mem0HttpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Token", mem0ApiKey);
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIAgent agent = new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())

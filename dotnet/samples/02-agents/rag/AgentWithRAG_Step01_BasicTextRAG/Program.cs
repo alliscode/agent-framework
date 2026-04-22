@@ -1,9 +1,11 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to use TextSearchProvider to add retrieval augmented generation (RAG) capabilities to an AI agent.
-// The sample uses an In-Memory vector store, which can easily be replaced with any other vector store that implements the Microsoft.Extensions.VectorData abstractions.
-// The TextSearchProvider runs a search against the vector store via the TextSearchStore before each model invocation and injects the results into the model context.
-// The TextSearchStore is a sample store implementation that hardcodes a storage schema and uses the vector store to store and retrieve documents.
+// Basic Text RAG — Retrieval-augmented generation with vector search
+//
+// This sample shows how to use TextSearchProvider to add RAG capabilities
+// to an AI agent. It uses an in-memory vector store (replaceable with any
+// Microsoft.Extensions.VectorData implementation). The provider runs a search
+// before each model invocation and injects results into context.
 
 using Azure.AI.OpenAI;
 using Azure.Identity;
@@ -18,9 +20,6 @@ var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? th
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 var embeddingDeploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME") ?? "text-embedding-3-large";
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AzureOpenAIClient azureOpenAIClient = new(
     new Uri(endpoint),
     new DefaultAzureCredential());

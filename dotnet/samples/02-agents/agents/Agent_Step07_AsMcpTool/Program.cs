@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to expose an AI agent as an MCP tool.
+// Agent as MCP Tool — Expose an agent via Model Context Protocol
+//
+// This sample shows how to expose an AI agent as an MCP tool so it
+// can be consumed by MCP-compatible hosts.
 
 using Azure.AI.Projects;
 using Azure.AI.Projects.Agents;
@@ -13,9 +16,6 @@ using ModelContextProtocol.Server;
 var endpoint = Environment.GetEnvironmentVariable("AZURE_AI_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("AZURE_AI_PROJECT_ENDPOINT is not set.");
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 var aiProjectClient = new AIProjectClient(new Uri(endpoint), new DefaultAzureCredential());
 
 // Create a server side agent and expose it as an AIAgent.

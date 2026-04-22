@@ -1,8 +1,12 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use a simple AI agent with OpenAI Responses as the backend, that uses a Hosted MCP Tool.
-// In this case the OpenAI responses service will invoke any MCP tools as required. MCP tools are not invoked by the Agent Framework.
-// The sample first shows how to use MCP tools with auto approval, and then how to set up a tool that requires approval before it can be invoked and how to approve such a tool.
+// OpenAI Responses with Hosted MCP Tools — Server-side MCP tool execution
+//
+// This sample shows how to use Hosted MCP Tools with OpenAI Responses.
+// The OpenAI service invokes MCP tools server-side — the Agent Framework does
+// not call them directly. Two modes are demonstrated:
+// 1. Auto-approval — tools execute without user confirmation
+// 2. Required approval — human-in-the-loop approval before each tool call
 
 using Azure.AI.OpenAI;
 using Azure.Identity;
@@ -10,11 +14,11 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OpenAI.Responses;
 
+// --- Configuration ---
 var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
-// **** MCP Tool with Auto Approval ****
-// *************************************
+// --- 1. MCP Tool with Auto Approval ---
 
 // Create an MCP tool definition that the agent can use.
 // In this case we allow the tool to always be called without approval.
@@ -27,9 +31,6 @@ var mcpTool = new HostedMcpServerTool(
 };
 
 // Create an agent based on Azure OpenAI Responses as the backend.
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIAgent agent = new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())
@@ -44,8 +45,7 @@ AIAgent agent = new AzureOpenAIClient(
 AgentSession session = await agent.CreateSessionAsync();
 Console.WriteLine(await agent.RunAsync("Please summarize the Azure AI Agent documentation related to MCP Tool calling?", session));
 
-// **** MCP Tool with Approval Required ****
-// *****************************************
+// --- 2. MCP Tool with Approval Required ---
 
 // Create an MCP tool definition that the agent can use.
 // In this case we require approval before the tool can be called.

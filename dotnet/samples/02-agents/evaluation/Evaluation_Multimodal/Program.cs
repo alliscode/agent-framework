@@ -1,10 +1,13 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
-// This sample demonstrates that the evaluation pipeline preserves multimodal content.
-// When an agent conversation includes images, EvalChecks.HasImageContent() can verify
-// they survived into the EvalItem — useful for testing vision-capable agents.
+// Evaluate Multimodal Conversations — Verify image content in eval pipeline
 //
-// No Azure credentials needed: this sample builds EvalItems locally to show the pattern.
+// Demonstrates that the evaluation pipeline preserves multimodal content:
+// 1. Build EvalItems with image content in conversations
+// 2. Use HasImageContent() to verify images flow through the eval pipeline
+// 3. Combine with other checks like NonEmpty()
+//
+// No Azure credentials needed — this sample builds EvalItems locally.
 
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;

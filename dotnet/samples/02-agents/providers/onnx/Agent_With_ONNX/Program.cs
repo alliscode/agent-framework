@@ -1,7 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use a simple AI agent with ONNX as the backend.
-// WARNING: ONNX doesn't support function calling, so any function tools passed to the agent will be ignored.
+// ONNX — Agent using an ONNX runtime model
+//
+// This sample shows how to create an AI agent using an ONNX runtime
+// model for local inference.
 
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;

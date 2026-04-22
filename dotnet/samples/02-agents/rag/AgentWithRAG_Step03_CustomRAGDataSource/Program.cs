@@ -1,10 +1,11 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to use TextSearchProvider to add retrieval augmented generation (RAG)
-// capabilities to an AI agent. This shows a mock implementation of a search function,
-// which can be replaced with any custom search logic to query any external knowledge base.
-// The provider invokes the custom search function
-// before each model invocation and injects the results into the model context.
+// Custom RAG Data Source — RAG with a custom search function
+//
+// This sample shows how to use TextSearchProvider with a custom search
+// function for RAG. The mock implementation can be replaced with any
+// custom search logic to query external knowledge bases. The provider
+// invokes the search function before each model invocation.
 
 using Azure.AI.OpenAI;
 using Azure.Identity;
@@ -22,9 +23,6 @@ TextSearchProviderOptions textSearchOptions = new()
     RecentMessageMemoryLimit = 6,
 };
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIAgent agent = new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())

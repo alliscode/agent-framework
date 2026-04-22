@@ -1,5 +1,7 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
+// Plugins — Use plugin classes with dependency injection
+//
 // This sample shows how to use plugins with an AI agent. Plugin classes can
 // depend on other services that need to be injected. In this sample, the
 // AgentPlugin class uses the WeatherProvider and CurrentTimeProvider classes
@@ -27,9 +29,6 @@ services.AddSingleton<AgentPlugin>(); // The plugin depends on WeatherProvider a
 
 IServiceProvider serviceProvider = services.BuildServiceProvider();
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIAgent agent = new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())

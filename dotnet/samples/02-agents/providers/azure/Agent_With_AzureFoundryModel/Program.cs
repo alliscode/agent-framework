@@ -1,8 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to use the OpenAI SDK to create and use a simple AI agent with any model hosted in Microsoft Foundry.
-// You could use models from Microsoft, OpenAI, DeepSeek, Hugging Face, Meta, xAI or any other model you have deployed in your Microsoft Foundry resource.
-// Note: Ensure that you pick a model that suits your needs. For example, if you want to use function calling, ensure that the model you pick supports function calling.
+// Azure Foundry Model — Agent using Azure AI Foundry model client
+//
+// This sample shows how to create an AI agent using the Azure AI
+// Foundry model client directly.
 
 using System.ClientModel;
 using System.ClientModel.Primitives;
@@ -19,9 +20,6 @@ var model = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYMENT_NAME")
 var clientOptions = new OpenAIClientOptions() { Endpoint = new Uri(endpoint) };
 
 // Create the OpenAI client with either an API key or Azure CLI credential.
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 OpenAIClient client = string.IsNullOrWhiteSpace(apiKey)
     ? new OpenAIClient(new BearerTokenPolicy(new DefaultAzureCredential(), "https://ai.azure.com/.default"), clientOptions)
     : new OpenAIClient(new ApiKeyCredential(apiKey), clientOptions);

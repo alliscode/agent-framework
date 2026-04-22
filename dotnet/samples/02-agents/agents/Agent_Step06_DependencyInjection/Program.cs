@@ -1,8 +1,11 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
 #pragma warning disable CA1812
 
-// This sample shows how to use dependency injection to register an AIAgent and use it from a hosted service with a user input chat loop.
+// Dependency Injection — Register and resolve agents via DI
+//
+// This sample shows how to use dependency injection to register an
+// AIAgent and consume it from a hosted service with a chat loop.
 
 using Azure.AI.OpenAI;
 using Azure.Identity;
@@ -21,9 +24,6 @@ HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddSingleton(new ChatClientAgentOptions() { Name = "Joker", ChatOptions = new() { Instructions = "You are good at telling jokes." } });
 
 // Add a chat client to the service collection.
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 builder.Services.AddKeyedChatClient("AzureOpenAI", (sp) => new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())

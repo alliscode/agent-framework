@@ -1,10 +1,12 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
 #pragma warning disable CA1869 // Cache and reuse 'JsonSerializerOptions' instances
 
-// This sample shows how to create and use a simple AI agent with custom ChatHistoryProvider that stores chat history in a custom storage location.
-// The state of the custom ChatHistoryProvider (SessionDbKey) is stored in the AgentSession's StateBag, so that when the session is resumed later,
-// the chat history can be retrieved from the custom storage location.
+// Third-Party Chat History Storage — Custom ChatHistoryProvider
+//
+// This sample shows how to use a custom ChatHistoryProvider that stores
+// chat history in an external location. The provider's state (SessionDbKey)
+// is stored in AgentSession.StateBag so conversations can be resumed later.
 
 using System.Text.Json;
 using Azure.AI.OpenAI;
@@ -25,9 +27,6 @@ var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT
 VectorStore vectorStore = new InMemoryVectorStore();
 
 // Create the agent
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIAgent agent = new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())

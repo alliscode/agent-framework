@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use a simple AI agent with Ollama as the backend.
+// Ollama — Agent using a local Ollama model
+//
+// This sample shows how to create an AI agent using Ollama for
+// local model inference.
 
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;

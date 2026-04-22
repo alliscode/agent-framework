@@ -1,6 +1,10 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
-// This sample shows how to create and use a simple AI agent with tools from an MCP Server that requires authentication.
+// MCP Server with OAuth Authentication — Connect to a protected MCP server
+//
+// This sample demonstrates how to create an AI agent that connects to an
+// MCP server requiring OAuth 2.0 authentication. It handles the full OAuth
+// flow including dynamic client registration and browser-based authorization.
 
 using System.Diagnostics;
 using System.Net;
@@ -13,10 +17,11 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Client;
 using OpenAI.Chat;
 
+// --- Configuration ---
 var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
-// We can customize a shared HttpClient with a custom handler if desired
+// --- HTTP client setup ---
 using var sharedHandler = new SocketsHttpHandler
 {
     PooledConnectionLifetime = TimeSpan.FromMinutes(2),
@@ -26,7 +31,7 @@ using var httpClient = new HttpClient(sharedHandler);
 
 var consoleLoggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
 
-// Create SSE client transport for the MCP server
+// --- Connect to the protected MCP server with OAuth ---
 var serverUrl = "http://localhost:7071/";
 var transport = new HttpClientTransport(new()
 {
@@ -43,22 +48,19 @@ var transport = new HttpClientTransport(new()
     }
 }, httpClient, consoleLoggerFactory);
 
-// Create an MCPClient for the protected MCP server
 await using var mcpClient = await McpClient.CreateAsync(transport, loggerFactory: consoleLoggerFactory);
 
-// Retrieve the list of tools available on the GitHub server
+// Discover tools exposed by the MCP server
 var mcpTools = await mcpClient.ListToolsAsync().ConfigureAwait(false);
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
+// --- Create the agent with MCP tools ---
 AIAgent agent = new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())
      .GetChatClient(deploymentName)
      .AsAIAgent(instructions: "You answer questions related to the weather.", tools: [.. mcpTools]);
 
-// Invoke the agent and output the text result.
+// --- Run the agent ---
 Console.WriteLine(await agent.RunAsync("Get current weather alerts for New York?"));
 
 // Handles the OAuth authorization URL by starting a local HTTP server and opening a browser.
