@@ -9,12 +9,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Azure.AI.OpenAI" />
-    <PackageReference Include="Azure.Identity" />
     <PackageReference Include="Azure.Monitor.OpenTelemetry.Exporter" />
-    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
     <PackageReference Include="OpenTelemetry" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\src\Microsoft.Agents.AI.Foundry\Microsoft.Agents.AI.Foundry.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="!$([MSBuild]::IsTargetFrameworkCompatible($(TargetFramework), 'net10.0'))">

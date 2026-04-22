@@ -8,9 +8,9 @@
 // integrate seamlessly into workflow pipelines.
 //
 // Prerequisites:
-// - An Azure OpenAI chat completion deployment must be configured.
+// - An Azure AI Foundry project endpoint must be configured.
 
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
@@ -22,15 +22,15 @@ public static class Program
 {
     private static async Task Main()
     {
-        // Step 1: Set up the Azure OpenAI client
-        var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-        var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
-        var chatClient = new AzureOpenAIClient(new Uri(endpoint), new AzureCliCredential()).GetChatClient(deploymentName).AsIChatClient();
+        // Step 1: Set up the Azure AI Foundry client
+        var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+        var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
+        AIProjectClient aiProjectClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
         // Step 2: Create the translation agents
-        AIAgent frenchAgent = GetTranslationAgent("French", chatClient);
-        AIAgent spanishAgent = GetTranslationAgent("Spanish", chatClient);
-        AIAgent englishAgent = GetTranslationAgent("English", chatClient);
+        AIAgent frenchAgent = GetTranslationAgent("French", aiProjectClient, deploymentName);
+        AIAgent spanishAgent = GetTranslationAgent("Spanish", aiProjectClient, deploymentName);
+        AIAgent englishAgent = GetTranslationAgent("English", aiProjectClient, deploymentName);
 
         // Step 3: Build the workflow — sequential translation chain
         var workflow = new WorkflowBuilder(frenchAgent)
@@ -66,6 +66,6 @@ public static class Program
     }
 
     /// <summary>Creates a translation agent for the specified target language.</summary>
-    private static ChatClientAgent GetTranslationAgent(string targetLanguage, IChatClient chatClient) =>
-        new(chatClient, $"You are a translation assistant that translates the provided text to {targetLanguage}.");
+    private static ChatClientAgent GetTranslationAgent(string targetLanguage, AIProjectClient client, string model) =>
+        client.AsAIAgent(model: model, instructions: $"You are a translation assistant that translates the provided text to {targetLanguage}.");
 }

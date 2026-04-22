@@ -13,11 +13,11 @@
 // data characteristics, such as triggering different analytics pipelines.
 //
 // Prerequisites:
-// - An Azure OpenAI chat completion deployment that supports structured outputs.
+// - An Azure AI Foundry project endpoint with a deployment that supports structured outputs.
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
@@ -31,15 +31,15 @@ public static class Program
 
     private static async Task Main()
     {
-        // Step 1: Set up the Azure OpenAI client
-        var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-        var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
-        var chatClient = new AzureOpenAIClient(new Uri(endpoint), new AzureCliCredential()).GetChatClient(deploymentName).AsIChatClient();
+        // Step 1: Set up the Azure AI Foundry client
+        var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+        var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
+        AIProjectClient aiProjectClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
         // Step 2: Create agents and executors
-        AIAgent emailAnalysisAgent = GetEmailAnalysisAgent(chatClient);
-        AIAgent emailAssistantAgent = GetEmailAssistantAgent(chatClient);
-        AIAgent emailSummaryAgent = GetEmailSummaryAgent(chatClient);
+        AIAgent emailAnalysisAgent = GetEmailAnalysisAgent(aiProjectClient, deploymentName);
+        AIAgent emailAssistantAgent = GetEmailAssistantAgent(aiProjectClient, deploymentName);
+        AIAgent emailSummaryAgent = GetEmailSummaryAgent(aiProjectClient, deploymentName);
 
         var emailAnalysisExecutor = new EmailAnalysisExecutor(emailAnalysisAgent);
         var emailAssistantExecutor = new EmailAssistantExecutor(emailAssistantAgent);
@@ -135,33 +135,36 @@ public static class Program
     }
 
     /// <summary>Creates an email analysis agent.</summary>
-    private static ChatClientAgent GetEmailAnalysisAgent(IChatClient chatClient) =>
-        new(chatClient, new ChatClientAgentOptions()
+    private static ChatClientAgent GetEmailAnalysisAgent(AIProjectClient client, string model) =>
+        client.AsAIAgent(new ChatClientAgentOptions()
         {
             ChatOptions = new()
             {
+                ModelId = model,
                 Instructions = "You are a spam detection assistant that identifies spam emails.",
                 ResponseFormat = ChatResponseFormat.ForJsonSchema<AnalysisResult>()
             }
         });
 
     /// <summary>Creates an email assistant agent.</summary>
-    private static ChatClientAgent GetEmailAssistantAgent(IChatClient chatClient) =>
-        new(chatClient, new ChatClientAgentOptions()
+    private static ChatClientAgent GetEmailAssistantAgent(AIProjectClient client, string model) =>
+        client.AsAIAgent(new ChatClientAgentOptions()
         {
             ChatOptions = new()
             {
+                ModelId = model,
                 Instructions = "You are an email assistant that helps users draft responses to emails with professionalism.",
                 ResponseFormat = ChatResponseFormat.ForJsonSchema<EmailResponse>()
             }
         });
 
     /// <summary>Creates an email summary agent.</summary>
-    private static ChatClientAgent GetEmailSummaryAgent(IChatClient chatClient) =>
-        new(chatClient, new ChatClientAgentOptions()
+    private static ChatClientAgent GetEmailSummaryAgent(AIProjectClient client, string model) =>
+        client.AsAIAgent(new ChatClientAgentOptions()
         {
             ChatOptions = new()
             {
+                ModelId = model,
                 Instructions = "You are an assistant that helps users summarize emails.",
                 ResponseFormat = ChatResponseFormat.ForJsonSchema<EmailSummary>()
             }

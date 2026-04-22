@@ -1,7 +1,7 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
 using System.Diagnostics;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Azure.Monitor.OpenTelemetry.Exporter;
 using Microsoft.Agents.AI;
@@ -24,7 +24,7 @@ namespace WorkflowAsAnAgentObservabilitySample;
 /// streaming responses from the workflow as if it were an agent who responds in both languages.
 ///
 /// OpenTelemetry observability is enabled at multiple levels:
-/// 1. At the chat client level, capturing telemetry for interactions with the Azure OpenAI service.
+/// 1. At the chat client level, capturing telemetry for interactions with the Azure AI Foundry service.
 /// 2. At the agent level, capturing telemetry for agent operations.
 /// 3. At the workflow level, capturing telemetry for workflow execution.
 ///
@@ -38,7 +38,7 @@ namespace WorkflowAsAnAgentObservabilitySample;
 /// Pre-requisites:
 /// - Foundational samples should be completed first.
 /// - This sample uses concurrent processing.
-/// - An Azure OpenAI endpoint and deployment name.
+/// - An Azure AI Foundry project endpoint and model deployment name.
 /// - An Application Insights resource for telemetry (optional).
 /// </remarks>
 public static class Program
@@ -70,22 +70,17 @@ public static class Program
 
         using var traceProvider = traceProviderBuilder.Build();
 
-        // Set up the Azure OpenAI client
-        var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-        var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
-        var chatClient = new AzureOpenAIClient(new Uri(endpoint), new AzureCliCredential())
-            .GetChatClient(deploymentName)
-            .AsIChatClient()
-            .AsBuilder()
-            .UseOpenTelemetry(sourceName: SourceName, configure: (cfg) => cfg.EnableSensitiveData = true) // enable telemetry at the chat client level
-            .Build();
+        // Set up the Azure AI Foundry client
+        var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+        var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
+        AIProjectClient aiProjectClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
         // Start a root activity for the application
         using var activity = s_activitySource.StartActivity("main");
         Console.WriteLine($"Operation/Trace ID: {Activity.Current?.TraceId}");
 
         // Create the workflow and turn it into an agent with OpenTelemetry instrumentation
-        var workflow = WorkflowHelper.GetWorkflow(chatClient, SourceName);
+        var workflow = WorkflowHelper.GetWorkflow(aiProjectClient, deploymentName, SourceName);
         var agent = new OpenTelemetryAgent(workflow.AsAIAgent("workflow-agent", "Workflow Agent"), SourceName)
         {
             EnableSensitiveData = true  // enable sensitive data at the agent level such as prompts and responses
