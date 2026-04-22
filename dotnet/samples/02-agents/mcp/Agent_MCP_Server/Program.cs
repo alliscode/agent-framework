@@ -7,15 +7,14 @@
 // MCP server via stdio, discovers available tools, and wires them into
 // the agent so the model can call them.
 
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using ModelContextProtocol.Client;
-using OpenAI.Chat;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 
 // --- Connect to the MCP server ---
 await using var mcpClient = await McpClient.CreateAsync(new StdioClientTransport(new()
@@ -29,11 +28,10 @@ await using var mcpClient = await McpClient.CreateAsync(new StdioClientTransport
 var mcpTools = await mcpClient.ListToolsAsync().ConfigureAwait(false);
 
 // --- Create the agent with MCP tools ---
-AIAgent agent = new AzureOpenAIClient(
+AIAgent agent = new AIProjectClient(
     new Uri(endpoint),
     new DefaultAzureCredential())
-     .GetChatClient(deploymentName)
-     .AsAIAgent(instructions: "You answer questions related to GitHub repositories only.", tools: [.. mcpTools.Cast<AITool>()]);
+     .AsAIAgent(model: deploymentName, instructions: "You answer questions related to GitHub repositories only.", tools: [.. mcpTools.Cast<AITool>()]);
 
 // --- Run the agent ---
 Console.WriteLine(await agent.RunAsync("Summarize the last four commits to the microsoft/semantic-kernel repository?"));

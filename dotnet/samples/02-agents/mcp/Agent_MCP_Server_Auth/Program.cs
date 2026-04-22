@@ -10,16 +10,15 @@ using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Web;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Client;
-using OpenAI.Chat;
 
 // --- Configuration ---
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 
 // --- HTTP client setup ---
 using var sharedHandler = new SocketsHttpHandler
@@ -54,11 +53,10 @@ await using var mcpClient = await McpClient.CreateAsync(transport, loggerFactory
 var mcpTools = await mcpClient.ListToolsAsync().ConfigureAwait(false);
 
 // --- Create the agent with MCP tools ---
-AIAgent agent = new AzureOpenAIClient(
+AIAgent agent = new AIProjectClient(
     new Uri(endpoint),
     new DefaultAzureCredential())
-     .GetChatClient(deploymentName)
-     .AsAIAgent(instructions: "You answer questions related to the weather.", tools: [.. mcpTools]);
+     .AsAIAgent(model: deploymentName, instructions: "You answer questions related to the weather.", tools: [.. mcpTools]);
 
 // --- Run the agent ---
 Console.WriteLine(await agent.RunAsync("Get current weather alerts for New York?"));

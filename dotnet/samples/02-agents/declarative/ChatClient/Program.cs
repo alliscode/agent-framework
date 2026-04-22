@@ -3,23 +3,20 @@
 // Declarative Agent from YAML — Load an agent definition from a YAML file
 //
 // This sample shows how to load an AI agent from a YAML file and process
-// a prompt using Azure OpenAI as the backend.
+// a prompt using Azure AI Foundry as the backend.
 
 using System.ComponentModel;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 
 // Create the chat client
-IChatClient chatClient = new AzureOpenAIClient(
-    new Uri(endpoint),
-    new DefaultAzureCredential())
-     .GetChatClient(deploymentName)
-     .AsIChatClient();
+AIProjectClient aiProjectClient = new(new Uri(endpoint), new DefaultAzureCredential());
+IChatClient chatClient = aiProjectClient.GetProjectOpenAIClient().GetResponsesClient().AsIChatClient(deploymentName);
 
 // Read command-line arguments
 if (args.Length < 2)

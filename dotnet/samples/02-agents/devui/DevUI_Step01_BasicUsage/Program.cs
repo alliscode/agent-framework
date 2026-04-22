@@ -6,7 +6,7 @@
 // application with AI agents.
 
 using System.ComponentModel;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.DevUI;
@@ -21,7 +21,7 @@ namespace DevUI_Step01_BasicUsage;
 /// </summary>
 /// <remarks>
 /// This sample shows how to:
-/// 1. Set up Azure OpenAI as the chat client
+/// 1. Set up Azure AI Foundry as the chat client
 /// 2. Create function tools for agents to use
 /// 3. Register agents and workflows using the hosting packages with tools
 /// 4. Map the DevUI endpoint which automatically configures the middleware
@@ -45,13 +45,14 @@ internal static class Program
     {
         var builder = WebApplication.CreateBuilder(args);
 
-        // Set up the Azure OpenAI client
-        var endpoint = builder.Configuration["AZURE_OPENAI_ENDPOINT"] ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-        var deploymentName = builder.Configuration["AZURE_OPENAI_DEPLOYMENT_NAME"] ?? "gpt-5.4-mini";
+        // Set up the Azure AI Foundry client
+        var endpoint = builder.Configuration["FOUNDRY_PROJECT_ENDPOINT"] ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+        var deploymentName = builder.Configuration["FOUNDRY_MODEL"] ?? "gpt-5.4-mini";
 
-        var chatClient = new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential())
-            .GetChatClient(deploymentName)
-            .AsIChatClient();
+        var chatClient = new AIProjectClient(new Uri(endpoint), new DefaultAzureCredential())
+            .GetProjectOpenAIClient()
+            .GetResponsesClient()
+            .AsIChatClient(deploymentName);
 
         builder.Services.AddChatClient(chatClient);
 

@@ -8,15 +8,15 @@
 // 1. Auto-approval — tools execute without user confirmation
 // 2. Required approval — human-in-the-loop approval before each tool call
 
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OpenAI.Responses;
 
 // --- Configuration ---
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 
 // --- 1. MCP Tool with Auto Approval ---
 
@@ -30,11 +30,10 @@ var mcpTool = new HostedMcpServerTool(
     ApprovalMode = HostedMcpServerToolApprovalMode.NeverRequire
 };
 
-// Create an agent based on Azure OpenAI Responses as the backend.
-AIAgent agent = new AzureOpenAIClient(
+// Create an agent based on Azure AI Foundry Responses as the backend.
+AIAgent agent = new AIProjectClient(
     new Uri(endpoint),
     new DefaultAzureCredential())
-     .GetResponsesClient()
      .AsAIAgent(
         model: deploymentName,
         instructions: "You answer questions by searching the Microsoft Learn content only.",
@@ -57,11 +56,10 @@ var mcpToolWithApproval = new HostedMcpServerTool(
     ApprovalMode = HostedMcpServerToolApprovalMode.AlwaysRequire
 };
 
-// Create an agent based on Azure OpenAI Responses as the backend.
-AIAgent agentWithRequiredApproval = new AzureOpenAIClient(
+// Create an agent based on Azure AI Foundry Responses as the backend.
+AIAgent agentWithRequiredApproval = new AIProjectClient(
     new Uri(endpoint),
     new DefaultAzureCredential())
-    .GetResponsesClient()
     .AsAIAgent(
         model: deploymentName,
         instructions: "You answer questions by searching the Microsoft Learn content only.",
