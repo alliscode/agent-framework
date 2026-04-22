@@ -1,5 +1,8 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// A2A Client — connects to an A2A server and interacts with remote agents.
+// Demonstrates discovering agent skills and running tasks via the A2A protocol.
+
 using System.CommandLine;
 using System.Reflection;
 using Microsoft.Agents.AI;

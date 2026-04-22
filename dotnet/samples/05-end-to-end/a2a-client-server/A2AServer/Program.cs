@@ -1,4 +1,8 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
+
+// A2A Server — hosts AI agents as A2A-compatible endpoints.
+// Supports multiple agent types (chat, foundry) and registers them as A2A services.
+
 using A2A;
 using A2A.AspNetCore;
 using A2AServer;

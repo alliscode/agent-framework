@@ -1,5 +1,8 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Agent Web Chat — Agent host backend that serves agents via A2A, DevUI, and AG-UI protocols.
+// Demonstrates hosting multiple agents with different capabilities in a single web application.
+
 using A2A.AspNetCore;
 using AgentWebChat.AgentHost;
 using AgentWebChat.AgentHost.Custom;

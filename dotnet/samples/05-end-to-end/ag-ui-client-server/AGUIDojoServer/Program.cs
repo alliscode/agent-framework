@@ -1,5 +1,8 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// AG-UI Dojo Server — AG-UI protocol test server with configurable agent scenarios.
+// Used for testing AG-UI client implementations against various agent behaviors.
+
 using AGUIDojoServer;
 using Microsoft.Agents.AI.Hosting.AGUI.AspNetCore;
 using Microsoft.AspNetCore.HttpLogging;

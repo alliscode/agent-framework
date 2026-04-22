@@ -1,5 +1,7 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Agent Web Chat — Aspire AppHost that orchestrates the agent backend and web frontend.
+
 using AgentWebChat.AppHost;
 
 var builder = DistributedApplication.CreateBuilder(args);

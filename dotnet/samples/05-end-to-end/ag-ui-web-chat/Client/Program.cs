@@ -1,5 +1,7 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// AG-UI Web Chat Client — Blazor web UI that connects to an AG-UI server for chat.
+
 using AGUIWebChatClient.Components;
 using Microsoft.Agents.AI.AGUI;
 

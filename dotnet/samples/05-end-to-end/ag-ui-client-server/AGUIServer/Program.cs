@@ -1,4 +1,7 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
+
+// AG-UI Server — hosts an AI agent with tools exposed via the AG-UI protocol.
+// Demonstrates streaming agent responses to AG-UI compatible clients.
 
 using System.ComponentModel;
 using AGUIServer;
@@ -20,9 +23,6 @@ string deploymentName = builder.Configuration["AZURE_OPENAI_DEPLOYMENT_NAME"] ??
 const string AgentName = "AGUIAssistant";
 
 // Create the AI agent with tools
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 var agent = new AzureOpenAIClient(
         new Uri(endpoint),
         new DefaultAzureCredential())

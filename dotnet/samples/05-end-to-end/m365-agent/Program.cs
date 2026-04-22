@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
 // Sample that shows how to create an Agent Framework agent that is hosted using the M365 Agent SDK.
 // The agent can then be consumed from various M365 channels.
@@ -35,10 +35,6 @@ if (builder.Configuration.GetSection("AIServices").GetValue<bool>("UseAzureOpenA
 {
     var deploymentName = builder.Configuration.GetSection("AIServices:AzureOpenAI").GetValue<string>("DeploymentName")!;
     var endpoint = builder.Configuration.GetSection("AIServices:AzureOpenAI").GetValue<string>("Endpoint")!;
-
-    // WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-    // In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-    // latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
     chatClient = new AzureOpenAIClient(
         new Uri(endpoint),
         new DefaultAzureCredential())

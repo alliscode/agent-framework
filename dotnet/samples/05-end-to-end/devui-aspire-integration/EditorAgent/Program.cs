@@ -1,5 +1,7 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// DevUI Editor Agent — Aspire-hosted editor agent with tool-calling and DevUI support.
+
 using System.ComponentModel;
 using Azure.Identity;
 using Microsoft.Agents.AI;

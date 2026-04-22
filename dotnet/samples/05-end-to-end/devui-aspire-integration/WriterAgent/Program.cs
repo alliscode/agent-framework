@@ -1,5 +1,7 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// DevUI Writer Agent — Aspire-hosted writer agent with DevUI debugging support.
+
 using Azure.Identity;
 using Microsoft.Agents.AI.Hosting;
 

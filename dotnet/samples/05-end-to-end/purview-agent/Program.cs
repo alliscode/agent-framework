@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
 // This sample shows how to create and use a simple AI agent with Purview integration.
 // It uses Azure OpenAI as the backend, but any IChatClient can be used.
@@ -23,10 +23,6 @@ TokenCredential browserCredential = new InteractiveBrowserCredential(
     {
         ClientId = purviewClientAppId
     });
-
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 using IChatClient client = new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())

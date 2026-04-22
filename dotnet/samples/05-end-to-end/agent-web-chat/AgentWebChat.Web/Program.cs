@@ -1,5 +1,7 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Agent Web Chat — Blazor web frontend for chatting with agents via A2A and AG-UI.
+
 using AgentWebChat.Web;
 using AgentWebChat.Web.Components;
 
