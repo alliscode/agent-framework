@@ -4,7 +4,7 @@
 // The agent can then be consumed from various M365 channels.
 // See the README.md for more information.
 
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using M365Agent;
 using M365Agent.Agents;
@@ -29,15 +29,16 @@ if (builder.Environment.IsDevelopment())
 
 builder.Services.AddHttpClient();
 
-// Register the inference service of your choice. AzureOpenAI and OpenAI are demonstrated...
+// Register the inference service of your choice. Azure AI Foundry and OpenAI are demonstrated...
 IChatClient chatClient;
-if (builder.Configuration.GetSection("AIServices").GetValue<bool>("UseAzureOpenAI"))
+if (builder.Configuration.GetSection("AIServices").GetValue<bool>("UseAzureAIFoundry"))
 {
-    var deploymentName = builder.Configuration.GetSection("AIServices:AzureOpenAI").GetValue<string>("DeploymentName")!;
-    var endpoint = builder.Configuration.GetSection("AIServices:AzureOpenAI").GetValue<string>("Endpoint")!;
-    chatClient = new AzureOpenAIClient(
+    var deploymentName = builder.Configuration.GetSection("AIServices:AzureAIFoundry").GetValue<string>("DeploymentName")!;
+    var endpoint = builder.Configuration.GetSection("AIServices:AzureAIFoundry").GetValue<string>("Endpoint")!;
+    chatClient = new AIProjectClient(
         new Uri(endpoint),
         new DefaultAzureCredential())
+         .GetProjectOpenAIClient()
          .GetChatClient(deploymentName)
          .AsIChatClient();
 }

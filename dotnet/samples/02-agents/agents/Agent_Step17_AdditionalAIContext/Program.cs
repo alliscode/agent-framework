@@ -12,16 +12,14 @@
 
 using System.Text;
 using System.Text.Json;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OpenAI.Chat;
 using SampleApp;
-using MEAI = Microsoft.Extensions.AI;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 
 // A sample function to load the next three calendar events for the user.
 Func<Task<string[]>> loadNextThreeCalendarEvents = async () =>
@@ -36,13 +34,12 @@ Func<Task<string[]>> loadNextThreeCalendarEvents = async () =>
 };
 
 // Create an agent with an AI context provider attached that aggregates two other providers:
-AIAgent agent = new AzureOpenAIClient(
+AIAgent agent = new AIProjectClient(
     new Uri(endpoint),
     new DefaultAzureCredential())
-    .GetChatClient(deploymentName)
     .AsAIAgent(new ChatClientAgentOptions()
     {
-        ChatOptions = new() { Instructions = """
+        ChatOptions = new() { ModelId = deploymentName, Instructions = """
         You are a helpful personal assistant.
         You manage a TODO list for the user. When the user has completed one of the tasks it can be removed from the TODO list. Only provide the list of TODO items if asked.
         You remind users of upcoming calendar events when the user interacts with you.
@@ -120,7 +117,7 @@ namespace SampleApp
                 ],
                 Messages =
                 [
-                    new MEAI.ChatMessage(ChatRole.User, outputMessageBuilder.ToString())
+                new ChatMessage(ChatRole.User, outputMessageBuilder.ToString())
                 ]
             });
         }
@@ -150,7 +147,7 @@ namespace SampleApp
     /// </summary>
     internal sealed class CalendarSearchAIContextProvider(Func<Task<string[]>> loadNextThreeCalendarEvents) : MessageAIContextProvider
     {
-        protected override async ValueTask<IEnumerable<MEAI.ChatMessage>> ProvideMessagesAsync(InvokingContext context, CancellationToken cancellationToken = default)
+        protected override async ValueTask<IEnumerable<ChatMessage>> ProvideMessagesAsync(InvokingContext context, CancellationToken cancellationToken = default)
         {
             var events = await loadNextThreeCalendarEvents();
 
@@ -161,7 +158,7 @@ namespace SampleApp
                 outputMessageBuilder.AppendLine($" - {calendarEvent}");
             }
 
-            return [new MEAI.ChatMessage(ChatRole.User, outputMessageBuilder.ToString())];
+            return [new ChatMessage(ChatRole.User, outputMessageBuilder.ToString())];
         }
     }
 }

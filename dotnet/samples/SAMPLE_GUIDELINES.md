@@ -56,18 +56,16 @@ For getting started samples (`01-get-started/`), use environment variables with 
 
 // Sample summary explaining what this demonstrates.
 
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
-using OpenAI.Chat;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")
+    ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 
-AIAgent agent = new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential())
-    .GetChatClient(deploymentName)
-    .AsAIAgent(instructions: "You are a helpful assistant.", name: "MyAgent");
+AIAgent agent = new AIProjectClient(new Uri(endpoint), new DefaultAzureCredential())
+    .AsAIAgent(model: deploymentName, instructions: "You are a helpful assistant.", name: "MyAgent");
 
 Console.WriteLine(await agent.RunAsync("Hello!"));
 ```
@@ -77,13 +75,13 @@ Console.WriteLine(await agent.RunAsync("Hello!"));
 For advanced samples, use the `SampleEnvironment` helper which reads from environment variables and `.env` files, and prompts the user interactively if values are missing:
 
 ```csharp
-var endpoint = SampleEnvironment.Get("AZURE_OPENAI_ENDPOINT");
-var model = SampleEnvironment.Get("AZURE_OPENAI_MODEL", "gpt-4o");
+var endpoint = SampleEnvironment.Get("FOUNDRY_PROJECT_ENDPOINT");
+var model = SampleEnvironment.Get("FOUNDRY_MODEL", "gpt-5.4-mini");
 ```
 
 ### Default Provider for Samples
 
-Unless a sample is specifically demonstrating a particular provider (OpenAI direct, Anthropic, Ollama, etc.), use **Azure OpenAI** as the default provider. This is the recommended path for Azure AI Foundry deployments.
+Unless a sample is specifically demonstrating a particular provider (OpenAI direct, Anthropic, Ollama, etc.), use **Azure AI Foundry** (`AIProjectClient`) as the default provider. This is the recommended path for Azure AI Foundry deployments.
 
 Provider-specific samples belong in `02-agents/providers/<provider>/` and should use the provider's native client.
 
@@ -93,9 +91,8 @@ Use XML comment tags to mark sections that may be referenced by documentation:
 
 ```csharp
 // <create_agent>
-AIAgent agent = new AzureOpenAIClient(...)
-    .GetChatClient(deploymentName)
-    .AsAIAgent(instructions: "...", name: "...");
+AIAgent agent = new AIProjectClient(...)
+    .AsAIAgent(model: deploymentName, instructions: "...", name: "...");
 // </create_agent>
 
 // <run_agent>

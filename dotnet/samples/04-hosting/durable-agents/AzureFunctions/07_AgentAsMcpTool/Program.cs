@@ -7,36 +7,28 @@
 
 #pragma warning disable IDE0002 // Simplify Member Access
 
-using Azure;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.DurableTask;
 using Microsoft.Agents.AI.Hosting.AzureFunctions;
 using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.Hosting;
-using OpenAI.Chat;
 
-// Get the Azure OpenAI endpoint and deployment name from environment variables.
-string endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-string deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not set.");
+// Get the Azure AI Foundry endpoint and model from environment variables.
+string endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")
+    ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+string deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL")
+    ?? throw new InvalidOperationException("FOUNDRY_MODEL is not set.");
 
-// Use Azure Key Credential if provided, otherwise use Azure CLI Credential.
-string? azureOpenAiKey = System.Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY");
-AzureOpenAIClient client = !string.IsNullOrEmpty(azureOpenAiKey)
-    ? new AzureOpenAIClient(new Uri(endpoint), new AzureKeyCredential(azureOpenAiKey))
-    : new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential());
+AIProjectClient client = new(new Uri(endpoint), new DefaultAzureCredential());
 
 // Define three AI agents we are going to use in this application.
-AIAgent agent1 = client.GetChatClient(deploymentName).AsAIAgent("You are good at telling jokes.", "Joker");
+AIAgent agent1 = client.AsAIAgent(model: deploymentName, instructions: "You are good at telling jokes.", name: "Joker");
 
-AIAgent agent2 = client.GetChatClient(deploymentName)
-    .AsAIAgent("Check stock prices.", "StockAdvisor");
+AIAgent agent2 = client.AsAIAgent(model: deploymentName, instructions: "Check stock prices.", name: "StockAdvisor");
 
-AIAgent agent3 = client.GetChatClient(deploymentName)
-    .AsAIAgent("Recommend plants.", "PlantAdvisor", description: "Get plant recommendations.");
+AIAgent agent3 = client.AsAIAgent(model: deploymentName, instructions: "Recommend plants.", name: "PlantAdvisor", description: "Get plant recommendations.");
 
 using IHost app = FunctionsApplication
     .CreateBuilder(args)

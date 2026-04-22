@@ -6,13 +6,12 @@
 
 using System.ComponentModel;
 using System.Text.Json.Serialization;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Hosting.AGUI.AspNetCore;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
-using OpenAI.Chat;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHttpClient().AddLogging();
@@ -22,10 +21,10 @@ builder.Services.AddAGUI();
 
 WebApplication app = builder.Build();
 
-string endpoint = builder.Configuration["AZURE_OPENAI_ENDPOINT"]
-    ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-string deploymentName = builder.Configuration["AZURE_OPENAI_DEPLOYMENT_NAME"]
-    ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not set.");
+string endpoint = builder.Configuration["FOUNDRY_PROJECT_ENDPOINT"]
+    ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+string deploymentName = builder.Configuration["FOUNDRY_MODEL"]
+    ?? throw new InvalidOperationException("FOUNDRY_MODEL is not set.");
 
 // Define the function tool
 [Description("Search for restaurants in a location.")]
@@ -78,12 +77,10 @@ AITool[] tools =
 ];
 
 // Create the AI agent with tools
-ChatClient chatClient = new AzureOpenAIClient(
-        new Uri(endpoint),
-        new DefaultAzureCredential())
-    .GetChatClient(deploymentName);
+AIProjectClient aiProjectClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
-ChatClientAgent agent = chatClient.AsAIAgent(
+ChatClientAgent agent = aiProjectClient.AsAIAgent(
+    model: deploymentName,
     name: "AGUIAssistant",
     instructions: "You are a helpful assistant with access to restaurant information.",
     tools: tools);

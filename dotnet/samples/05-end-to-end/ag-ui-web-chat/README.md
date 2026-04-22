@@ -9,13 +9,13 @@ The sample consists of two projects:
 
 ## Prerequisites
 
-### Azure OpenAI Configuration
+### Azure AI Foundry Configuration
 
-The server requires Azure OpenAI credentials. Set the following environment variables:
+The server requires Azure AI Foundry credentials. Set the following environment variables:
 
 ```powershell
-$env:AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
-$env:AZURE_OPENAI_DEPLOYMENT_NAME="your-deployment-name"  # e.g., "gpt-5.4-mini"
+$env:FOUNDRY_PROJECT_ENDPOINT="https://your-resource.services.ai.azure.com/api/projects/your-project"
+$env:FOUNDRY_MODEL="your-deployment-name"  # e.g., "gpt-5.4-mini"
 ```
 
 The server uses `DefaultAzureCredential` for authentication. Ensure you are logged in using one of the following methods:
@@ -66,17 +66,16 @@ Features:
 The server (`Server/Program.cs`) creates a simple chat agent:
 
 ```csharp
-// Create Azure OpenAI client
-AzureOpenAIClient azureOpenAIClient = new AzureOpenAIClient(
+// Create Azure AI Foundry client
+AIProjectClient aiProjectClient = new AIProjectClient(
     new Uri(endpoint),
     new DefaultAzureCredential());
 
-ChatClient chatClient = azureOpenAIClient.GetChatClient(deploymentName);
-
 // Create AI agent
-ChatClientAgent agent = chatClient.AsAIAgent(
-    name: "ChatAssistant",
-    instructions: "You are a helpful assistant.");
+ChatClientAgent agent = aiProjectClient.AsAIAgent(
+    model: deploymentName,
+    instructions: "You are a helpful assistant.",
+    name: "ChatAssistant");
 
 // Map AG-UI endpoint
 app.MapAGUI("/ag-ui", agent);
@@ -162,9 +161,10 @@ dotnet run
 Edit the instructions in `Server/Program.cs`:
 
 ```csharp
-ChatClientAgent agent = chatClient.AsAIAgent(
-    name: "ChatAssistant",
-    instructions: "You are a helpful coding assistant specializing in C# and .NET.");
+ChatClientAgent agent = aiProjectClient.AsAIAgent(
+    model: deploymentName,
+    instructions: "You are a helpful coding assistant specializing in C# and .NET.",
+    name: "ChatAssistant");
 ```
 
 ### Styling the UI

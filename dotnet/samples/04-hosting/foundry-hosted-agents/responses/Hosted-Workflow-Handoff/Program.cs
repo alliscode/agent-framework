@@ -9,14 +9,14 @@
 //   /workflow-demo - Triage workflow routing to specialist agents
 //
 // Prerequisites:
-//   - Azure OpenAI resource with a deployed model
+//   - Azure AI Foundry project with a deployed model
 //
 // Environment variables:
-//   - AZURE_OPENAI_ENDPOINT   - your Azure OpenAI endpoint
-//   - AZURE_OPENAI_DEPLOYMENT - the model deployment name (default: "gpt-4o")
+//   - FOUNDRY_PROJECT_ENDPOINT - your Azure AI Foundry project endpoint
+//   - FOUNDRY_MODEL            - the model deployment name (default: "gpt-4o")
 
 using System.ComponentModel;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Core;
 using Azure.Identity;
 using DotNetEnv;
@@ -33,15 +33,14 @@ Env.TraversePath().Load();
 var builder = WebApplication.CreateBuilder(args);
 
 // ---------------------------------------------------------------------------
-// 1. Create the shared Azure OpenAI chat client
+// 1. Create the Azure AI Foundry project client
 // ---------------------------------------------------------------------------
-var endpoint = new Uri(Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set."));
-var deployment = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT") ?? "gpt-4o";
+var endpoint = new Uri(Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set."));
+var deployment = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-4o";
 
-var azureClient = new AzureOpenAIClient(endpoint, new ChainedTokenCredential(
+var projectClient = new AIProjectClient(endpoint, new ChainedTokenCredential(
     new DevTemporaryTokenCredential(),
     new DefaultAzureCredential()));
-IChatClient chatClient = azureClient.GetResponsesClient().AsIChatClient(deployment);
 
 // ---------------------------------------------------------------------------
 // 2. DEMO 1: Tool Agent — local tools + Microsoft Learn MCP
@@ -55,27 +54,26 @@ McpClient mcpClient = await McpClient.CreateAsync(new HttpClientTransport(new()
 var mcpTools = await mcpClient.ListToolsAsync();
 Console.WriteLine($"MCP tools available: {string.Join(", ", mcpTools.Select(t => t.Name))}");
 
-builder.AddAIAgent(
-    name: "tool-agent",
-    instructions: """
-        You are a helpful assistant hosted as a Foundry Hosted Agent.
-        You have access to several tools - use them proactively:
-        - GetCurrentTime: Returns the current date/time in any timezone.
-        - GetWeather: Returns weather conditions for any location.
-        - Microsoft Learn MCP tools: Search and fetch Microsoft documentation.
-        When a user asks a technical question about Microsoft products, use the
-        documentation search tools to give accurate, up-to-date answers.
-        """,
-    chatClient: chatClient)
-    .WithAITool(AIFunctionFactory.Create(GetCurrentTime))
-    .WithAITool(AIFunctionFactory.Create(GetWeather))
-    .WithAITools(mcpTools.Cast<AITool>().ToArray());
+builder.AddAIAgent("tool-agent", (_, key) =>
+    projectClient.AsAIAgent(
+        model: deployment,
+        instructions: """
+            You are a helpful assistant hosted as a Foundry Hosted Agent.
+            You have access to several tools - use them proactively:
+            - GetCurrentTime: Returns the current date/time in any timezone.
+            - GetWeather: Returns weather conditions for any location.
+            - Microsoft Learn MCP tools: Search and fetch Microsoft documentation.
+            When a user asks a technical question about Microsoft products, use the
+            documentation search tools to give accurate, up-to-date answers.
+            """,
+        name: key,
+        tools: [AIFunctionFactory.Create(GetCurrentTime), AIFunctionFactory.Create(GetWeather), .. mcpTools.Cast<AITool>()]));
 
 // ---------------------------------------------------------------------------
 // 3. DEMO 2: Triage Workflow — routes to specialist agents
 // ---------------------------------------------------------------------------
-ChatClientAgent triageAgent = new(
-    chatClient,
+ChatClientAgent triageAgent = projectClient.AsAIAgent(
+    model: deployment,
     instructions: """
         You are a triage agent that determines which specialist to hand off to.
         Based on the user's question, ALWAYS hand off to one of the available agents.
@@ -84,8 +82,8 @@ ChatClientAgent triageAgent = new(
     name: "triage_agent",
     description: "Routes messages to the appropriate specialist agent");
 
-ChatClientAgent codeExpert = new(
-    chatClient,
+ChatClientAgent codeExpert = projectClient.AsAIAgent(
+    model: deployment,
     instructions: """
         You are a coding and technology expert. You help with programming questions,
         explain technical concepts, debug code, and suggest best practices.
@@ -94,8 +92,8 @@ ChatClientAgent codeExpert = new(
     name: "code_expert",
     description: "Specialist agent for programming and technology questions");
 
-ChatClientAgent creativeWriter = new(
-    chatClient,
+ChatClientAgent creativeWriter = projectClient.AsAIAgent(
+    model: deployment,
     instructions: """
         You are a creative writing specialist. You help write stories, poems,
         marketing copy, emails, and other creative content. You have a flair

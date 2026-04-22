@@ -6,44 +6,43 @@ using AGUIDojoServer.AgenticUI;
 using AGUIDojoServer.BackendToolRendering;
 using AGUIDojoServer.PredictiveStateUpdates;
 using AGUIDojoServer.SharedState;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OpenAI.Chat;
 
 namespace AGUIDojoServer;
 
 internal static class ChatClientAgentFactory
 {
-    private static AzureOpenAIClient? s_azureOpenAIClient;
+    private static AIProjectClient? s_aiProjectClient;
     private static string? s_deploymentName;
 
     public static void Initialize(IConfiguration configuration)
     {
-        string endpoint = configuration["AZURE_OPENAI_ENDPOINT"] ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-        s_deploymentName = configuration["AZURE_OPENAI_DEPLOYMENT_NAME"] ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not set.");
-        s_azureOpenAIClient = new AzureOpenAIClient(
+        string endpoint = configuration["FOUNDRY_PROJECT_ENDPOINT"] ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+        s_deploymentName = configuration["FOUNDRY_MODEL"] ?? throw new InvalidOperationException("FOUNDRY_MODEL is not set.");
+        s_aiProjectClient = new AIProjectClient(
             new Uri(endpoint),
             new DefaultAzureCredential());
     }
 
     public static ChatClientAgent CreateAgenticChat()
     {
-        ChatClient chatClient = s_azureOpenAIClient!.GetChatClient(s_deploymentName!);
-
-        return chatClient.AsAIAgent(
+        return s_aiProjectClient!.AsAIAgent(
+            model: s_deploymentName!,
+            instructions: "You are a helpful assistant.",
             name: "AgenticChat",
-            description: "A simple chat agent using Azure OpenAI");
+            description: "A simple chat agent using Azure AI Foundry");
     }
 
     public static ChatClientAgent CreateBackendToolRendering()
     {
-        ChatClient chatClient = s_azureOpenAIClient!.GetChatClient(s_deploymentName!);
-
-        return chatClient.AsAIAgent(
+        return s_aiProjectClient!.AsAIAgent(
+            model: s_deploymentName!,
+            instructions: "You are a helpful assistant.",
             name: "BackendToolRenderer",
-            description: "An agent that can render backend tools using Azure OpenAI",
+            description: "An agent that can render backend tools using Azure AI Foundry",
             tools: [AIFunctionFactory.Create(
                 GetWeather,
                 name: "get_weather",
@@ -53,31 +52,31 @@ internal static class ChatClientAgentFactory
 
     public static ChatClientAgent CreateHumanInTheLoop()
     {
-        ChatClient chatClient = s_azureOpenAIClient!.GetChatClient(s_deploymentName!);
-
-        return chatClient.AsAIAgent(
+        return s_aiProjectClient!.AsAIAgent(
+            model: s_deploymentName!,
+            instructions: "You are a helpful assistant.",
             name: "HumanInTheLoopAgent",
-            description: "An agent that involves human feedback in its decision-making process using Azure OpenAI");
+            description: "An agent that involves human feedback in its decision-making process using Azure AI Foundry");
     }
 
     public static ChatClientAgent CreateToolBasedGenerativeUI()
     {
-        ChatClient chatClient = s_azureOpenAIClient!.GetChatClient(s_deploymentName!);
-
-        return chatClient.AsAIAgent(
+        return s_aiProjectClient!.AsAIAgent(
+            model: s_deploymentName!,
+            instructions: "You are a helpful assistant.",
             name: "ToolBasedGenerativeUIAgent",
-            description: "An agent that uses tools to generate user interfaces using Azure OpenAI");
+            description: "An agent that uses tools to generate user interfaces using Azure AI Foundry");
     }
 
     public static AIAgent CreateAgenticUI(JsonSerializerOptions options)
     {
-        ChatClient chatClient = s_azureOpenAIClient!.GetChatClient(s_deploymentName!);
-        var baseAgent = chatClient.AsAIAgent(new ChatClientAgentOptions
+        var baseAgent = s_aiProjectClient!.AsAIAgent(new ChatClientAgentOptions
         {
             Name = "AgenticUIAgent",
-            Description = "An agent that generates agentic user interfaces using Azure OpenAI",
+            Description = "An agent that generates agentic user interfaces using Azure AI Foundry",
             ChatOptions = new ChatOptions
             {
+                ModelId = s_deploymentName!,
                 Instructions = """
                     When planning use tools only, without any other messages.
                     IMPORTANT:
@@ -113,25 +112,24 @@ internal static class ChatClientAgentFactory
 
     public static AIAgent CreateSharedState(JsonSerializerOptions options)
     {
-        ChatClient chatClient = s_azureOpenAIClient!.GetChatClient(s_deploymentName!);
-
-        var baseAgent = chatClient.AsAIAgent(
+        var baseAgent = s_aiProjectClient!.AsAIAgent(
+            model: s_deploymentName!,
+            instructions: "You are a helpful assistant.",
             name: "SharedStateAgent",
-            description: "An agent that demonstrates shared state patterns using Azure OpenAI");
+            description: "An agent that demonstrates shared state patterns using Azure AI Foundry");
 
         return new SharedStateAgent(baseAgent, options);
     }
 
     public static AIAgent CreatePredictiveStateUpdates(JsonSerializerOptions options)
     {
-        ChatClient chatClient = s_azureOpenAIClient!.GetChatClient(s_deploymentName!);
-
-        var baseAgent = chatClient.AsAIAgent(new ChatClientAgentOptions
+        var baseAgent = s_aiProjectClient!.AsAIAgent(new ChatClientAgentOptions
         {
             Name = "PredictiveStateUpdatesAgent",
-            Description = "An agent that demonstrates predictive state updates using Azure OpenAI",
+            Description = "An agent that demonstrates predictive state updates using Azure AI Foundry",
             ChatOptions = new ChatOptions
             {
+                ModelId = s_deploymentName!,
                 Instructions = """
                     You are a document editor assistant. When asked to write or edit content:
                     

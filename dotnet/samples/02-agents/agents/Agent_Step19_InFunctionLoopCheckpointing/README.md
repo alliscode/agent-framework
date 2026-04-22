@@ -30,13 +30,13 @@ The sample asks the agent about the weather and time in three cities. The model 
 ChatClientAgent
   └─ FunctionInvokingChatClient    (handles tool call loop)
        └─ PerServiceCallChatHistoryPersistingChatClient  (persists after each service call)
-            └─ Leaf IChatClient            (Azure OpenAI)
+            └─ Leaf IChatClient            (Azure AI Foundry)
 ```
 
 ## Prerequisites
 
 - .NET 10 SDK or later
-- Azure OpenAI service endpoint and model deployment
+- Azure AI Foundry project endpoint and model deployment
 - Azure CLI installed and authenticated
 
 **Note**: This sample uses `DefaultAzureCredential`. Sign in with `az login` before running. For production, prefer a specific credential such as `ManagedIdentityCredential`. For more information, see the [Azure CLI authentication documentation](https://learn.microsoft.com/cli/azure/authenticate-azure-cli-interactively).
@@ -44,8 +44,8 @@ ChatClientAgent
 ## Environment Variables
 
 ```powershell
-$env:AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"  # Required
-$env:AZURE_OPENAI_DEPLOYMENT_NAME="gpt-5.4-mini"                      # Optional, defaults to gpt-5.4-mini
+$env:FOUNDRY_PROJECT_ENDPOINT="https://your-project.services.ai.azure.com/"  # Required
+$env:FOUNDRY_MODEL="gpt-5.4-mini"                                            # Optional, defaults to gpt-5.4-mini
 ```
 
 ## Running the Sample

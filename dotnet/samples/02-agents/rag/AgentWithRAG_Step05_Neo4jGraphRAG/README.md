@@ -7,15 +7,15 @@ The sample uses a Neo4j fulltext index for retrieval and a Cypher `RetrievalQuer
 ## Prerequisites
 
 - .NET 10 SDK or later
-- Azure OpenAI endpoint and chat deployment
+- Azure AI Foundry project endpoint and chat model configured
 - Azure CLI installed and authenticated
 - A Neo4j database with chunked documents and a fulltext index such as `search_chunks`
 
 ## Environment variables
 
 ```powershell
-$env:AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
-$env:AZURE_OPENAI_DEPLOYMENT_NAME="gpt-5.4-mini"
+$env:FOUNDRY_PROJECT_ENDPOINT="https://your-project.services.ai.azure.com/"
+$env:FOUNDRY_MODEL="gpt-5.4-mini"
 $env:NEO4J_URI="neo4j+s://your-instance.databases.neo4j.io"
 $env:NEO4J_USERNAME="neo4j"
 $env:NEO4J_PASSWORD="your-password"

@@ -6,26 +6,20 @@
 
 #pragma warning disable IDE0002 // Simplify Member Access
 
-using Azure;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Hosting.AzureFunctions;
 using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.Hosting;
-using OpenAI.Chat;
 
-// Get the Azure OpenAI endpoint and deployment name from environment variables.
-string endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-string deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not set.");
+// Get the Azure AI Foundry endpoint and model from environment variables.
+string endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")
+    ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+string deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL")
+    ?? throw new InvalidOperationException("FOUNDRY_MODEL is not set.");
 
-// Use Azure Key Credential if provided, otherwise use Azure CLI Credential.
-string? azureOpenAiKey = System.Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY");
-AzureOpenAIClient client = !string.IsNullOrEmpty(azureOpenAiKey)
-    ? new AzureOpenAIClient(new Uri(endpoint), new AzureKeyCredential(azureOpenAiKey))
-    : new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential());
+AIProjectClient client = new(new Uri(endpoint), new DefaultAzureCredential());
 
 // Single agent used by the orchestration to demonstrate human-in-the-loop workflow.
 const string WriterName = "WriterAgent";
@@ -35,7 +29,7 @@ const string WriterInstructions =
     You write engaging, informative, and well-structured content that follows best practices for readability and accuracy.
     """;
 
-AIAgent writerAgent = client.GetChatClient(deploymentName).AsAIAgent(WriterInstructions, WriterName);
+AIAgent writerAgent = client.AsAIAgent(model: deploymentName, instructions: WriterInstructions, name: WriterName);
 
 using IHost app = FunctionsApplication
     .CreateBuilder(args)

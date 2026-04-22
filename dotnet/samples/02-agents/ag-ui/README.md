@@ -5,17 +5,17 @@ This directory contains samples that demonstrate how to build AG-UI (Agent UI Pr
 ## Prerequisites
 
 - .NET 9.0 or later
-- Azure OpenAI service endpoint and deployment configured
+- Azure AI Foundry project endpoint and model configured
 - Azure CLI installed and authenticated (`az login`)
-- User has the `Cognitive Services OpenAI Contributor` role for the Azure OpenAI resource
+- User has the `Cognitive Services OpenAI Contributor` role for the Azure AI Foundry project
 
 ## Environment Variables
 
 All samples require the following environment variables:
 
 ```bash
-export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
-export AZURE_OPENAI_DEPLOYMENT_NAME="gpt-5.4-mini"
+export FOUNDRY_PROJECT_ENDPOINT="https://your-project.services.ai.azure.com/"
+export FOUNDRY_MODEL="gpt-5.4-mini"
 ```
 
 For the client samples, you can optionally set:
@@ -36,7 +36,7 @@ A basic AG-UI server that hosts an AI agent accessible via HTTP. Demonstrates:
 
 - Creating an ASP.NET Core web application
 - Setting up an AG-UI server endpoint with `MapAGUI`
-- Creating an AI agent from an Azure OpenAI chat client
+- Creating an AI agent from an Azure AI Foundry chat client
 - Streaming responses via Server-Sent Events (SSE)
 
 **Run the server:**
@@ -261,11 +261,11 @@ Make sure you're authenticated with Azure:
 az login
 ```
 
-Verify you have the `Cognitive Services OpenAI Contributor` role on the Azure OpenAI resource.
+Verify you have the `Cognitive Services OpenAI Contributor` role on the Azure AI Foundry project.
 
 ### Missing Environment Variables
 
-If you see "AZURE_OPENAI_ENDPOINT is not set" errors, ensure environment variables are set in your current shell session before running the samples.
+If you see "FOUNDRY_PROJECT_ENDPOINT is not set" errors, ensure environment variables are set in your current shell session before running the samples.
 
 ### Streaming Not Working
 

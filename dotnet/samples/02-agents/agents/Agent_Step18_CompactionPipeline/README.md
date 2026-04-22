@@ -59,7 +59,7 @@ Order strategies from **least aggressive** to **most aggressive**. The pipeline 
 ## Prerequisites
 
 - .NET 10 SDK or later
-- Azure OpenAI service endpoint and model deployment
+- Azure AI Foundry project endpoint and model deployment
 - Azure CLI installed and authenticated
 
 **Note**: This sample uses `DefaultAzureCredential`. Sign in with `az login` before running. For production, prefer a specific credential such as `ManagedIdentityCredential`. For more information, see the [Azure CLI authentication documentation](https://learn.microsoft.com/cli/azure/authenticate-azure-cli-interactively).
@@ -67,8 +67,8 @@ Order strategies from **least aggressive** to **most aggressive**. The pipeline 
 ## Environment Variables
 
 ```powershell
-$env:AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"  # Required
-$env:AZURE_OPENAI_DEPLOYMENT_NAME="gpt-5.4-mini"                      # Optional, defaults to gpt-5.4-mini
+$env:FOUNDRY_PROJECT_ENDPOINT="https://your-project.services.ai.azure.com/"  # Required
+$env:FOUNDRY_MODEL="gpt-5.4-mini"                                            # Optional, defaults to gpt-5.4-mini
 ```
 
 ## Running the Sample

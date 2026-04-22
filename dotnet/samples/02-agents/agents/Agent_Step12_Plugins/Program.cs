@@ -11,15 +11,14 @@
 // as AI functions. The AsAITools method of the plugin class shows how to specify
 // which methods should be exposed to the AI agent.
 
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
-using OpenAI.Chat;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 
 // Create a service collection to hold the agent plugin and its dependencies.
 ServiceCollection services = new();
@@ -29,11 +28,11 @@ services.AddSingleton<AgentPlugin>(); // The plugin depends on WeatherProvider a
 
 IServiceProvider serviceProvider = services.BuildServiceProvider();
 
-AIAgent agent = new AzureOpenAIClient(
+AIAgent agent = new AIProjectClient(
     new Uri(endpoint),
     new DefaultAzureCredential())
-    .GetChatClient(deploymentName)
     .AsAIAgent(
+        model: deploymentName,
         instructions: "You are a helpful assistant that helps people find information.",
         name: "Assistant",
         tools: [.. serviceProvider.GetRequiredService<AgentPlugin>().AsAITools()],

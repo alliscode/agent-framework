@@ -9,15 +9,13 @@
 
 using System.Net.Http.Headers;
 using System.Text.Json;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Mem0;
-using Microsoft.Extensions.AI;
-using OpenAI.Chat;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 
 var mem0ServiceUri = Environment.GetEnvironmentVariable("MEM0_ENDPOINT") ?? throw new InvalidOperationException("MEM0_ENDPOINT is not set.");
 var mem0ApiKey = Environment.GetEnvironmentVariable("MEM0_API_KEY") ?? throw new InvalidOperationException("MEM0_API_KEY is not set.");
@@ -27,13 +25,12 @@ using HttpClient mem0HttpClient = new();
 mem0HttpClient.BaseAddress = new Uri(mem0ServiceUri);
 mem0HttpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Token", mem0ApiKey);
 
-AIAgent agent = new AzureOpenAIClient(
-    new Uri(endpoint),
-    new DefaultAzureCredential())
-    .GetChatClient(deploymentName)
+AIProjectClient aiProjectClient = new(new Uri(endpoint), new DefaultAzureCredential());
+
+AIAgent agent = aiProjectClient
     .AsAIAgent(new ChatClientAgentOptions()
     {
-        ChatOptions = new() { Instructions = "You are a friendly travel assistant. Use known memories about the user when responding, and do not invent details." },
+        ChatOptions = new() { ModelId = deploymentName, Instructions = "You are a friendly travel assistant. Use known memories about the user when responding, and do not invent details." },
         // The stateInitializer can be used to customize the Mem0 scope per session and it will be called each time a session
         // is encountered by the Mem0Provider that does not already have Mem0Provider state stored on the session.
         // If each session should have its own Mem0 scope, you can create a new id per session via the stateInitializer, e.g.:

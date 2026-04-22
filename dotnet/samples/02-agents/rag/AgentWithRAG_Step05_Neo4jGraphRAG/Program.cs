@@ -5,15 +5,14 @@
 // This sample shows how to use Neo4j graph database for RAG with
 // an AI agent.
 
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
 using Neo4j.AgentFramework.GraphRAG;
 using Neo4j.Driver;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 var neo4jUri = Environment.GetEnvironmentVariable("NEO4J_URI") ?? throw new InvalidOperationException("NEO4J_URI is not set.");
 var neo4jUsername = Environment.GetEnvironmentVariable("NEO4J_USERNAME") ?? "neo4j";
 var neo4jPassword = Environment.GetEnvironmentVariable("NEO4J_PASSWORD") ?? throw new InvalidOperationException("NEO4J_PASSWORD is not set.");
@@ -50,15 +49,14 @@ await using var provider = new Neo4jContextProvider(
         ContextPrompt = "Use the retrieved Neo4j graph context to answer accurately and call out when context is missing."
     });
 
-AIAgent agent = new AzureOpenAIClient(
+AIAgent agent = new AIProjectClient(
     new Uri(endpoint),
     new DefaultAzureCredential())
-    .GetChatClient(deploymentName)
-    .AsIChatClient()
     .AsAIAgent(new ChatClientAgentOptions
     {
         ChatOptions = new()
         {
+            ModelId = deploymentName,
             Instructions = "You are a helpful assistant that answers questions using Neo4j graph context."
         },
         AIContextProviders = [provider]

@@ -10,12 +10,12 @@ The DevUI provides an interactive web interface for testing and debugging AI age
 
 Set the following environment variables:
 
-- `AZURE_OPENAI_ENDPOINT` - Your Azure OpenAI endpoint URL (required)
-- `AZURE_OPENAI_DEPLOYMENT_NAME` - Your deployment name (defaults to "gpt-5.4-mini")
+- `FOUNDRY_PROJECT_ENDPOINT` - Your Azure AI Foundry project endpoint URL (required)
+- `FOUNDRY_MODEL` - Your model deployment name (defaults to "gpt-5.4-mini")
 
 ## Running the Sample
 
-1. Set your Azure OpenAI credentials as environment variables
+1. Set your Azure AI Foundry credentials as environment variables
 2. Run the application:
    ```bash
    dotnet run

@@ -8,8 +8,7 @@
 //
 // KEY: All methods can be called MULTIPLE times - configurations are ADDITIVE.
 
-using Azure;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.DurableTask;
@@ -20,27 +19,22 @@ using Microsoft.DurableTask.Worker.AzureManaged;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using OpenAI.Chat;
 using WorkflowConcurrency;
 
 // Configuration
 string dtsConnectionString = Environment.GetEnvironmentVariable("DURABLE_TASK_SCHEDULER_CONNECTION_STRING")
     ?? "Endpoint=http://localhost:8080;TaskHub=default;Authentication=None";
-string endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-string deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT is not set.");
-string? azureOpenAiKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_KEY");
+string endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")
+    ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+string deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL")
+    ?? throw new InvalidOperationException("FOUNDRY_MODEL is not set.");
 
 // Create AI agents
-AzureOpenAIClient openAiClient = !string.IsNullOrEmpty(azureOpenAiKey)
-    ? new AzureOpenAIClient(new Uri(endpoint), new AzureKeyCredential(azureOpenAiKey))
-    : new AzureOpenAIClient(new Uri(endpoint), new AzureCliCredential());
-ChatClient chatClient = openAiClient.GetChatClient(deploymentName);
+AIProjectClient client = new(new Uri(endpoint), new DefaultAzureCredential());
 
-AIAgent biologist = chatClient.AsAIAgent("You are a biology expert. Explain concepts clearly in 2-3 sentences.", "Biologist");
-AIAgent physicist = chatClient.AsAIAgent("You are a physics expert. Explain concepts clearly in 2-3 sentences.", "Physicist");
-AIAgent chemist = chatClient.AsAIAgent("You are a chemistry expert. Explain concepts clearly in 2-3 sentences.", "Chemist");
+AIAgent biologist = client.AsAIAgent(model: deploymentName, instructions: "You are a biology expert. Explain concepts clearly in 2-3 sentences.", name: "Biologist");
+AIAgent physicist = client.AsAIAgent(model: deploymentName, instructions: "You are a physics expert. Explain concepts clearly in 2-3 sentences.", name: "Physicist");
+AIAgent chemist = client.AsAIAgent(model: deploymentName, instructions: "You are a chemistry expert. Explain concepts clearly in 2-3 sentences.", name: "Chemist");
 
 // Create workflows
 ParseQuestionExecutor questionParser = new();

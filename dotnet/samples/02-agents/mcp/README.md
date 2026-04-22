@@ -7,13 +7,13 @@ The getting started with Model Content Protocol samples demonstrate how to use M
 Before you begin, ensure you have the following prerequisites:
 
 - .NET 10.0 SDK or later
-- Azure OpenAI service endpoint and deployment configured
+- Azure AI Foundry project endpoint and model configured
 - Azure CLI installed and authenticated (for Azure credential authentication)
-- User has the `Cognitive Services OpenAI Contributor` role for the Azure OpenAI resource.
+- User has the `Cognitive Services OpenAI Contributor` role for the Azure AI Foundry project.
 
-**Note**: These samples use Azure OpenAI models. For more information, see [how to deploy Azure OpenAI models with Microsoft Foundry](https://learn.microsoft.com/en-us/azure/ai-foundry/how-to/deploy-models-openai).
+**Note**: These samples use Azure AI Foundry models. For more information, see [how to deploy models with Azure AI Foundry](https://learn.microsoft.com/en-us/azure/ai-foundry/how-to/deploy-models-openai).
 
-**Note**: These samples use Azure CLI credentials for authentication. Make sure you're logged in with `az login` and have access to the Azure OpenAI resource and have the `Cognitive Services OpenAI Contributor` role. For more information, see the [Azure CLI documentation](https://learn.microsoft.com/cli/azure/authenticate-azure-cli-interactively).
+**Note**: These samples use Azure CLI credentials for authentication. Make sure you're logged in with `az login` and have access to the Azure AI Foundry project and have the `Cognitive Services OpenAI Contributor` role. For more information, see the [Azure CLI documentation](https://learn.microsoft.com/cli/azure/authenticate-azure-cli-interactively).
 
 ## Samples
 
@@ -34,8 +34,8 @@ cd Agents_Step01_Running
 Set the following environment variables:
 
 ```powershell
-$env:AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/" # Replace with your Azure OpenAI resource endpoint
-$env:AZURE_OPENAI_DEPLOYMENT_NAME="gpt-5.4-mini"  # Optional, defaults to gpt-5.4-mini
+$env:FOUNDRY_PROJECT_ENDPOINT="https://your-project.services.ai.azure.com/" # Replace with your Azure AI Foundry project endpoint
+$env:FOUNDRY_MODEL="gpt-5.4-mini"  # Optional, defaults to gpt-5.4-mini
 ```
 
 If the variables are not set, you will be prompted for the values when running the samples.

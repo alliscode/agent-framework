@@ -6,35 +6,28 @@
 
 #pragma warning disable IDE0002 // Simplify Member Access
 
-using Azure;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Hosting.AzureFunctions;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.Hosting;
-using OpenAI.Chat;
 using WorkflowAndAgents;
 
-// Get the Azure OpenAI endpoint and deployment name from environment variables.
-string endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-string deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not set.");
+// Get the Azure AI Foundry endpoint and model from environment variables.
+string endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")
+    ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+string deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL")
+    ?? throw new InvalidOperationException("FOUNDRY_MODEL is not set.");
 
-// Use Azure Key Credential if provided, otherwise use Azure CLI Credential.
-string? azureOpenAiKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY");
-AzureOpenAIClient client = !string.IsNullOrEmpty(azureOpenAiKey)
-    ? new AzureOpenAIClient(new Uri(endpoint), new AzureKeyCredential(azureOpenAiKey))
-    : new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential());
-
-ChatClient chatClient = client.GetChatClient(deploymentName);
+AIProjectClient client = new(new Uri(endpoint), new DefaultAzureCredential());
 
 // Define a standalone AI agent
-AIAgent assistant = chatClient.AsAIAgent(
-    "You are a helpful assistant. Answer questions clearly and concisely.",
-    "Assistant",
+AIAgent assistant = client.AsAIAgent(
+    model: deploymentName,
+    instructions: "You are a helpful assistant. Answer questions clearly and concisely.",
+    name: "Assistant",
     description: "A general-purpose helpful assistant.");
 
 // Define workflow executors

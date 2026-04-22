@@ -3,37 +3,36 @@
 // Host Your Agent — Azure Functions hosting
 //
 // This sample shows the .NET hosting pattern:
-// - Create an agent with Azure OpenAI
+// - Create an agent with Azure AI Foundry
 // - Register it with DurableAgents
 // - Run with Azure Functions Core Tools (func start)
 //
 // Prerequisites:
 //   - Azure Functions Core Tools
-//   - Azure OpenAI resource
+//   - Azure AI Foundry resource
 //
 // Environment variables:
-//   AZURE_OPENAI_ENDPOINT
-//   AZURE_OPENAI_DEPLOYMENT_NAME (defaults to "gpt-5.4-mini")
+//   FOUNDRY_PROJECT_ENDPOINT
+//   FOUNDRY_MODEL (defaults to "gpt-5.4-mini")
 //
 // Run with: func start
 // Then call: POST http://localhost:7071/api/agents/HostedAgent/run
 
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Hosting.AzureFunctions;
 using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.Hosting;
-using OpenAI.Chat;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")
+    ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 
 // <create_agent>
-AIAgent agent = new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential())
-    .GetChatClient(deploymentName)
+AIAgent agent = new AIProjectClient(new Uri(endpoint), new DefaultAzureCredential())
     .AsAIAgent(
+        model: deploymentName,
         instructions: "You are a helpful assistant hosted in Azure Functions.",
         name: "HostedAgent");
 // </create_agent>

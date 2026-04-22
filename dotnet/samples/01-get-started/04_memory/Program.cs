@@ -11,27 +11,25 @@
 
 using System.Text;
 using System.Text.Json;
-using Azure.AI.OpenAI;
+using Azure.AI.Extensions.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OpenAI.Chat;
 using SampleApp;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 
-ChatClient chatClient = new AzureOpenAIClient(
-    new Uri(endpoint),
-    new DefaultAzureCredential())
-    .GetChatClient(deploymentName);
+AIProjectClient projectClient = new(new Uri(endpoint), new DefaultAzureCredential());
+IChatClient chatClient = projectClient.GetProjectOpenAIClient().GetProjectResponsesClientForModel(deploymentName).AsIChatClientWithStoredOutputDisabled(deploymentName);
 
 // <create_agent>
 // Create the agent with a memory provider that stores user info across turns.
-AIAgent agent = chatClient.AsAIAgent(new ChatClientAgentOptions()
+AIAgent agent = projectClient.AsAIAgent(new ChatClientAgentOptions()
 {
-    ChatOptions = new() { Instructions = "You are a friendly assistant." },
-    AIContextProviders = [new UserInfoMemory(chatClient.AsIChatClient())]
+    ChatOptions = new() { ModelId = deploymentName, Instructions = "You are a friendly assistant." },
+    AIContextProviders = [new UserInfoMemory(chatClient)]
 });
 // </create_agent>
 

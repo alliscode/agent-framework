@@ -17,17 +17,17 @@
 // using streaming (RunStreamingAsync), to demonstrate correct behavior in both modes.
 
 using System.ComponentModel;
-using Azure.AI.OpenAI;
+using Azure.AI.Extensions.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OpenAI.Responses;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
-var store = Environment.GetEnvironmentVariable("AZURE_OPENAI_RESPONSES_STORE") ?? "false";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
+var store = Environment.GetEnvironmentVariable("FOUNDRY_RESPONSES_STORE") ?? "false";
 
-AzureOpenAIClient openAIClient = new(new Uri(endpoint), new DefaultAzureCredential());
+AIProjectClient aiProjectClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
 // Define multiple tools so the model makes several tool calls in a single run.
 [Description("Get the current weather for a city.")]
@@ -55,9 +55,10 @@ static string GetTime([Description("The city name.")] string city) =>
 // Create the agent — per-service-call persistence is enabled via RequirePerServiceCallChatHistoryPersistence.
 // The in-memory ChatHistoryProvider is used by default when the service does not require service stored chat
 // history, so for those cases, we can inspect the chat history via session.TryGetInMemoryChatHistory().
+var responsesClient = aiProjectClient.GetProjectOpenAIClient().GetProjectResponsesClientForModel(deploymentName);
 IChatClient chatClient = string.Equals(store, "TRUE", StringComparison.OrdinalIgnoreCase) ?
-    openAIClient.GetResponsesClient().AsIChatClient(deploymentName) :
-    openAIClient.GetResponsesClient().AsIChatClientWithStoredOutputDisabled(deploymentName);
+    responsesClient.AsIChatClient(deploymentName) :
+    responsesClient.AsIChatClientWithStoredOutputDisabled(deploymentName);
 AIAgent agent = chatClient.AsAIAgent(
     new ChatClientAgentOptions
     {

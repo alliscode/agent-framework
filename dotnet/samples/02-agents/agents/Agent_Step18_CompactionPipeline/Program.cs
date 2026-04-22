@@ -11,21 +11,21 @@
 //   4. TruncationCompactionStrategy — Emergency token-budget backstop
 
 using System.ComponentModel;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Compaction;
 using Microsoft.Extensions.AI;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 
-AzureOpenAIClient openAIClient = new(new Uri(endpoint), new DefaultAzureCredential());
+AIProjectClient aiProjectClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
 // Create a chat client for the agent and a separate one for the summarization strategy.
 // Using the same model for simplicity; in production, use a smaller/cheaper model for summarization.
-IChatClient agentChatClient = openAIClient.GetChatClient(deploymentName).AsIChatClient();
-IChatClient summarizerChatClient = openAIClient.GetChatClient(deploymentName).AsIChatClient();
+IChatClient agentChatClient = aiProjectClient.GetProjectOpenAIClient().GetResponsesClient().AsIChatClient(deploymentName);
+IChatClient summarizerChatClient = aiProjectClient.GetProjectOpenAIClient().GetResponsesClient().AsIChatClient(deploymentName);
 
 // Define a tool the agent can use, so we can see tool-result compaction in action.
 [Description("Look up the current price of a product by name.")]

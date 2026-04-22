@@ -7,8 +7,7 @@
 
 using System.Text.Json;
 using AgentOrchestration_Concurrency;
-using Azure;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.DurableTask;
@@ -20,23 +19,18 @@ using Microsoft.DurableTask.Worker.AzureManaged;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using OpenAI.Chat;
 
-// Get the Azure OpenAI endpoint and deployment name from environment variables.
-string endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-string deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not set.");
+// Get the Azure AI Foundry endpoint and model from environment variables.
+string endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")
+    ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+string deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL")
+    ?? throw new InvalidOperationException("FOUNDRY_MODEL is not set.");
 
 // Get DTS connection string from environment variable
 string dtsConnectionString = Environment.GetEnvironmentVariable("DURABLE_TASK_SCHEDULER_CONNECTION_STRING")
     ?? "Endpoint=http://localhost:8080;TaskHub=default;Authentication=None";
 
-// Use Azure Key Credential if provided, otherwise use Azure CLI Credential.
-string? azureOpenAiKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY");
-AzureOpenAIClient client = !string.IsNullOrEmpty(azureOpenAiKey)
-    ? new AzureOpenAIClient(new Uri(endpoint), new AzureKeyCredential(azureOpenAiKey))
-    : new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential());
+AIProjectClient client = new(new Uri(endpoint), new DefaultAzureCredential());
 
 // Two agents used by the orchestration to demonstrate concurrent execution.
 const string PhysicistName = "PhysicistAgent";
@@ -45,8 +39,8 @@ const string PhysicistInstructions = "You are an expert in physics. You answer q
 const string ChemistName = "ChemistAgent";
 const string ChemistInstructions = "You are a middle school chemistry teacher. You answer questions so that middle school students can understand.";
 
-AIAgent physicistAgent = client.GetChatClient(deploymentName).AsAIAgent(PhysicistInstructions, PhysicistName);
-AIAgent chemistAgent = client.GetChatClient(deploymentName).AsAIAgent(ChemistInstructions, ChemistName);
+AIAgent physicistAgent = client.AsAIAgent(model: deploymentName, instructions: PhysicistInstructions, name: PhysicistName);
+AIAgent chemistAgent = client.AsAIAgent(model: deploymentName, instructions: ChemistInstructions, name: ChemistName);
 
 // Orchestrator function
 static async Task<object> RunOrchestratorAsync(TaskOrchestrationContext context, string prompt)

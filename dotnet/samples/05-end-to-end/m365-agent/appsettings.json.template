@@ -33,16 +33,16 @@
   // This is the configuration for the AI services, use environment variables or user secrets to store sensitive information.
   // Do not store sensitive information in this file
   "AIServices": {
-    "AzureOpenAI": {
-      "DeploymentName": "", // This is the Deployment (as opposed to model) Name of the Azure OpenAI model
-      "Endpoint": "", // This is the Endpoint of the Azure OpenAI resource
-      "ApiKey": "" // This is the API Key of the Azure OpenAI resource. Optional, uses AzureCliCredential if not provided
+    "AzureAIFoundry": {
+      "DeploymentName": "", // This is the Deployment (as opposed to model) Name of the Azure AI Foundry model
+      "Endpoint": "", // This is the Endpoint of the Azure AI Foundry project
+      "ApiKey": "" // This is the API Key of the Azure AI Foundry resource. Optional, uses AzureCliCredential if not provided
     },
     "OpenAI": {
       "ModelId": "", // This is the Model ID of the OpenAI model
       "ApiKey": "" // This is your API Key for the OpenAI service
     },
-    "UseAzureOpenAI": false // This is a flag to determine whether to use the Azure OpenAI or the OpenAI service
+    "UseAzureAIFoundry": false // This is a flag to determine whether to use the Azure AI Foundry or the OpenAI service
   },
 
   "Logging": {

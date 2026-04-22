@@ -5,12 +5,11 @@
 // This sample shows how to manage shared state between the
 // AG-UI server and client.
 
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Hosting.AGUI.AspNetCore;
 using Microsoft.Extensions.Options;
-using OpenAI.Chat;
 using RecipeAssistant;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -24,21 +23,19 @@ builder.WebHost.UseUrls("http://localhost:8888");
 
 WebApplication app = builder.Build();
 
-string endpoint = builder.Configuration["AZURE_OPENAI_ENDPOINT"]
-    ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-string deploymentName = builder.Configuration["AZURE_OPENAI_DEPLOYMENT_NAME"]
-    ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not set.");
+string endpoint = builder.Configuration["FOUNDRY_PROJECT_ENDPOINT"]
+    ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+string deploymentName = builder.Configuration["FOUNDRY_MODEL"]
+    ?? throw new InvalidOperationException("FOUNDRY_MODEL is not set.");
 
 // Get JsonSerializerOptions
 var jsonOptions = app.Services.GetRequiredService<IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>().Value;
 
 // Create base agent
-ChatClient chatClient = new AzureOpenAIClient(
-        new Uri(endpoint),
-        new DefaultAzureCredential())
-    .GetChatClient(deploymentName);
+AIProjectClient aiProjectClient = new(new Uri(endpoint), new DefaultAzureCredential());
 
-AIAgent baseAgent = chatClient.AsAIAgent(
+AIAgent baseAgent = aiProjectClient.AsAIAgent(
+    model: deploymentName,
     name: "RecipeAgent",
     instructions: """
         You are a helpful recipe assistant. When users ask you to create or suggest a recipe,

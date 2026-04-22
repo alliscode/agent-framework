@@ -12,22 +12,22 @@ This Agent Sample is intended to introduce you the basics of integrating Agent F
 - [devtunnel](https://learn.microsoft.com/azure/developer/dev-tunnels/get-started?tabs=windows)
 - [Microsoft 365 Agents Toolkit](https://github.com/OfficeDev/microsoft-365-agents-toolkit)
 
-- You will need an Azure OpenAI or OpenAI resource using `gpt-5.4-mini`
+- You will need an Azure AI Foundry or OpenAI resource using `gpt-5.4-mini`
  
-- Configure OpenAI in appsettings
+- Configure AI services in appsettings
 
   ```json
   "AIServices": {
-    "AzureOpenAI": {
-      "DeploymentName": "", // This is the Deployment (as opposed to model) Name of the Azure OpenAI model
-      "Endpoint": "", // This is the Endpoint of the Azure OpenAI resource
-      "ApiKey": "" // This is the API Key of the Azure OpenAI resource. Optional, uses DefaultAzureCredential if not provided
+    "AzureAIFoundry": {
+      "DeploymentName": "", // This is the Deployment (as opposed to model) Name of the Azure AI Foundry model
+      "Endpoint": "", // This is the Endpoint of the Azure AI Foundry project
+      "ApiKey": "" // This is the API Key of the Azure AI Foundry resource. Optional, uses DefaultAzureCredential if not provided
     },
     "OpenAI": {
       "ModelId": "", // This is the Model ID of the OpenAI model
       "ApiKey": "" // This is your API Key for the OpenAI service
     },
-    "UseAzureOpenAI": false // This is a flag to determine whether to use the Azure OpenAI or the OpenAI service
+    "UseAzureAIFoundry": false // This is a flag to determine whether to use the Azure AI Foundry or the OpenAI service
   }
   ```
 

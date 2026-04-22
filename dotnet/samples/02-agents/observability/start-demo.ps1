@@ -21,18 +21,18 @@ try {
     exit 1
 }
 
-# Check for Azure OpenAI configuration
-if ($env:AZURE_OPENAI_ENDPOINT) {
-    Write-Host "Found Azure OpenAI endpoint: $($env:AZURE_OPENAI_ENDPOINT)" -ForegroundColor Green
-    if ($env:AZURE_OPENAI_DEPLOYMENT_NAME) {
-        Write-Host "Using deployment: $($env:AZURE_OPENAI_DEPLOYMENT_NAME)" -ForegroundColor Green
+# Check for Azure AI Foundry configuration
+if ($env:FOUNDRY_PROJECT_ENDPOINT) {
+    Write-Host "Found Foundry project endpoint: $($env:FOUNDRY_PROJECT_ENDPOINT)" -ForegroundColor Green
+    if ($env:FOUNDRY_MODEL) {
+        Write-Host "Using deployment: $($env:FOUNDRY_MODEL)" -ForegroundColor Green
     } else {
-        Write-Host "Using default deployment: gpt-4o-mini" -ForegroundColor Cyan
+        Write-Host "Using default deployment: gpt-5.4-mini" -ForegroundColor Cyan
     }
 } else {
-    Write-Host "Warning: AZURE_OPENAI_ENDPOINT not found!" -ForegroundColor Yellow
-    Write-Host "Please set the AZURE_OPENAI_ENDPOINT environment variable" -ForegroundColor Yellow
-    Write-Host "Example: `$env:AZURE_OPENAI_ENDPOINT='https://your-resource.openai.azure.com/'" -ForegroundColor Yellow
+    Write-Host "Warning: FOUNDRY_PROJECT_ENDPOINT not found!" -ForegroundColor Yellow
+    Write-Host "Please set the FOUNDRY_PROJECT_ENDPOINT environment variable" -ForegroundColor Yellow
+    Write-Host "Example: `$env:FOUNDRY_PROJECT_ENDPOINT='https://your-project.services.ai.azure.com'" -ForegroundColor Yellow
     Write-Host ""
 }
 

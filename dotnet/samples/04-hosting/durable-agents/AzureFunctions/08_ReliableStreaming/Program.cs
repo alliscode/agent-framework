@@ -10,8 +10,7 @@
 
 #pragma warning disable IDE0002 // Simplify Member Access
 
-using Azure;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI.DurableTask;
 using Microsoft.Agents.AI.Hosting.AzureFunctions;
@@ -19,15 +18,14 @@ using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using OpenAI.Chat;
 using ReliableStreaming;
 using StackExchange.Redis;
 
-// Get the Azure OpenAI endpoint and deployment name from environment variables.
-string endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-string deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not set.");
+// Get the Azure AI Foundry endpoint and model from environment variables.
+string endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")
+    ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+string deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL")
+    ?? throw new InvalidOperationException("FOUNDRY_MODEL is not set.");
 
 // Get Redis connection string from environment variable.
 string redisConnectionString = Environment.GetEnvironmentVariable("REDIS_CONNECTION_STRING")
@@ -38,11 +36,7 @@ int redisStreamTtlMinutes = int.TryParse(
     Environment.GetEnvironmentVariable("REDIS_STREAM_TTL_MINUTES"),
     out int ttlMinutes) ? ttlMinutes : 10;
 
-// Use Azure Key Credential if provided, otherwise use Azure CLI Credential.
-string? azureOpenAiKey = System.Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY");
-AzureOpenAIClient client = !string.IsNullOrEmpty(azureOpenAiKey)
-    ? new AzureOpenAIClient(new Uri(endpoint), new AzureKeyCredential(azureOpenAiKey))
-    : new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential());
+AIProjectClient client = new(new Uri(endpoint), new DefaultAzureCredential());
 
 // Travel Planner agent instructions - designed to produce longer responses for demonstrating streaming.
 const string TravelPlannerName = "TravelPlanner";
@@ -72,7 +66,8 @@ FunctionsApplicationBuilder builder = FunctionsApplication
         // Define the Travel Planner agent with tools for weather and events
         options.AddAIAgentFactory(TravelPlannerName, sp =>
         {
-            return client.GetChatClient(deploymentName).AsAIAgent(
+            return client.AsAIAgent(
+                model: deploymentName,
                 instructions: TravelPlannerInstructions,
                 name: TravelPlannerName,
                 services: sp,

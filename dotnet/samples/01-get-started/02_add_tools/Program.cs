@@ -6,14 +6,13 @@
 // an agent so the model can call it.
 
 using System.ComponentModel;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OpenAI.Chat;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 
 // <define_tool>
 // Define a function tool the agent can call.
@@ -28,11 +27,11 @@ static string GetWeather([Description("The location to get the weather for.")] s
 // </define_tool>
 
 // <create_agent_with_tools>
-AIAgent agent = new AzureOpenAIClient(
+AIAgent agent = new AIProjectClient(
     new Uri(endpoint),
     new DefaultAzureCredential())
-    .GetChatClient(deploymentName)
     .AsAIAgent(
+        model: deploymentName,
         instructions: "You are a helpful weather agent. Use the GetWeather tool to answer questions.",
         tools: [AIFunctionFactory.Create(GetWeather)]);
 // </create_agent_with_tools>

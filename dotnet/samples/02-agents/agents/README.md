@@ -3,7 +3,7 @@
 The getting started with agents samples demonstrate the fundamental concepts and functionalities
 of single agents and can be used with any agent type.
 
-While the functionality can be used with any agent type, these samples use Azure OpenAI as the AI provider
+While the functionality can be used with any agent type, these samples use Azure AI Foundry as the AI provider
 and use ChatCompletion as the type of service.
 
 For other samples that demonstrate how to create and configure each type of agent that come with the agent framework,
@@ -14,13 +14,13 @@ see the [How to create an agent for each provider](../providers/README.md) sampl
 Before you begin, ensure you have the following prerequisites:
 
 - .NET 10 SDK or later
-- Azure OpenAI service endpoint and deployment configured
+- Azure AI Foundry project endpoint and model configured
 - Azure CLI installed and authenticated (for Azure credential authentication)
-- User has the `Cognitive Services OpenAI Contributor` role for the Azure OpenAI resource.
+- User has the `Cognitive Services OpenAI Contributor` role for the Azure AI Foundry project.
 
-**Note**: These samples use Azure OpenAI models. For more information, see [how to deploy Azure OpenAI models with Microsoft Foundry](https://learn.microsoft.com/en-us/azure/ai-foundry/how-to/deploy-models-openai).
+**Note**: These samples use Azure AI Foundry models. For more information, see [how to deploy Azure OpenAI models with Microsoft Foundry](https://learn.microsoft.com/en-us/azure/ai-foundry/how-to/deploy-models-openai).
 
-**Note**: These samples use Azure CLI credentials for authentication. Make sure you're logged in with `az login` and have access to the Azure OpenAI resource and have the `Cognitive Services OpenAI Contributor` role. For more information, see the [Azure CLI documentation](https://learn.microsoft.com/cli/azure/authenticate-azure-cli-interactively).
+**Note**: These samples use Azure CLI credentials for authentication. Make sure you're logged in with `az login` and have access to the Azure AI Foundry project and have the `Cognitive Services OpenAI Contributor` role. For more information, see the [Azure CLI documentation](https://learn.microsoft.com/cli/azure/authenticate-azure-cli-interactively).
 
 ## Samples
 
@@ -58,8 +58,8 @@ cd Agent_Step01_UsingFunctionToolsWithApprovals
 Set the following environment variables:
 
 ```powershell
-$env:AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/" # Replace with your Azure OpenAI resource endpoint
-$env:AZURE_OPENAI_DEPLOYMENT_NAME="gpt-5.4-mini"  # Optional, defaults to gpt-5.4-mini
+$env:FOUNDRY_PROJECT_ENDPOINT="https://your-project.services.ai.azure.com/" # Replace with your Azure AI Foundry project endpoint
+$env:FOUNDRY_MODEL="gpt-5.4-mini"  # Optional, defaults to gpt-5.4-mini
 ```
 
 If the variables are not set, you will be prompted for the values when running the samples.

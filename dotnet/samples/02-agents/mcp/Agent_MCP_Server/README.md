@@ -18,8 +18,8 @@ The sample shows:
 Set the following environment variables:
 
 ```powershell
-$env:AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/" # Replace with your Azure OpenAI resource endpoint
-$env:AZURE_OPENAI_DEPLOYMENT_NAME="gpt-5.4-mini"  # Optional, defaults to gpt-5.4-mini
+$env:FOUNDRY_PROJECT_ENDPOINT="https://your-project.services.ai.azure.com/" # Replace with your Azure AI Foundry project endpoint
+$env:FOUNDRY_MODEL="gpt-5.4-mini"  # Optional, defaults to gpt-5.4-mini
 ```
 
 ## Setup and Running

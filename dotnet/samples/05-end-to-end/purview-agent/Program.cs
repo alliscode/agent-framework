@@ -1,19 +1,19 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
 // This sample shows how to create and use a simple AI agent with Purview integration.
-// It uses Azure OpenAI as the backend, but any IChatClient can be used.
+// It uses Azure AI Foundry as the backend, but any IChatClient can be used.
 // Authentication to Purview is done using an InteractiveBrowserCredential.
 // Any TokenCredential with Purview API permissions can be used here.
 
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Core;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Purview;
 using Microsoft.Extensions.AI;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 var purviewClientAppId = Environment.GetEnvironmentVariable("PURVIEW_CLIENT_APP_ID") ?? throw new InvalidOperationException("PURVIEW_CLIENT_APP_ID is not set.");
 
 // This will get a user token for an entra app configured to call the Purview API.
@@ -23,11 +23,12 @@ TokenCredential browserCredential = new InteractiveBrowserCredential(
     {
         ClientId = purviewClientAppId
     });
-using IChatClient client = new AzureOpenAIClient(
+using IChatClient client = new AIProjectClient(
     new Uri(endpoint),
     new DefaultAzureCredential())
-    .GetResponsesClient()
-    .AsIChatClient(deploymentName)
+    .GetProjectOpenAIClient()
+    .GetChatClient(deploymentName)
+    .AsIChatClient()
     .AsBuilder()
     .WithPurview(browserCredential, new PurviewSettings("Agent Framework Test App"))
     .Build();

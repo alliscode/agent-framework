@@ -90,27 +90,26 @@ dotnet/samples/
 
 ## Default provider
 
-All canonical samples (01-get-started) use **Azure OpenAI** via `AzureOpenAIClient`
+All canonical samples use **Azure AI Foundry** via `AIProjectClient`
 with `DefaultAzureCredential`:
 
 ```csharp
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
-using OpenAI.Chat;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")
+    ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 
-AIAgent agent = new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential())
-    .GetChatClient(deploymentName)
-    .AsAIAgent(instructions: "...", name: "...");
+AIAgent agent = new AIProjectClient(new Uri(endpoint), new DefaultAzureCredential())
+    .AsAIAgent(model: deploymentName, instructions: "...", name: "...");
 ```
 
 Environment variables:
-- `AZURE_OPENAI_ENDPOINT` — Your Azure OpenAI endpoint
-- `AZURE_OPENAI_DEPLOYMENT_NAME` — Model deployment name (defaults to `gpt-5.4-mini`)
+- `FOUNDRY_PROJECT_ENDPOINT` — Your Azure AI Foundry project endpoint
+- `FOUNDRY_MODEL` — Model deployment name (defaults to `gpt-5.4-mini`)
+- `FOUNDRY_EMBEDDING_MODEL` — Embedding model name (where applicable)
 
 For authentication, run `az login` before running samples.
 
@@ -135,9 +134,9 @@ dotnet run
 
 ## Current API notes
 
-- `AIAgent` is the primary agent abstraction (created via `ChatClient.AsAIAgent(...)`)
+- `AIAgent` is the primary agent abstraction (created via `AIProjectClient.AsAIAgent(...)`)
 - `AgentSession` manages multi-turn conversation state
 - `AIContextProvider` injects memory and context
-- Prefer `client.GetChatClient(deployment).AsAIAgent(...)` extension method pattern
+- Prefer `new AIProjectClient(...).AsAIAgent(model, instructions, ...)` extension method pattern
 - Azure Functions hosting uses `ConfigureDurableAgents(options => options.AddAIAgent(agent))`
 - Workflows use `WorkflowBuilder` with `Executor<TIn, TOut>` and edge connections

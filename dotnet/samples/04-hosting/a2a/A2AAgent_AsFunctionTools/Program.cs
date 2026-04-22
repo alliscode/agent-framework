@@ -6,14 +6,13 @@
 
 using System.Text.RegularExpressions;
 using A2A;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OpenAI.Chat;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
+var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+var deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL") ?? "gpt-5.4-mini";
 var a2aAgentHost = Environment.GetEnvironmentVariable("A2A_AGENT_HOST") ?? throw new InvalidOperationException("A2A_AGENT_HOST is not set.");
 
 // Initialize an A2ACardResolver to get an A2A agent card.
@@ -26,11 +25,11 @@ AgentCard agentCard = await agentCardResolver.GetAgentCardAsync();
 AIAgent a2aAgent = agentCard.AsAIAgent();
 
 // Create the main agent, and provide the a2a agent skills as a function tools.
-AIAgent agent = new AzureOpenAIClient(
+AIAgent agent = new AIProjectClient(
     new Uri(endpoint),
     new DefaultAzureCredential())
-    .GetChatClient(deploymentName)
     .AsAIAgent(
+        model: deploymentName,
         instructions: "You are a helpful assistant that helps people with travel planning.",
         tools: [.. CreateFunctionTools(a2aAgent, agentCard)]
     );

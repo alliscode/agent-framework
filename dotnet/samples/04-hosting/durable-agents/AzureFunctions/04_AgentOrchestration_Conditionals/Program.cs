@@ -6,26 +6,20 @@
 
 #pragma warning disable IDE0002 // Simplify Member Access
 
-using Azure;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Hosting.AzureFunctions;
 using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.Hosting;
-using OpenAI.Chat;
 
-// Get the Azure OpenAI endpoint and deployment name from environment variables.
-string endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-string deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not set.");
+// Get the Azure AI Foundry endpoint and model from environment variables.
+string endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")
+    ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+string deploymentName = Environment.GetEnvironmentVariable("FOUNDRY_MODEL")
+    ?? throw new InvalidOperationException("FOUNDRY_MODEL is not set.");
 
-// Use Azure Key Credential if provided, otherwise use Azure CLI Credential.
-string? azureOpenAiKey = System.Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY");
-AzureOpenAIClient client = !string.IsNullOrEmpty(azureOpenAiKey)
-    ? new AzureOpenAIClient(new Uri(endpoint), new AzureKeyCredential(azureOpenAiKey))
-    : new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential());
+AIProjectClient client = new(new Uri(endpoint), new DefaultAzureCredential());
 
 // Two agents used by the orchestration to demonstrate conditional logic.
 const string SpamDetectionName = "SpamDetectionAgent";
@@ -34,11 +28,9 @@ const string SpamDetectionInstructions = "You are a spam detection assistant tha
 const string EmailAssistantName = "EmailAssistantAgent";
 const string EmailAssistantInstructions = "You are an email assistant that helps users draft responses to emails with professionalism.";
 
-AIAgent spamDetectionAgent = client.GetChatClient(deploymentName)
-    .AsAIAgent(SpamDetectionInstructions, SpamDetectionName);
+AIAgent spamDetectionAgent = client.AsAIAgent(model: deploymentName, instructions: SpamDetectionInstructions, name: SpamDetectionName);
 
-AIAgent emailAssistantAgent = client.GetChatClient(deploymentName)
-    .AsAIAgent(EmailAssistantInstructions, EmailAssistantName);
+AIAgent emailAssistantAgent = client.AsAIAgent(model: deploymentName, instructions: EmailAssistantInstructions, name: EmailAssistantName);
 
 using IHost app = FunctionsApplication
     .CreateBuilder(args)

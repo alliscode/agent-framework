@@ -5,29 +5,29 @@
 
 using System.ComponentModel;
 using AGUIServer;
-using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI.Hosting;
 using Microsoft.Agents.AI.Hosting.AGUI.AspNetCore;
 using Microsoft.Extensions.AI;
-using OpenAI.Chat;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHttpClient().AddLogging();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.TypeInfoResolverChain.Add(AGUIServerSerializerContext.Default));
 builder.Services.AddAGUI();
 
-string endpoint = builder.Configuration["AZURE_OPENAI_ENDPOINT"] ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-string deploymentName = builder.Configuration["AZURE_OPENAI_DEPLOYMENT_NAME"] ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not set.");
+string endpoint = builder.Configuration["FOUNDRY_PROJECT_ENDPOINT"] ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set.");
+string deploymentName = builder.Configuration["FOUNDRY_MODEL"] ?? throw new InvalidOperationException("FOUNDRY_MODEL is not set.");
 
 const string AgentName = "AGUIAssistant";
 
 // Create the AI agent with tools
-var agent = new AzureOpenAIClient(
+var agent = new AIProjectClient(
         new Uri(endpoint),
         new DefaultAzureCredential())
-    .GetChatClient(deploymentName)
     .AsAIAgent(
+        model: deploymentName,
+        instructions: "You are a helpful assistant.",
         name: AgentName,
         tools: [
             AIFunctionFactory.Create(
