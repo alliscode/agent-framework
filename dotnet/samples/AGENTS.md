@@ -81,8 +81,9 @@ dotnet/samples/
 2. **One concept per project** in 01-get-started. Each step is a standalone
    C# project with a single `Program.cs` file.
 
-3. **Workflows preserved**: 03-workflows/ keeps the upstream folder names
-   intact. Do not rename or restructure workflow samples.
+3. **Cross-language alignment**: Directory structure and naming conventions
+   mirror the Python samples (`kebab-case` concept folders, matching sample
+   progression). See [SAMPLE_GUIDELINES.md](./SAMPLE_GUIDELINES.md) for details.
 
 4. **Per-project structure**: Each sample is a separate .csproj. Shared build
    configuration is inherited from `Directory.Build.props`.
@@ -102,9 +103,6 @@ var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
     ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIAgent agent = new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential())
     .GetChatClient(deploymentName)
     .AsAIAgent(instructions: "...", name: "...");
