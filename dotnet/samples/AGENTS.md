@@ -17,18 +17,24 @@ dotnet/samples/
 ├── 02-agents/                         # Deep-dive concept samples
 │   ├── agents/                        # Core agent patterns (tools, structured output,
 │   │                                  #   conversations, middleware, plugins, MCP, etc.)
-│   ├── providers/                     # One project per provider (Azure OpenAI, OpenAI,
-│   │                                  #   Anthropic, Gemini, Ollama, ONNX, Foundry, etc.)
+│   ├── providers/                     # Provider-specific samples, organized by provider
+│   │   ├── a2a/                       #   Agent-to-Agent protocol provider
+│   │   ├── anthropic/                 #   Anthropic Claude models
+│   │   ├── azure/                     #   Azure OpenAI, Foundry Model, AI Project, etc.
+│   │   ├── custom/                    #   Custom AIAgent implementations
+│   │   ├── foundry/                   #   Microsoft Foundry (FoundryAgent + AsAIAgent)
+│   │   ├── github-copilot/            #   GitHub Copilot SDK
+│   │   ├── google-gemini/             #   Google Gemini
+│   │   ├── ollama/                    #   Ollama local models
+│   │   ├── onnx/                      #   ONNX Runtime
+│   │   └── openai/                    #   OpenAI direct (ChatCompletion + Responses)
 │   ├── observability/                 # OpenTelemetry integration
 │   ├── skills/                        # Agent skills patterns
-│   ├── anthropic/                     # Anthropic-specific samples
 │   ├── context-providers/             # Memory providers (chat history, Mem0, Foundry)
-│   ├── openai/                        # OpenAI-specific samples
 │   ├── rag/                           # RAG patterns (text, vector store, Foundry)
 │   ├── ag-ui/                         # AG-UI protocol samples
 │   ├── declarative/                   # Declarative agent definitions
 │   ├── devui/                         # DevUI samples
-│   ├── foundry/                       # Microsoft Foundry samples (FoundryAgent + AsAIAgent extensions)
 │   ├── evaluation/                    # Evaluation samples
 │   └── mcp/                           # MCP server/client patterns
 ├── 03-workflows/                      # Workflow patterns
