@@ -21,52 +21,16 @@ The following prerequisites are required to run the samples:
 
 - [.NET 10.0 SDK or later](https://dotnet.microsoft.com/download/dotnet)
 - [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local) (version 4.x or later)
-- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) installed and authenticated (`az login`) or an API key for the Azure OpenAI service
-- [Azure OpenAI Service](https://learn.microsoft.com/azure/ai-services/openai/how-to/create-resource) with a deployed model (gpt-5.4-mini or better is recommended)
+- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) installed and authenticated (`az login`)
+- [Azure AI Foundry](https://learn.microsoft.com/azure/ai-foundry/) project with a deployed model (gpt-5.4-mini or better is recommended)
 - [Durable Task Scheduler](https://learn.microsoft.com/azure/azure-functions/durable/durable-task-scheduler/develop-with-durable-task-scheduler) (local emulator or Azure-hosted)
 - [Docker](https://docs.docker.com/get-docker/) installed if running the Durable Task Scheduler emulator locally
 
-### Configuring RBAC Permissions for Azure OpenAI
+### Authentication
 
-These samples are configured to use the Azure OpenAI service with RBAC permissions to access the model. You'll need to configure the RBAC permissions for the Azure OpenAI service to allow the Azure Functions app to access the model.
+These samples use `DefaultAzureCredential` to authenticate with Azure AI Foundry. Ensure you are logged in with the Azure CLI (`az login`) and have the appropriate role assignments on your Azure AI Foundry project.
 
-Below is an example of how to configure the RBAC permissions for the Azure OpenAI service to allow the current user to access the model.
-
-Bash (Linux/macOS/WSL):
-
-```bash
-az role assignment create \
-    --assignee "yourname@contoso.com" \
-    --role "Cognitive Services OpenAI User" \
-    --scope /subscriptions/<your-subscription-id>/resourceGroups/<your-resource-group-name>/providers/Microsoft.CognitiveServices/accounts/<your-openai-resource-name>
-```
-
-PowerShell:
-
-```powershell
-az role assignment create `
-    --assignee "yourname@contoso.com" `
-    --role "Cognitive Services OpenAI User" `
-    --scope /subscriptions/<your-subscription-id>/resourceGroups/<your-resource-group-name>/providers/Microsoft.CognitiveServices/accounts/<your-openai-resource-name>
-```
-
-More information on how to configure RBAC permissions for Azure OpenAI can be found in the [Azure OpenAI documentation](https://learn.microsoft.com/azure/ai-services/openai/how-to/create-resource?pivots=cli).
-
-### Setting an API key for the Azure OpenAI service
-
-As an alternative to configuring Azure RBAC permissions, you can set an API key for the Azure OpenAI service by setting the `AZURE_OPENAI_API_KEY` environment variable.
-
-Bash (Linux/macOS/WSL):
-
-```bash
-export AZURE_OPENAI_API_KEY="your-api-key"
-```
-
-PowerShell:
-
-```powershell
-$env:AZURE_OPENAI_API_KEY="your-api-key"
-```
+> **Note:** API key authentication is not supported with Azure AI Foundry. Use `DefaultAzureCredential` (via `az login`, managed identity, or other supported credential types) instead.
 
 ### Start Durable Task Scheduler
 
@@ -101,13 +65,13 @@ azurite
 
 ### Environment Configuration
 
-Each sample has its own `local.settings.json` file that contains the environment variables for the sample. You'll need to update the `local.settings.json` file with the correct values for your Azure OpenAI resource.
+Each sample has its own `local.settings.json` file that contains the environment variables for the sample. You'll need to update the `local.settings.json` file with the correct values for your Azure AI Foundry project.
 
 ```json
 {
   "Values": {
-    "AZURE_OPENAI_ENDPOINT": "https://your-resource.openai.azure.com/",
-    "AZURE_OPENAI_DEPLOYMENT_NAME": "your-deployment-name"
+    "FOUNDRY_PROJECT_ENDPOINT": "https://your-project.services.ai.azure.com/",
+    "FOUNDRY_MODEL": "your-deployment-name"
   }
 }
 ```
@@ -117,15 +81,15 @@ Alternatively, you can set the environment variables in the command line.
 ### Bash (Linux/macOS/WSL)
 
 ```bash
-export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
-export AZURE_OPENAI_DEPLOYMENT_NAME="your-deployment-name"
+export FOUNDRY_PROJECT_ENDPOINT="https://your-project.services.ai.azure.com/"
+export FOUNDRY_MODEL="your-deployment-name"
 ```
 
 ### PowerShell
 
 ```powershell
-$env:AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
-$env:AZURE_OPENAI_DEPLOYMENT_NAME="your-deployment-name"
+$env:FOUNDRY_PROJECT_ENDPOINT="https://your-project.services.ai.azure.com/"
+$env:FOUNDRY_MODEL="your-deployment-name"
 ```
 
 These environment variables, when set, will override the values in the `local.settings.json` file, making it convenient to test the sample without having to update the `local.settings.json` file.

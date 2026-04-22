@@ -24,7 +24,7 @@ This sample creates three agents with different trigger configurations:
 See the [README.md](../README.md) file in the parent directory for complete setup instructions, including:
 
 - Prerequisites installation
-- Azure OpenAI configuration
+- Azure AI Foundry configuration
 - Durable Task Scheduler setup
 - Storage emulator configuration
 
@@ -32,17 +32,18 @@ For this sample, you'll also need to install [node.js](https://nodejs.org/en/dow
 
 ## Configuration
 
-Update your `local.settings.json` with your Azure OpenAI credentials:
+Update your `local.settings.json` with your Azure AI Foundry credentials:
 
 ```json
 {
   "Values": {
-    "AZURE_OPENAI_ENDPOINT": "https://your-resource.openai.azure.com/",
-    "AZURE_OPENAI_DEPLOYMENT_NAME": "your-deployment-name",
-    "AZURE_OPENAI_API_KEY": "your-api-key-if-not-using-rbac"
+    "FOUNDRY_PROJECT_ENDPOINT": "https://your-project.services.ai.azure.com/",
+    "FOUNDRY_MODEL": "your-deployment-name"
   }
 }
 ```
+
+> **Note:** Authentication uses `DefaultAzureCredential`. Ensure you are logged in with `az login`.
 
 ## Running the Sample
 

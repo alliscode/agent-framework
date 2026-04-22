@@ -74,10 +74,10 @@ Without this adapter, the workflow would fail because the agent cannot accept ra
 
 ## Prerequisites
 
-- An Azure OpenAI endpoint and deployment
+- An Azure AI Foundry project endpoint
 - Set the following environment variables:
-  - `AZURE_OPENAI_ENDPOINT` - Your Azure OpenAI endpoint URL
-  - `AZURE_OPENAI_DEPLOYMENT_NAME` - Your chat completion deployment name (defaults to "gpt-5.4-mini")
+  - `FOUNDRY_PROJECT_ENDPOINT` - Your Azure AI Foundry project endpoint URL
+  - `FOUNDRY_MODEL` - Your chat completion model deployment name (defaults to "gpt-5.4-mini")
 
 ## Running the Sample
 

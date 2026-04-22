@@ -25,11 +25,12 @@ This sample defines a single workflow:
 
 See the [README.md](../../README.md) file in the parent directory for more information on how to configure the environment, including how to install and run common sample dependencies.
 
-This sample requires Azure OpenAI. Set the following environment variables:
+This sample requires Azure AI Foundry. Set the following environment variables:
 
-- `AZURE_OPENAI_ENDPOINT` — Your Azure OpenAI endpoint URL.
-- `AZURE_OPENAI_DEPLOYMENT` — The name of your chat model deployment.
-- `AZURE_OPENAI_KEY` (optional) — Your Azure OpenAI API key. If not set, Azure CLI credentials are used.
+- `FOUNDRY_PROJECT_ENDPOINT` — Your Azure AI Foundry project endpoint URL.
+- `FOUNDRY_MODEL` — The name of your chat model deployment.
+
+> **Note:** Authentication uses `DefaultAzureCredential`. Ensure you are logged in with `az login`.
 
 ## Running the Sample
 

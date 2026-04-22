@@ -32,11 +32,12 @@ See the [README.md](../../README.md) file in the parent directory for complete s
 - Durable Task Scheduler setup
 - Storage emulator configuration
 
-This sample also requires Azure OpenAI credentials. Set the following in `local.settings.json`:
+This sample also requires Azure AI Foundry credentials. Set the following in `local.settings.json`:
 
-- `AZURE_OPENAI_ENDPOINT`: Your Azure OpenAI endpoint URL
-- `AZURE_OPENAI_DEPLOYMENT_NAME`: Your chat model deployment name
-- `AZURE_OPENAI_API_KEY` (optional): If not set, Azure CLI credential is used
+- `FOUNDRY_PROJECT_ENDPOINT`: Your Azure AI Foundry project endpoint URL
+- `FOUNDRY_MODEL`: Your chat model deployment name
+
+> **Note:** Authentication uses `DefaultAzureCredential`. Ensure you are logged in with `az login`.
 
 ## Running the Sample
 

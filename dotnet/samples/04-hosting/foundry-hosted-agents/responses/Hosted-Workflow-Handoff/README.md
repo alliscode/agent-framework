@@ -7,12 +7,12 @@ A hosted agent server demonstrating two patterns in a single app:
 
 Both agents are served over the Responses protocol. The server also exposes interactive web demos at `/tool-demo` and `/workflow-demo`.
 
-> Unlike the other samples in this folder, this one connects to an **Azure OpenAI** resource directly (not an Azure AI Foundry project endpoint).
+> This sample connects to an **Azure AI Foundry** project endpoint using `DefaultAzureCredential`.
 
 ## Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
-- An Azure OpenAI resource with a deployed model (e.g., `gpt-4o`)
+- An Azure AI Foundry project with a deployed model (e.g., `gpt-4o`)
 - Azure CLI logged in (`az login`)
 
 ## Configuration
@@ -26,14 +26,14 @@ cp .env.example .env
 Edit `.env`:
 
 ```env
-AZURE_OPENAI_ENDPOINT=https://<your-account>.openai.azure.com/
-AZURE_OPENAI_DEPLOYMENT=gpt-4o
+FOUNDRY_PROJECT_ENDPOINT=https://<your-project>.services.ai.azure.com/
+FOUNDRY_MODEL=gpt-4o
 AZURE_BEARER_TOKEN=DefaultAzureCredential
 ASPNETCORE_URLS=http://+:8088
 ASPNETCORE_ENVIRONMENT=Development
 ```
 
-`AZURE_BEARER_TOKEN=DefaultAzureCredential` is a sentinel value that tells the app to skip the bearer token and fall through to `DefaultAzureCredential` (requires `az login`). Set it to a real token only when running in Docker.
+`AZURE_BEARER_TOKEN=DefaultAzureCredential` is a sentinel value that tells the app to use `DefaultAzureCredential` for authentication (requires `az login`). Set it to a real token only when running in Docker.
 
 > **Note:** `.env` is gitignored. The `.env.example` template is checked in as a reference.
 
