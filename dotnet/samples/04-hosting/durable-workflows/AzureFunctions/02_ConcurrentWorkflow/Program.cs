@@ -1,5 +1,8 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Concurrent Workflow — Azure Functions Hosting
+// Demonstrates the Fan-out/Fan-in pattern in a durable workflow hosted as an Azure Function.
+
 using Azure;
 using Azure.AI.OpenAI;
 using Azure.Identity;

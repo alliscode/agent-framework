@@ -1,4 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
+
+// Multi-Agent Conditional Orchestration — Durable Task Hosting
+// Demonstrates conditional branching in a Durable Task orchestration with two agents:
+// a SpamDetectionAgent analyzes emails and an EmailAssistantAgent drafts responses.
+// The orchestration routes to different activity functions based on spam detection results.
 
 using AgentOrchestration_Conditionals;
 using Azure;
@@ -28,9 +33,6 @@ string dtsConnectionString = Environment.GetEnvironmentVariable("DURABLE_TASK_SC
 
 // Use Azure Key Credential if provided, otherwise use Azure CLI Credential.
 string? azureOpenAiKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY");
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AzureOpenAIClient client = !string.IsNullOrEmpty(azureOpenAiKey)
     ? new AzureOpenAIClient(new Uri(endpoint), new AzureKeyCredential(azureOpenAiKey))
     : new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential());

@@ -1,4 +1,9 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
+
+// Human-in-the-Loop Orchestration — Durable Task Hosting
+// Demonstrates the HITL pattern: a WriterAgent generates content, then waits for human
+// approval via external events. Handles approval, rejection with feedback for iterative
+// refinement, and timeout scenarios.
 
 using System.Text.Json;
 using AgentOrchestration_HITL;
@@ -29,9 +34,6 @@ string dtsConnectionString = Environment.GetEnvironmentVariable("DURABLE_TASK_SC
 
 // Use Azure Key Credential if provided, otherwise use Azure CLI Credential.
 string? azureOpenAiKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY");
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AzureOpenAIClient client = !string.IsNullOrEmpty(azureOpenAiKey)
     ? new AzureOpenAIClient(new Uri(endpoint), new AzureKeyCredential(azureOpenAiKey))
     : new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential());

@@ -1,5 +1,9 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Sequential Workflow — Durable Task Hosting
+// Demonstrates a simple sequential workflow where executors run one after another
+// in a defined order, passing results through the pipeline.
+
 using Microsoft.Agents.AI.DurableTask;
 using Microsoft.Agents.AI.DurableTask.Workflows;
 using Microsoft.Agents.AI.Workflows;

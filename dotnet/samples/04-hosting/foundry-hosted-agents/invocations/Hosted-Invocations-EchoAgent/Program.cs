@@ -1,5 +1,9 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Echo Agent — Hosted Invocations Agent
+// Demonstrates hosting a custom agent (no LLM) using the Azure AI Invocations API.
+// The agent echoes back user input, showing the minimal hosted agent pattern.
+
 using Azure.AI.AgentServer.Invocations;
 using DotNetEnv;
 using HostedInvocationsEchoAgent;

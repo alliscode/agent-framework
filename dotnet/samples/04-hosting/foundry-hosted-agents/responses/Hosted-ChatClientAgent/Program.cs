@@ -1,5 +1,9 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// ChatClient Agent — Hosted Agent (Responses API)
+// Demonstrates hosting an agent backed by a ChatClient using the Azure AI Responses API.
+// Shows how to use the standard IChatClient interface with hosted agent infrastructure.
+
 using Azure.AI.Projects;
 using Azure.Core;
 using Azure.Identity;

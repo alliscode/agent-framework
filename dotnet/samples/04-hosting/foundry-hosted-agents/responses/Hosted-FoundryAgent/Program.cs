@@ -1,5 +1,9 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Foundry Agent — Hosted Agent (Responses API)
+// Demonstrates hosting a Foundry agent using the Azure AI Responses API.
+// The agent runs as a hosted server that processes requests via the Foundry platform.
+
 using Azure.AI.Projects;
 using Azure.AI.Projects.Agents;
 using Azure.Core;

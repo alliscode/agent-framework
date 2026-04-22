@@ -1,5 +1,9 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Simple Invocations Agent Client — Hosted Agent Consumer
+// Demonstrates calling a remote invocations-based agent endpoint.
+// Connects to a running hosted agent and runs a conversational REPL.
+
 using DotNetEnv;
 using Microsoft.Agents.AI;
 

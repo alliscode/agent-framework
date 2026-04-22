@@ -1,5 +1,9 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+// Simple Agent Client — Foundry Hosted Agent Consumer
+// Demonstrates calling a remote hosted agent endpoint using the agent-framework SDK.
+// Connects to a running hosted agent and runs a conversational REPL.
+
 using System.ClientModel.Primitives;
 using Azure.AI.Extensions.OpenAI;
 using Azure.AI.Projects;

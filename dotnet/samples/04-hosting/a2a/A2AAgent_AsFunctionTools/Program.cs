@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 
 // This sample shows how to represent an A2A agent as a set of function tools, where each function tool
 // corresponds to a skill of the A2A agent, and register these function tools with another AI agent so
@@ -26,9 +26,6 @@ AgentCard agentCard = await agentCardResolver.GetAgentCardAsync();
 AIAgent a2aAgent = agentCard.AsAIAgent();
 
 // Create the main agent, and provide the a2a agent skills as a function tools.
-// WARNING: DefaultAzureCredential is convenient for development but requires careful consideration in production.
-// In production, consider using a specific credential (e.g., ManagedIdentityCredential) to avoid
-// latency issues, unintended credential probing, and potential security risks from fallback mechanisms.
 AIAgent agent = new AzureOpenAIClient(
     new Uri(endpoint),
     new DefaultAzureCredential())
