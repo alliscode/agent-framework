@@ -54,6 +54,7 @@ members = [
     "agent-framework-orchestrations",
     "agent-framework-purview",
     "agent-framework-redis",
+    "agent-framework-tools",
 ]
 constraints = [{ name = "litellm", url = "https://files.pythonhosted.org/packages/57/77/0c6eca2cb049793ddf8ce9cdcd5123a35666c4962514788c4fc90edf1d3b/litellm-1.82.1-py3-none-any.whl" }]
 
@@ -760,6 +761,17 @@ requires-dist = [
     { name = "redis", specifier = ">=6.4.0,<7.2.1" },
     { name = "redisvl", specifier = ">=0.11.0,<0.16" },
 ]
+
+[[package]]
+name = "agent-framework-tools"
+version = "1.0.0a260424"
+source = { editable = "packages/tools" }
+dependencies = [
+    { name = "agent-framework-core", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "agent-framework-core", editable = "packages/core" }]
 
 [[package]]
 name = "agentlightning"
