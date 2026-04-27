@@ -128,7 +128,74 @@ persistent-mode hazards that now have explicit fixes + regression tests:
   command still wanders. Documented explicitly; callers who need true
   confinement are pointed at CodeAct / future `HyperlightShellExecutor`.
 
+### Threat model
+
+Stating the threat model explicitly so users can reason about residual risk
+rather than relying on the word "safe":
+
+**Assets**
+- Files reachable from the agent process's effective user.
+- Network access from the host.
+- Credentials in the host environment / config / keychain.
+- The host itself (uptime, integrity).
+
+**Attacker model**
+- A model that has been prompt-injected via tool output, retrieved
+  documents, or adversarial user input. The model emits arbitrary commands
+  to the shell tool.
+- An end-user who has an interactive console and may approve or reject
+  each command.
+
+**Defenses (in priority order)**
+
+1. **Approval-in-the-loop** (`approval_mode="always_require"`, default).
+   Each command surfaces as a `user_input_request`; nothing runs without
+   human consent. **This is the only real boundary.** Disabling it
+   requires `acknowledge_unsafe=True` to make the risk explicit.
+2. **Operator trust / sandbox tier.** `LocalShellTool` is for
+   trusted-developer workflows. Untrusted input belongs in
+   `HyperlightCodeActProvider` (microVM) or a container.
+3. **Process-tree termination on timeout.** Delegated to `psutil` so
+   children (`make`, watchers, network tools) cannot survive a timeout.
+4. **Output truncation.** Bounded blast radius for runaway commands.
+5. **Audit hook.** `on_command` fires for every command that passes
+   policy, suitable for SIEM / append-only logs.
+
+**Explicit non-defenses (residual risk classes)**
+
+- The denylist is a **guardrail**, not a boundary. Documented bypasses:
+  backslash insertion (`r''m -rf /`), variable expansion
+  (`${RM:=rm} -rf /`), interpreter escape (`python -c "…os.system(…)"`),
+  base64 smuggling, `eval $(…)`, alternative tools (`find / -delete`),
+  PowerShell-native verbs (`Remove-Item -Recurse -Force`). See
+  `tests/test_security.py::test_known_denylist_bypasses` — those tests
+  *assert the bypasses succeed* to keep the residual risk visible in code.
+- `confine_workdir` is a per-call re-anchor, not a sandbox. A single
+  command can still `cd /tmp && rm *`.
+- Network egress is not restricted.
+- Environment-variable leakage to children is not blocked.
+- `AGENT_FRAMEWORK_SHELL` env var lets a caller redirect which shell binary
+  is launched. An attacker who can set env vars can already do worse.
+
+### Confidence strategy
+
+We do not claim to have eliminated risk. We claim to have:
+
+- A documented threat model (this section).
+- Test coverage that **encodes both defenses and non-defenses** so
+  regressions in either direction become visible.
+- Delegation to a battle-tested library (`psutil`) for the
+  security-critical lifecycle primitive.
+- No reliance on per-OS hand-rolled flag manipulation for things where a
+  canonical implementation exists.
+
+Anything claiming "production-ready for untrusted input" requires a
+formal external security review and a sandboxed executor. Today,
+`LocalShellTool` is not that thing — `HyperlightShellExecutor` (planned)
+will be.
+
 ### Non-goals for v1
+
 
 
 
