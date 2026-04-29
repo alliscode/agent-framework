@@ -25,7 +25,7 @@ It is the first end-to-end consumer of the .NET shell tool, validating that:
 
 | Variable | Description |
 |---|---|
-| `AZURE_FOUNDRY_OPENAI_ENDPOINT` | Foundry Responses endpoint. Required. |
+| `AZURE_AI_PROJECT_ENDPOINT` | Azure AI Foundry project endpoint. Required. |
 | `AZURE_AI_MODEL_DEPLOYMENT_NAME` | Model deployment. Defaults to `gpt-5.4`. |
 | `AGENT_FRAMEWORK_SHELL` | Optional: override shell binary (e.g. `/usr/bin/zsh`). |
 

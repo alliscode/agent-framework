@@ -13,17 +13,16 @@
 #pragma warning disable OPENAI001 // Suppress experimental API warnings for Responses API usage.
 #pragma warning disable MAAI001  // Suppress experimental API warnings for Agents AI experiments.
 
-using System.ClientModel.Primitives;
+using Azure.AI.Extensions.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Harness.Shared.Console;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Compaction;
 using Microsoft.Agents.AI.Tools.Shell;
 using Microsoft.Extensions.AI;
-using OpenAI;
-using OpenAI.Responses;
 
-var endpoint = Environment.GetEnvironmentVariable("AZURE_FOUNDRY_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_FOUNDRY_OPENAI_ENDPOINT is not set.");
+var endpoint = Environment.GetEnvironmentVariable("AZURE_AI_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("AZURE_AI_PROJECT_ENDPOINT is not set.");
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYMENT_NAME") ?? "gpt-5.4";
 
 const int MaxContextWindowTokens = 1_050_000;
@@ -85,14 +84,9 @@ var compactionStrategy = new ContextWindowCompactionStrategy(
     maxOutputTokens: MaxOutputTokens);
 
 AIAgent agent =
-    new OpenAIClient(
-        new BearerTokenPolicy(new DefaultAzureCredential(), "https://ai.azure.com/.default"),
-        new OpenAIClientOptions()
-        {
-            Endpoint = new Uri(endpoint),
-            RetryPolicy = new ClientRetryPolicy(3),
-        })
-    .GetResponsesClient()
+    new AIProjectClient(new Uri(endpoint), new DefaultAzureCredential())
+    .GetProjectOpenAIClient()
+    .GetProjectResponsesClientForModel(deploymentName)
     .AsIChatClientWithStoredOutputDisabled(deploymentName)
     .AsBuilder()
     .UseFunctionInvocation()
