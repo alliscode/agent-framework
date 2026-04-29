@@ -5,6 +5,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Microsoft.Agents.AI.Tools.Shell;
+using Microsoft.Extensions.AI;
 
 namespace Microsoft.Agents.AI.Tools.Shell.UnitTests;
 
@@ -96,12 +97,22 @@ public sealed class LocalShellToolTests
     }
 
     [Fact]
-    public void AsAIFunction_HasNameAndDescription()
+    public void AsAIFunction_DefaultsToApprovalRequired()
     {
         using var shell = new LocalShellTool();
         var fn = shell.AsAIFunction();
+        Assert.IsType<ApprovalRequiredAIFunction>(fn);
         Assert.Equal("run_shell", fn.Name);
         Assert.False(string.IsNullOrWhiteSpace(fn.Description));
+    }
+
+    [Fact]
+    public void AsAIFunction_OptOut_ReturnsPlainFunction()
+    {
+        using var shell = new LocalShellTool();
+        var fn = shell.AsAIFunction(requireApproval: false);
+        Assert.IsNotType<ApprovalRequiredAIFunction>(fn);
+        Assert.Equal("run_shell", fn.Name);
     }
 
     [Fact]

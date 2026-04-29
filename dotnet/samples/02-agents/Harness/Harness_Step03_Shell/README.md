@@ -43,6 +43,33 @@ Try prompts like:
 
 Each command is presented for approval before execution.
 
+## Security model
+
+- **Per-command approval is the only boundary.** Every `run_shell` call surfaces
+  a `ToolApprovalRequestContent` and runs only after the user approves it.
+  This is wired automatically by `LocalShellTool.AsAIFunction(...)`, which
+  wraps the function in `ApprovalRequiredAIFunction` by default. Combined
+  with the harness `UseToolApproval()` middleware, the user sees a prompt
+  for each command.
+- **There is no approved-directory allow-list.** If you want to scope by path
+  or command shape, pass a custom `ShellPolicy` with `allowList` regexes,
+  for example:
+
+  ```csharp
+  var policy = new ShellPolicy(
+      allowList: [
+          @"^(ls|cat|head|tail|grep|find) /repo/",
+          @"^git (status|log|diff)( |$)",
+      ]);
+  using var shell = new LocalShellTool(workingDirectory: "/repo", policy: policy);
+  ```
+
+  Anything not matching the allow-list is rejected before approval is
+  even requested.
+- **Disabling approval is opt-in:** `shell.AsAIFunction(requireApproval: false)`.
+  Only do this when the tool itself is the boundary (sandboxed container,
+  ephemeral VM, etc.).
+
 ## Known v1 gaps (vs Python)
 
 - Only `ShellMode.Stateless` is implemented. Persistent-session mode (sentinel

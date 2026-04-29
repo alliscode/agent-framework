@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
+﻿// Copyright (c) Microsoft. All rights reserved.
 
 // This sample demonstrates how to use the new Microsoft.Agents.AI.Tools.Shell
 // LocalShellTool inside the Harness stack: a ChatClientAgent equipped with
@@ -23,13 +23,17 @@ using Microsoft.Agents.AI.Tools.Shell;
 using Microsoft.Extensions.AI;
 
 var endpoint = Environment.GetEnvironmentVariable("AZURE_AI_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("AZURE_AI_PROJECT_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYMENT_NAME") ?? "gpt-5.4";
+var deploymentName = "gpt-5.2"; // Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYMENT_NAME") ?? "gpt-5.4";
 
 const int MaxContextWindowTokens = 1_050_000;
 const int MaxOutputTokens = 128_000;
 
-// Build the shell tool. Approval-in-the-loop is the security boundary, so
-// every call will surface as a ToolApprovalRequest in the harness console.
+// Build the shell tool. AsAIFunction(...) wraps the function in
+// ApprovalRequiredAIFunction by default, so every call surfaces a
+// ToolApprovalRequestContent that the harness console presents to the user
+// before the command runs. This is the security boundary — there is no
+// "approved directory" allow-list. Tighten further by passing a custom
+// ShellPolicy with an allow-list regex if you want to restrict commands.
 var shell = new LocalShellTool(
     timeout: TimeSpan.FromSeconds(30),
     maxOutputBytes: 32 * 1024,

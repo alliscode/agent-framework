@@ -241,13 +241,22 @@ public sealed class LocalShellTool : IDisposable
     /// </summary>
     /// <param name="name">Function name surfaced to the model. Defaults to <c>run_shell</c>.</param>
     /// <param name="description">Function description for the model.</param>
+    /// <param name="requireApproval">
+    /// When <see langword="true"/> (the default) the returned function is wrapped in
+    /// <see cref="ApprovalRequiredAIFunction"/>, so any agent built with
+    /// <c>UseFunctionInvocation()</c> + <c>UseToolApproval()</c> will surface a
+    /// <see cref="ToolApprovalRequestContent"/> that the harness can present to the user
+    /// before the command runs. This is the security boundary for the local shell tool —
+    /// disable only if you are intentionally running unattended (e.g. in a sandboxed
+    /// container where the tool itself is the boundary).
+    /// </param>
     /// <returns>An <see cref="AIFunction"/> wrapping <see cref="RunAsync"/>.</returns>
-    public AIFunction AsAIFunction(string name = "run_shell", string? description = null)
+    public AIFunction AsAIFunction(string name = "run_shell", string? description = null, bool requireApproval = true)
     {
         description ??= "Execute a single shell command and return its stdout, stderr, and exit code. " +
             "The tool runs commands directly on the host. The user reviews and approves each call.";
 
-        return AIFunctionFactory.Create(
+        var fn = AIFunctionFactory.Create(
             async ([Description("The shell command to execute.")] string command,
                 CancellationToken cancellationToken) =>
             {
@@ -266,6 +275,8 @@ public sealed class LocalShellTool : IDisposable
                 Name = name,
                 Description = description,
             });
+
+        return requireApproval ? new ApprovalRequiredAIFunction(fn) : fn;
     }
 
     /// <inheritdoc />
