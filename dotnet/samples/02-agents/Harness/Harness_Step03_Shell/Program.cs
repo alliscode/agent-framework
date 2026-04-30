@@ -35,6 +35,7 @@ const int MaxOutputTokens = 128_000;
 // "approved directory" allow-list. Tighten further by passing a custom
 // ShellPolicy with an allow-list regex if you want to restrict commands.
 var shell = new LocalShellTool(
+    mode: ShellMode.Persistent,
     timeout: TimeSpan.FromSeconds(30),
     maxOutputBytes: 32 * 1024,
     onCommand: cmd => Console.Error.WriteLine($"[shell] running: {cmd}"));
