@@ -150,8 +150,10 @@ public sealed class LocalShellToolTests
             mode: ShellMode.Persistent,
             timeout: TimeSpan.FromSeconds(20));
 
+        // Use `pwd` (alias for Get-Location → PathInfo object) on pwsh to
+        // exercise the formatter path that previously raced the sentinel.
         var (cdCmd, pwdCmd) = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? ("Set-Location ([System.IO.Path]::GetTempPath())", "(Get-Location).Path")
+            ? ("Set-Location ([System.IO.Path]::GetTempPath())", "pwd")
             : ("cd \"$(dirname \"$(mktemp -u)\")\"", "pwd");
 
         var first = await shell.RunAsync(cdCmd);
@@ -159,8 +161,7 @@ public sealed class LocalShellToolTests
 
         var second = await shell.RunAsync(pwdCmd);
         Assert.Equal(0, second.ExitCode);
-        Assert.False(string.IsNullOrWhiteSpace(second.Stdout));
-        // Result should look like a tmp dir, not the test runner cwd.
+        Assert.False(string.IsNullOrWhiteSpace(second.Stdout), $"pwd produced no output. stderr='{second.Stderr}'");
         var tmp = System.IO.Path.GetTempPath().TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
         Assert.Contains(System.IO.Path.GetFileName(tmp), second.Stdout, StringComparison.OrdinalIgnoreCase);
     }

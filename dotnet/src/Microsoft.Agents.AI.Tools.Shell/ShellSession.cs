@@ -471,7 +471,20 @@ internal sealed class ShellSession : IAsyncDisposable
                 " $__af_rc = 0;" +
                 " try {" +
                 $"   $__af_cmd = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded}'));" +
-                "   Invoke-Expression $__af_cmd;" +
+                // Force the user command's success output through the same
+                // [Console]::Out pipe as the sentinel, *inside the try* so
+                // every byte of output is flushed before the finally fires.
+                // Without this, pwsh defers Out-Default formatting until the
+                // script block returns and the sentinel races ahead of the
+                // user's output in the byte stream.
+                "   Invoke-Expression $__af_cmd 2>&1 | ForEach-Object {" +
+                "     if ($_ -is [System.Management.Automation.ErrorRecord]) {" +
+                "       [Console]::Error.WriteLine(($_ | Out-String).TrimEnd());" +
+                "     } else {" +
+                "       [Console]::WriteLine(($_ | Out-String).TrimEnd());" +
+                "     }" +
+                "   };" +
+                "   [Console]::Out.Flush();" +
                 "   if ($LASTEXITCODE -ne $null) { $__af_rc = $LASTEXITCODE }" +
                 "   elseif (-not $?) { $__af_rc = 1 }" +
                 " } catch {" +
