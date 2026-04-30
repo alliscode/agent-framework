@@ -294,8 +294,7 @@ public sealed class LocalShellTool : IDisposable, IAsyncDisposable
                 "or leave `requireApproval: true` (the default).");
         }
 
-        description ??= "Execute a single shell command and return its stdout, stderr, and exit code. " +
-            "The tool runs commands directly on the host. The user reviews and approves each call.";
+        description ??= this.BuildDefaultDescription();
 
         var fn = AIFunctionFactory.Create(
             async ([Description("The shell command to execute.")] string command,
@@ -431,6 +430,68 @@ public sealed class LocalShellTool : IDisposable, IAsyncDisposable
             }
             return (sb.ToString(), true);
         }
+    }
+
+    private string BuildDefaultDescription()
+    {
+        var sb = new StringBuilder();
+        _ = sb.Append("Execute a single shell command on the local machine and return its stdout, stderr, and exit code.");
+        _ = sb.Append(' ');
+
+        var os = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) ? "Windows"
+            : System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX) ? "macOS"
+            : System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Linux) ? "Linux"
+            : "POSIX";
+        _ = sb.Append("Operating system: ").Append(os).Append(". ");
+
+        var shellName = this._shell.Kind switch
+        {
+            ShellKind.PowerShell => "PowerShell (pwsh)",
+            ShellKind.Cmd => "cmd.exe",
+            ShellKind.Bash => "bash",
+            _ => "POSIX shell",
+        };
+        _ = sb.Append("Shell: ").Append(shellName).Append(" (binary: '").Append(this._shell.Binary).Append("'). ");
+
+        if (this._shell.Kind == ShellKind.PowerShell)
+        {
+            _ = sb.Append(
+                "Use PowerShell syntax — NOT bash/sh. Equivalents: ");
+            _ = sb.Append("`cd $env:TEMP` (NOT `cd /tmp`); ");
+            _ = sb.Append("`$env:VAR = 'x'` (NOT `VAR=x` or `export VAR=x`); ");
+            _ = sb.Append("`$env:VAR` (NOT `$VAR`); ");
+            _ = sb.Append("`Get-ChildItem` or `dir` (NOT `ls -la`); ");
+            _ = sb.Append("`Get-Content` or `cat` (built-in alias works); ");
+            _ = sb.Append("`Where-Object` / `Select-String` (NOT `grep`). ");
+        }
+        else if (this._shell.Kind == ShellKind.Bash)
+        {
+            _ = sb.Append("Use POSIX shell syntax (bash). ");
+        }
+
+        if (this._mode == ShellMode.Persistent)
+        {
+            _ = sb.Append(
+                "PERSISTENT MODE: a single long-lived shell handles every call. " +
+                "`cd`, exported / `$env:` variables, and function definitions DO persist across calls. " +
+                "Use this to your advantage: change directory once, then run subsequent commands without re-cd'ing.");
+        }
+        else
+        {
+            _ = sb.Append(
+                "STATELESS MODE: each call runs in a fresh shell. " +
+                "Working directory and environment variables DO NOT carry across calls — combine related steps into one command if state matters.");
+        }
+
+        _ = sb.Append(' ');
+        if (this._timeout is { } t)
+        {
+            _ = sb.Append("Per-call timeout: ").Append((int)t.TotalSeconds).Append("s. ");
+        }
+        _ = sb.Append("Output is truncated to ").Append(this._maxOutputBytes).Append(" bytes (head + tail). ");
+        _ = sb.Append("The user reviews and approves every call.");
+
+        return sb.ToString();
     }
 
     private static void KillProcessTree(Process process)

@@ -21,6 +21,7 @@ using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Compaction;
 using Microsoft.Agents.AI.Tools.Shell;
 using Microsoft.Extensions.AI;
+using System.Runtime.InteropServices;
 
 var endpoint = Environment.GetEnvironmentVariable("AZURE_AI_PROJECT_ENDPOINT") ?? throw new InvalidOperationException("AZURE_AI_PROJECT_ENDPOINT is not set.");
 var deploymentName = "gpt-5.2"; // Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYMENT_NAME") ?? "gpt-5.4";
@@ -40,10 +41,28 @@ var shell = new LocalShellTool(
     maxOutputBytes: 32 * 1024,
     onCommand: cmd => Console.Error.WriteLine($"[shell] running: {cmd}"));
 
-var instructions =
-    """
+var osLabel = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "Windows"
+    : RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "macOS"
+    : RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "Linux"
+    : "POSIX";
+var shellLabel = OperatingSystem.IsWindows() ? "PowerShell (pwsh)" : "bash";
+
+var instructions = $$"""
     You are an assistant with access to a local shell on the user's machine.
     The user reviews and approves every shell command you propose.
+
+    ## Working environment
+
+    - Operating system: {{osLabel}}
+    - Shell: {{shellLabel}}
+    - The shell session is PERSISTENT: a single long-lived shell handles every
+      tool call, so `cd`, environment variables, and function definitions
+      persist across calls. Use this to your advantage — change directory
+      once, then run subsequent commands without re-cd'ing.
+
+    Always write commands in the syntax of the actual shell above. On Windows
+    the shell is PowerShell, NOT bash — for example use `cd $env:TEMP` not
+    `cd /tmp`, `$env:VAR = 'x'` not `VAR=x`, and `Get-ChildItem` not `ls -la`.
 
     ## Mandatory planning workflow
 
