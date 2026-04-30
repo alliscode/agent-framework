@@ -123,4 +123,22 @@ internal readonly record struct ResolvedShell(string Binary, ShellKind Kind)
         ShellKind.Cmd => ["/d", "/c", command],
         _ => ["--noprofile", "--norc", "-c", command],
     };
+
+    /// <summary>
+    /// Argv for launching a long-lived shell that reads commands from stdin.
+    /// </summary>
+    public IReadOnlyList<string> PersistentArgv() => this.Kind switch
+    {
+        ShellKind.PowerShell =>
+        [
+            "-NoProfile",
+            "-NoLogo",
+            "-NonInteractive",
+            "-Command",
+            "-",
+        ],
+        ShellKind.Cmd => throw new NotSupportedException(
+            "Persistent mode is not supported for cmd.exe — use pwsh, powershell, or a POSIX shell."),
+        _ => ["--noprofile", "--norc"],
+    };
 }

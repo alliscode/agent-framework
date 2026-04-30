@@ -22,22 +22,27 @@ namespace Microsoft.Agents.AI.Tools.Shell;
 /// timeout terminates the process tree.
 /// </para>
 /// <para>
-/// This is the .NET counterpart to the Python <c>agent_framework_tools.shell.LocalShellTool</c>.
-/// The current build implements <see cref="ShellMode.Stateless"/> only — every call spawns a
-/// fresh shell. <see cref="ShellMode.Persistent"/> (long-lived shell + sentinel protocol) is
-/// reserved for a follow-up.
+/// Both <see cref="ShellMode.Stateless"/> (every call spawns a fresh shell) and
+/// <see cref="ShellMode.Persistent"/> (a long-lived shell that preserves <c>cd</c>, exported
+/// variables, etc. across calls via a sentinel protocol) are supported. Persistent mode is the
+/// recommended default for coding agents because it eliminates a class of "agent runs cd and
+/// then runs the wrong path" failures.
 /// </para>
 /// <para>
 /// <b>Threat model.</b> The deny list is a guardrail, not a security boundary. Real isolation
 /// requires either (a) approval-in-the-loop, where every command is reviewed by a human via the
-/// harness <c>ToolApprovalAgent</c>, or (b) container isolation. To disable approval gating you
-/// must pass <c>acknowledgeUnsafe: true</c>; otherwise the tool refuses to wire up.
+/// harness <c>ToolApprovalAgent</c> (this is the default; see
+/// <see cref="AsAIFunction(string, string?, bool)"/>), or (b) container isolation
+/// (<c>DockerShellTool</c>). To produce an unapproved <see cref="AIFunction"/> you must pass
+/// <c>acknowledgeUnsafe: true</c> at construction; otherwise <see cref="AsAIFunction"/> will
+/// refuse to return a non-approval-gated function.
 /// </para>
 /// </remarks>
-public sealed class LocalShellTool : IDisposable
+public sealed class LocalShellTool : IDisposable, IAsyncDisposable
 {
     private const int DefaultMaxOutputBytes = 64 * 1024;
 
+    private readonly ShellMode _mode;
     private readonly ShellPolicy _policy;
     private readonly ResolvedShell _shell;
     private readonly TimeSpan? _timeout;
@@ -45,18 +50,29 @@ public sealed class LocalShellTool : IDisposable
     private readonly string? _workingDirectory;
     private readonly IReadOnlyDictionary<string, string?>? _environment;
     private readonly Action<string>? _onCommand;
+    private readonly bool _acknowledgeUnsafe;
+    private ShellSession? _session;
+    private readonly object _sessionGate = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LocalShellTool"/> class.
     /// </summary>
-    /// <param name="mode">Execution mode. Currently only <see cref="ShellMode.Stateless"/> is implemented.</param>
+    /// <param name="mode">Execution mode. Defaults to <see cref="ShellMode.Stateless"/>; use
+    /// <see cref="ShellMode.Persistent"/> for a long-lived shell that preserves <c>cd</c>,
+    /// exported variables, and function definitions across calls.</param>
     /// <param name="shell">Override path to the shell binary. Falls back to the <c>AGENT_FRAMEWORK_SHELL</c> environment variable, then OS defaults.</param>
     /// <param name="workingDirectory">Working directory for the spawned shell. Defaults to the current process directory.</param>
     /// <param name="environment">Extra environment variables. Pass a <see langword="null"/> value to remove an inherited variable.</param>
     /// <param name="policy">Optional <see cref="ShellPolicy"/>. Defaults to a policy seeded with <see cref="ShellPolicy.DefaultDenyList"/>.</param>
     /// <param name="timeout">Per-command timeout. <see langword="null"/> disables timeouts.</param>
-    /// <param name="maxOutputBytes">Combined stdout/stderr cap before truncation.</param>
+    /// <param name="maxOutputBytes">Per-stream cap before head+tail truncation.</param>
     /// <param name="onCommand">Audit callback invoked for every allowed command.</param>
+    /// <param name="acknowledgeUnsafe">
+    /// Set to <see langword="true"/> to allow <see cref="AsAIFunction"/> to produce an
+    /// AIFunction without an <c>ApprovalRequiredAIFunction</c> wrapper. Required if you pass
+    /// <c>requireApproval: false</c> to <see cref="AsAIFunction"/>. The default is
+    /// <see langword="false"/>, which makes accidentally bypassing approval impossible.
+    /// </param>
     public LocalShellTool(
         ShellMode mode = ShellMode.Stateless,
         string? shell = null,
@@ -65,18 +81,15 @@ public sealed class LocalShellTool : IDisposable
         ShellPolicy? policy = null,
         TimeSpan? timeout = null,
         int maxOutputBytes = DefaultMaxOutputBytes,
-        Action<string>? onCommand = null)
+        Action<string>? onCommand = null,
+        bool acknowledgeUnsafe = false)
     {
-        if (mode == ShellMode.Persistent)
-        {
-            throw new NotSupportedException(
-                "Persistent mode is reserved for a follow-up release. Use ShellMode.Stateless.");
-        }
         if (maxOutputBytes <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(maxOutputBytes));
         }
 
+        this._mode = mode;
         this._policy = policy ?? new ShellPolicy();
         this._shell = ShellResolver.Resolve(shell);
         this._timeout = timeout ?? TimeSpan.FromSeconds(30);
@@ -84,6 +97,13 @@ public sealed class LocalShellTool : IDisposable
         this._workingDirectory = workingDirectory;
         this._environment = environment;
         this._onCommand = onCommand;
+        this._acknowledgeUnsafe = acknowledgeUnsafe;
+
+        if (mode == ShellMode.Persistent && this._shell.Kind == ShellKind.Cmd)
+        {
+            throw new NotSupportedException(
+                "Persistent mode is not supported for cmd.exe — use pwsh/powershell or override the shell with AGENT_FRAMEWORK_SHELL.");
+        }
     }
 
     /// <summary>Gets the resolved shell binary that will host commands.</summary>
@@ -112,6 +132,24 @@ public sealed class LocalShellTool : IDisposable
 
         this._onCommand?.Invoke(command);
 
+        return this._mode == ShellMode.Persistent
+            ? await this.RunPersistentAsync(command, cancellationToken).ConfigureAwait(false)
+            : await this.RunStatelessAsync(command, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ShellResult> RunPersistentAsync(string command, CancellationToken cancellationToken)
+    {
+        ShellSession session;
+        lock (this._sessionGate)
+        {
+            this._session ??= new ShellSession(this._shell, this._workingDirectory, this._environment, this._maxOutputBytes);
+            session = this._session;
+        }
+        return await session.RunAsync(command, this._timeout, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ShellResult> RunStatelessAsync(string command, CancellationToken cancellationToken)
+    {
         var startInfo = new ProcessStartInfo
         {
             FileName = this._shell.Binary,
@@ -150,26 +188,18 @@ public sealed class LocalShellTool : IDisposable
         }
 
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        var stdoutBuf = new StringBuilder();
-        var stderrBuf = new StringBuilder();
-        var stdoutTruncated = false;
-        var stderrTruncated = false;
+        var stdoutBuf = new HeadTailBuffer(this._maxOutputBytes);
+        var stderrBuf = new HeadTailBuffer(this._maxOutputBytes);
 
         process.OutputDataReceived += (_, e) =>
         {
-            if (e.Data is null)
-            {
-                return;
-            }
-            AppendCapped(stdoutBuf, e.Data, this._maxOutputBytes, ref stdoutTruncated);
+            if (e.Data is null) { return; }
+            stdoutBuf.AppendLine(e.Data);
         };
         process.ErrorDataReceived += (_, e) =>
         {
-            if (e.Data is null)
-            {
-                return;
-            }
-            AppendCapped(stderrBuf, e.Data, this._maxOutputBytes, ref stderrTruncated);
+            if (e.Data is null) { return; }
+            stderrBuf.AppendLine(e.Data);
         };
 
         var stopwatch = Stopwatch.StartNew();
@@ -226,12 +256,15 @@ public sealed class LocalShellTool : IDisposable
         // OutputDataReceived/ErrorDataReceived events have all fired.
         process.WaitForExit();
 
+        var (stdout, soutTrunc) = stdoutBuf.ToFinalString();
+        var (stderr, serrTrunc) = stderrBuf.ToFinalString();
+
         return new ShellResult(
-            Stdout: stdoutBuf.ToString(),
-            Stderr: stderrBuf.ToString(),
-            ExitCode: timedOut ? -1 : process.ExitCode,
+            Stdout: stdout,
+            Stderr: stderr,
+            ExitCode: timedOut ? 124 : process.ExitCode,
             Duration: stopwatch.Elapsed,
-            Truncated: stdoutTruncated || stderrTruncated,
+            Truncated: soutTrunc || serrTrunc,
             TimedOut: timedOut);
     }
 
@@ -253,6 +286,14 @@ public sealed class LocalShellTool : IDisposable
     /// <returns>An <see cref="AIFunction"/> wrapping <see cref="RunAsync"/>.</returns>
     public AIFunction AsAIFunction(string name = "run_shell", string? description = null, bool requireApproval = true)
     {
+        if (!requireApproval && !this._acknowledgeUnsafe)
+        {
+            throw new InvalidOperationException(
+                "Refusing to produce an AIFunction without approval gating. " +
+                "Pass `acknowledgeUnsafe: true` to the LocalShellTool constructor to opt out, " +
+                "or leave `requireApproval: true` (the default).");
+        }
+
         description ??= "Execute a single shell command and return its stdout, stderr, and exit code. " +
             "The tool runs commands directly on the host. The user reviews and approves each call.";
 
@@ -282,31 +323,114 @@ public sealed class LocalShellTool : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        // Reserved for persistent-mode resources (the long-lived shell process).
-        // Stateless mode owns no long-lived state, but Dispose is part of the
-        // contract so callers can write `using var shell = new LocalShellTool();`.
+#pragma warning disable VSTHRD002 // best-effort sync drain for users that didn't await DisposeAsync
+        this.DisposeAsync().AsTask().GetAwaiter().GetResult();
+#pragma warning restore VSTHRD002
     }
 
-    private static void AppendCapped(StringBuilder sb, string line, int cap, ref bool truncated)
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
     {
-        if (truncated)
+        ShellSession? session;
+        lock (this._sessionGate)
+        {
+            session = this._session;
+            this._session = null;
+        }
+        if (session is not null)
+        {
+            await session.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private static void AppendBounded(StringBuilder sb, string line, int hardCap)
+    {
+        if (sb.Length >= hardCap)
         {
             return;
         }
-        // Approximate cap on bytes via char length (UTF-16). Good enough for
-        // the byte cap — exact byte accounting would require encoding every
-        // append.
-        if (sb.Length + line.Length + 1 > cap)
+        var remaining = hardCap - sb.Length;
+        if (line.Length + 1 <= remaining)
         {
-            var allowed = Math.Max(0, cap - sb.Length);
-            if (allowed > 0)
+            _ = sb.AppendLine(line);
+        }
+        else
+        {
+            _ = sb.Append(line, 0, Math.Min(line.Length, remaining));
+        }
+    }
+
+    /// <summary>
+    /// Bounded accumulator that keeps the first <c>cap/2</c> chars of input and the
+    /// most recent <c>cap/2</c> chars (rolling tail). When the input fits in <c>cap</c>,
+    /// the result is the original concatenation. Otherwise the middle is dropped and
+    /// the result includes a "[... truncated N chars ...]" marker.
+    /// </summary>
+    private sealed class HeadTailBuffer
+    {
+        private readonly int _cap;
+        private readonly int _halfCap;
+        private readonly StringBuilder _head = new();
+        private readonly Queue<char> _tail = new();
+        private long _totalChars;
+
+        public HeadTailBuffer(int cap)
+        {
+            this._cap = cap;
+            this._halfCap = cap / 2;
+        }
+
+        public void AppendLine(string line)
+        {
+            this.AppendInternal(line);
+            this.AppendInternal("\n");
+        }
+
+        private void AppendInternal(string s)
+        {
+            for (var i = 0; i < s.Length; i++)
             {
-                _ = sb.Append(line, 0, Math.Min(allowed, line.Length));
+                this._totalChars++;
+                if (this._head.Length < this._halfCap)
+                {
+                    _ = this._head.Append(s[i]);
+                }
+                else
+                {
+                    this._tail.Enqueue(s[i]);
+                    if (this._tail.Count > this._halfCap)
+                    {
+                        _ = this._tail.Dequeue();
+                    }
+                }
             }
-            truncated = true;
-            return;
         }
-        _ = sb.AppendLine(line);
+
+        public (string text, bool truncated) ToFinalString()
+        {
+            if (this._totalChars <= this._cap)
+            {
+                var combined = new StringBuilder(this._head.Length + this._tail.Count);
+                _ = combined.Append(this._head);
+                foreach (var c in this._tail)
+                {
+                    _ = combined.Append(c);
+                }
+                return (combined.ToString(), false);
+            }
+
+            var dropped = this._totalChars - this._head.Length - this._tail.Count;
+            var sb = new StringBuilder();
+            _ = sb.Append(this._head);
+            _ = sb.Append('\n');
+            _ = sb.Append("[... truncated ").Append(dropped).Append(" chars ...]");
+            _ = sb.Append('\n');
+            foreach (var c in this._tail)
+            {
+                _ = sb.Append(c);
+            }
+            return (sb.ToString(), true);
+        }
     }
 
     private static void KillProcessTree(Process process)

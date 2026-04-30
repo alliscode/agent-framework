@@ -92,7 +92,7 @@ public sealed class LocalShellToolTests
             : "sleep 30";
         var result = await shell.RunAsync(sleepCmd);
         Assert.True(result.TimedOut);
-        Assert.Equal(-1, result.ExitCode);
+        Assert.Equal(124, result.ExitCode);
         Assert.True(result.Duration < TimeSpan.FromSeconds(10));
     }
 
@@ -107,18 +107,31 @@ public sealed class LocalShellToolTests
     }
 
     [Fact]
-    public void AsAIFunction_OptOut_ReturnsPlainFunction()
+    public void AsAIFunction_OptOut_RequiresAcknowledgeUnsafe()
     {
         using var shell = new LocalShellTool();
+        _ = Assert.Throws<InvalidOperationException>(() => shell.AsAIFunction(requireApproval: false));
+    }
+
+    [Fact]
+    public void AsAIFunction_OptOut_WithAck_ReturnsPlainFunction()
+    {
+        using var shell = new LocalShellTool(acknowledgeUnsafe: true);
         var fn = shell.AsAIFunction(requireApproval: false);
         Assert.IsNotType<ApprovalRequiredAIFunction>(fn);
         Assert.Equal("run_shell", fn.Name);
     }
 
     [Fact]
-    public void Persistent_Mode_NotImplemented_Throws()
+    public void Persistent_Mode_RejectsCmd()
     {
-        Assert.Throws<NotSupportedException>(() => new LocalShellTool(mode: ShellMode.Persistent));
+        // pwsh and bash work; cmd.exe doesn't because it lacks a sentinel-friendly REPL.
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+        _ = Assert.Throws<NotSupportedException>(() =>
+            new LocalShellTool(mode: ShellMode.Persistent, shell: "cmd.exe"));
     }
 
     [Fact]
@@ -128,5 +141,80 @@ public sealed class LocalShellToolTests
         using var shell = new LocalShellTool(onCommand: cmd => calls.Add(cmd));
         await Assert.ThrowsAsync<ShellCommandRejectedException>(() => shell.RunAsync("rm -rf /"));
         Assert.Empty(calls);
+    }
+
+    [Fact]
+    public async Task Persistent_CarriesWorkingDirectory_AcrossCalls()
+    {
+        await using var shell = new LocalShellTool(
+            mode: ShellMode.Persistent,
+            timeout: TimeSpan.FromSeconds(20));
+
+        var (cdCmd, pwdCmd) = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? ("Set-Location ([System.IO.Path]::GetTempPath())", "(Get-Location).Path")
+            : ("cd \"$(dirname \"$(mktemp -u)\")\"", "pwd");
+
+        var first = await shell.RunAsync(cdCmd);
+        Assert.Equal(0, first.ExitCode);
+
+        var second = await shell.RunAsync(pwdCmd);
+        Assert.Equal(0, second.ExitCode);
+        Assert.False(string.IsNullOrWhiteSpace(second.Stdout));
+        // Result should look like a tmp dir, not the test runner cwd.
+        var tmp = System.IO.Path.GetTempPath().TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+        Assert.Contains(System.IO.Path.GetFileName(tmp), second.Stdout, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Persistent_CarriesEnvironment_AcrossCalls()
+    {
+        await using var shell = new LocalShellTool(
+            mode: ShellMode.Persistent,
+            timeout: TimeSpan.FromSeconds(20));
+
+        var (setCmd, readCmd) = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? ("$env:AF_SHELL_TEST = 'persisted-value'", "$env:AF_SHELL_TEST")
+            : ("export AF_SHELL_TEST=persisted-value", "echo $AF_SHELL_TEST");
+
+        _ = await shell.RunAsync(setCmd);
+        var read = await shell.RunAsync(readCmd);
+        Assert.Equal(0, read.ExitCode);
+        Assert.Contains("persisted-value", read.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Persistent_Timeout_ReturnsExitCode124()
+    {
+        await using var shell = new LocalShellTool(
+            mode: ShellMode.Persistent,
+            timeout: TimeSpan.FromMilliseconds(400));
+
+        var sleepCmd = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? "Start-Sleep -Seconds 30"
+            : "sleep 30";
+
+        var result = await shell.RunAsync(sleepCmd);
+        Assert.True(result.TimedOut);
+        Assert.Equal(124, result.ExitCode);
+    }
+
+    [Fact]
+    public async Task Stateless_OutputTruncation_UsesHeadTailFormat()
+    {
+        // 2KB cap, emit ~10KB → must be truncated and contain the head+tail marker.
+        using var shell = new LocalShellTool(
+            maxOutputBytes: 2048,
+            timeout: TimeSpan.FromSeconds(20));
+
+        var bigCmd = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? "1..400 | ForEach-Object { 'line-' + $_ + '-padding-padding-padding' }"
+            : "for i in $(seq 1 400); do echo \"line-$i-padding-padding-padding\"; done";
+
+        var result = await shell.RunAsync(bigCmd);
+        Assert.True(result.Truncated);
+        Assert.Contains("truncated", result.Stdout, StringComparison.OrdinalIgnoreCase);
+        // Should keep both ends — first and last line should be visible.
+        Assert.Contains("line-1-", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("line-400-", result.Stdout, StringComparison.Ordinal);
     }
 }
