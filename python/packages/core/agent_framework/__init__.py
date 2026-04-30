@@ -79,6 +79,7 @@ from ._evaluation import (
     tool_calls_present,
 )
 from ._feature_stage import ExperimentalFeature, ReleaseCandidateFeature
+from ._filesystem import FileSystemPolicy, FileSystemTool
 from ._mcp import MCPStdioTool, MCPStreamableHTTPTool, MCPWebsocketTool
 from ._middleware import (
     AgentContext,
@@ -331,6 +332,8 @@ __all__ = [
     "FanOutEdgeGroup",
     "FileCheckpointStorage",
     "FileHistoryProvider",
+    "FileSystemPolicy",
+    "FileSystemTool",
     "FinalT",
     "FinishReason",
     "FinishReasonLiteral",

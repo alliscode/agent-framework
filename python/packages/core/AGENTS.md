@@ -74,6 +74,11 @@ agent_framework/
 - **`SkillScriptRunner`** - Protocol for file-based script execution. Any callable matching `(skill, script, args) -> Any` satisfies it. Code-defined scripts do not use a runner.
 - **`SkillsProvider`** - Context provider (extends `ContextProvider`) that discovers file-based skills from `SKILL.md` files and/or accepts code-defined `Skill` instances. Follows progressive disclosure: advertise → load → read resources / run scripts.
 
+### Filesystem Tool (`_filesystem.py`)
+
+- **`FileSystemTool`** - Sandboxed filesystem operations exposed as `FunctionTool` instances via `as_tools()`. Supports `fs_view`, `fs_create`, `fs_edit`, `fs_multi_edit` (atomic batch of unique-match edits), `fs_glob`, `fs_grep` (uses `rg` if available, pure-Python fallback), `fs_list_dir`, plus `fs_delete`, `fs_move`, and `fs_rename` (which always require user approval). Mandatory workspace `root` argument; rejects path traversal and symlink escape; reuses `_path_security` helpers.
+- **`FileSystemPolicy`** - Configures `read_paths`, `write_paths`, `denylist` (defaults block `.git`, `.env*`, SSH keys, credentials), `respect_gitignore` (default `True`; applies to `glob`/`grep`/`list_dir` only), size and result limits.
+
 ### Workflows (`_workflows/`)
 
 - **`Workflow`** - Graph-based workflow definition

@@ -36,6 +36,8 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar, Final, Protocol, runtime_checkable
 
 from ._feature_stage import ExperimentalFeature, experimental
+from ._path_security import has_symlink_in_path as _has_symlink_in_path
+from ._path_security import is_path_within_directory as _is_path_within_directory
 from ._sessions import ContextProvider
 from ._tools import FunctionTool
 
@@ -965,58 +967,6 @@ def _normalize_resource_path(path: str) -> str:
         A clean forward-slash-separated path string.
     """
     return PurePosixPath(path.replace("\\", "/")).as_posix()
-
-
-def _is_path_within_directory(path: str, directory: str) -> bool:
-    """Return whether *path* resides under *directory*.
-
-    Comparison uses :meth:`pathlib.Path.is_relative_to`, which respects
-    per-platform case-sensitivity rules.
-
-    Args:
-        path: Absolute path to check.
-        directory: Directory that must be an ancestor of *path*.
-
-    Returns:
-        ``True`` if *path* is a descendant of *directory*.
-    """
-    try:
-        return Path(path).is_relative_to(directory)
-    except (ValueError, OSError):
-        return False
-
-
-def _has_symlink_in_path(path: str, directory: str) -> bool:
-    """Detect symlinks in the portion of *path* below *directory*.
-
-    Only segments below *directory* are inspected; the directory itself
-    and anything above it are not checked.
-
-    **Precondition:** *path* must be a descendant of *directory*.
-    Call :func:`_is_path_within_directory` first to verify containment.
-
-    Args:
-        path: Absolute path to inspect.
-        directory: Root directory; segments above it are not checked.
-
-    Returns:
-        ``True`` if any intermediate segment below *directory* is a symlink.
-
-    Raises:
-        ValueError: If *path* is not relative to *directory*.
-    """
-    dir_path = Path(directory)
-    try:
-        relative = Path(path).relative_to(dir_path)
-    except ValueError as exc:
-        raise ValueError(f"path {path!r} does not start with directory {directory!r}") from exc
-
-    current = dir_path
-    for part in relative.parts:
-        current = current / part
-        if current.is_symlink():
-            return True
-    return False
 
 
 def _discover_resource_files(
