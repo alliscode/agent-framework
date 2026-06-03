@@ -49,18 +49,25 @@ internal sealed class FunctionInvocationDelegatingAgent : DelegatingAIAgent
         var originalFactory = aco.ChatClientFactory;
         aco.ChatClientFactory = chatClient =>
         {
-            var builder = chatClient.AsBuilder();
-
+            // When multiple FunctionInvocationDelegatingAgents are stacked, the outer agent's
+            // factory is stored in originalFactory. To maintain correct middleware order
+            // (outer.Pre -> inner.Pre -> function -> inner.Post -> outer.Post), we must:
+            // 1. Apply the outer middleware's factory first (if any)
+            // 2. Then apply the current (inner) middleware's tool wrapping on top
+            //
+            // This creates a ConfigureOptions chain where inner's transforms run first,
+            // causing outer's tool wrapper to be the outermost layer during invocation.
             if (originalFactory is not null)
             {
-                builder.Use(originalFactory);
+                chatClient = originalFactory(chatClient);
             }
 
-            return builder.ConfigureOptions(co
-                => co.Tools = co.Tools?.Select(tool => tool is AIFunction aiFunction
-                        ? new MiddlewareEnabledFunction(this.InnerAgent, aiFunction, this._delegateFunc)
-                        : tool)
-                    .ToList())
+            return chatClient.AsBuilder()
+                .ConfigureOptions(co
+                    => co.Tools = co.Tools?.Select(tool => tool is AIFunction aiFunction
+                            ? new MiddlewareEnabledFunction(this.InnerAgent, aiFunction, this._delegateFunc)
+                            : tool)
+                        .ToList())
                 .Build();
         };
 

@@ -642,6 +642,9 @@ public sealed class FunctionInvocationDelegatingAgentTests
 
     /// <summary>
     /// Tests execution order with multiple function middleware instances in a chain.
+    /// When Second wraps First (Second is outer, First is inner), the expected order is:
+    /// Outer.Pre -> Inner.Pre -> Function -> Inner.Post -> Outer.Post
+    /// i.e., Second.Pre -> First.Pre -> Function -> First.Post -> Second.Post
     /// </summary>
     [Fact]
     public async Task RunAsync_MultipleFunctionMiddleware_ExecutesInCorrectOrderAsync()
@@ -691,7 +694,7 @@ public sealed class FunctionInvocationDelegatingAgentTests
             return result;
         }
 
-        // Create nested middleware chain
+        // Create nested middleware chain: Second wraps First, so Second is outer, First is inner
         var firstMiddleware = new FunctionInvocationDelegatingAgent(innerAgent, FirstMiddlewareAsync);
         var secondMiddleware = new FunctionInvocationDelegatingAgent(firstMiddleware, SecondMiddlewareAsync);
 
@@ -699,8 +702,78 @@ public sealed class FunctionInvocationDelegatingAgentTests
         var options = new ChatClientAgentRunOptions(new ChatOptions { Tools = [testFunction] });
         await secondMiddleware.RunAsync(messages, null, options, CancellationToken.None);
 
-        // Assert
-        var expectedOrder = new[] { "First-Pre", "Second-Pre", "Function-Executed", "Second-Post", "First-Post" };
+        // Assert: Outer.Pre -> Inner.Pre -> Function -> Inner.Post -> Outer.Post
+        var expectedOrder = new[] { "Second-Pre", "First-Pre", "Function-Executed", "First-Post", "Second-Post" };
+        Assert.Equal(expectedOrder, executionOrder);
+    }
+
+    /// <summary>
+    /// Regression test for GitHub issue #6260: Order inversion in FunctionCallMiddleware.
+    /// When registering Use(A) then Use(B), the expected function invocation order is:
+    /// A.Pre -> B.Pre -> function -> B.Post -> A.Post (A is outer, B is inner)
+    /// This tests the AIAgentBuilder.Use() pattern specifically.
+    /// </summary>
+    [Fact]
+    public async Task AIAgentBuilder_Use_MultipleFunctionMiddleware_ExecutesInCorrectOrder_Issue6260Async()
+    {
+        // Arrange
+        var executionOrder = new List<string>();
+        var testFunction = AIFunctionFactory.Create(() =>
+        {
+            executionOrder.Add("Function-Executed");
+            return "Function result";
+        }, "TestFunction", "A test function");
+
+        var functionCall = new FunctionCallContent("call_123", "TestFunction", new Dictionary<string, object?>());
+        var mockChatClient = new Mock<IChatClient>();
+
+        // Setup sequence: first call returns function call, subsequent calls return final response
+        var responseWithFunctionCall = new ChatResponse([
+            new ChatMessage(ChatRole.Assistant, [functionCall])
+        ]);
+        var finalResponse = new ChatResponse([
+            new ChatMessage(ChatRole.Assistant, "Final response")
+        ]);
+
+        mockChatClient.SetupSequence(c => c.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(responseWithFunctionCall)
+            .ReturnsAsync(finalResponse);
+
+        var innerAgent = new ChatClientAgent(mockChatClient.Object);
+        var messages = new List<ChatMessage> { new(ChatRole.User, "Test message") };
+
+        async ValueTask<object?> MiddlewareAAsync(AIAgent agent, FunctionInvocationContext context, Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>> next, CancellationToken cancellationToken)
+        {
+            executionOrder.Add("A-Pre");
+            var result = await next(context, cancellationToken);
+            executionOrder.Add("A-Post");
+            return result;
+        }
+
+        async ValueTask<object?> MiddlewareBAsync(AIAgent agent, FunctionInvocationContext context, Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>> next, CancellationToken cancellationToken)
+        {
+            executionOrder.Add("B-Pre");
+            var result = await next(context, cancellationToken);
+            executionOrder.Add("B-Post");
+            return result;
+        }
+
+        // Build agent with Use(A) then Use(B) - A should be outer, B should be inner
+        var agent = new AIAgentBuilder(innerAgent)
+            .Use(MiddlewareAAsync)
+            .Use(MiddlewareBAsync)
+            .Build();
+
+        // Act
+        var options = new ChatClientAgentRunOptions(new ChatOptions { Tools = [testFunction] });
+        await agent.RunAsync(messages, null, options, CancellationToken.None);
+
+        // Assert: A (first registered) should be outer, B (second registered) should be inner
+        // Expected order: A.Pre -> B.Pre -> function -> B.Post -> A.Post
+        var expectedOrder = new[] { "A-Pre", "B-Pre", "Function-Executed", "B-Post", "A-Post" };
         Assert.Equal(expectedOrder, executionOrder);
     }
 
