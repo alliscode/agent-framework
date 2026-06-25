@@ -72,6 +72,7 @@ from agent_framework import InMemoryHistoryProvider, create_harness_agent, todos
 from agent_framework.foundry import FoundryChatClient
 from agent_framework_eval_harness import EvalHarness
 from agent_framework_eval_harness.benchmarks import GAIABenchmark
+from agent_framework_monty import MontyCodeActProvider
 from azure.identity import AzureCliCredential
 from dotenv import load_dotenv
 
@@ -142,18 +143,20 @@ async def main(args: argparse.Namespace) -> None:
     # Key choices for a fair apples-to-apples comparison against LangGraph
     # Deep Research Agent and Claude Opus:
     #   - Web search: enabled automatically by create_harness_agent
-    #   - Code interpreter: Foundry-hosted Python sandbox for arithmetic,
-    #     sorting, counting — the main gap vs published GAIA scores
+    #   - MontyCodeActProvider: local Python interpreter for arithmetic,
+    #     sorting, counting — the main gap vs published GAIA scores.
+    #     Uses pydantic-monty (Rust-backed Python sandbox), no extra services.
     #   - TodoProvider + looping: structured multi-step planning while open todos remain
     #   - File memory/access: disabled (not available in competing systems)
     #   - loop_max_iterations=15: generous cap for complex GAIA tasks
+    codeact = MontyCodeActProvider(approval_mode="never_require")
     agent = create_harness_agent(
         client=client,
         max_context_window_tokens=128_000,
         max_output_tokens=8_192,
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
-        tools=[client.get_code_interpreter_tool()],
+        context_providers=[codeact],
         loop_should_continue=todos_remaining(),
         loop_next_message=todos_remaining_message,
         loop_max_iterations=15,
