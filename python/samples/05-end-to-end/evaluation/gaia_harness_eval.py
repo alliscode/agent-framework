@@ -68,11 +68,9 @@ import asyncio
 import os
 import re
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 import aiohttp
 from agent_framework import (
-    Agent,
     AgentContext,
     AgentMiddleware,
     AgentResponse,
@@ -133,10 +131,9 @@ You are a precise research assistant answering GAIA benchmark questions.
 
 ### How to work
 
-For most research questions, use the `deep_research` tool — it searches the web
-and reads full page content to find precise answers.
-Use `fetch_url` directly when you already know a specific URL to read.
-Use `execute_code` for arithmetic, counting, sorting, or data manipulation.
+Use web search to find relevant pages, then fetch_url to read their full content.
+Search multiple sources and cross-reference before committing to an answer.
+Use execute_code for arithmetic, counting, sorting, or data manipulation.
 For multi-step questions, create todos to track each sub-task before executing.
 Always verify facts with tools — GAIA questions require specific, current knowledge.
 
@@ -165,7 +162,13 @@ _FINAL_ANSWER_RE = re.compile(r"FINAL\s+ANSWER\s*[:\-]\s*(.+?)(?:\n|$)", re.IGNO
 # Only strip at ". Word" when the preceding token is a full word (≥4 chars),
 # not an abbreviation like INT., Mr., Dr., etc.
 _PROSE_BOUNDARY_RE = re.compile(
-    r"(?:(?<=\w{4})\.\s+(?=[A-Z])|\s+(?:I|The|This|It|Note|Please|Both|All|Here)\s+)",
+    # ". Word" boundary — only after a full word (≥4 chars), not abbreviations like INT., Mr.
+    r"(?:(?<=\w{4})\.\s+(?=[A-Z])"
+    # "I ..." or "I've/I'd/I'll ..." — agent continuing with self-reference
+    r"|\s+I(?:'[a-z]+)?\s+"
+    # Common sentence starters the agent appends after the answer
+    r"|\s+(?:The|This|It|Note|Please|Both|All|Here)(?:'[a-z]+)?\s+"
+    r")",
 )
 # Markdown link: [text](url) or bare (url) — strip the whole thing
 _MARKDOWN_LINK_RE = re.compile(r"\s*\[?[^\]]*\]?\(https?://[^\)]+\)")
@@ -199,13 +202,11 @@ def extract_final_answer(response: str) -> str:
 # ── Answer formatter middleware ───────────────────────────────────────────────
 
 _FORMATTER_PROMPT = """\
-The research above must end with a FINAL ANSWER line but does not.
-State the answer on the very next line in exactly this format — nothing else:
+Output the final answer to the question. One line only, exactly:
 
-FINAL ANSWER: <short exact answer>
+FINAL ANSWER: <answer>
 
-The answer must be a number, name, date, short phrase, or comma-separated list.
-No units, no explanation, no punctuation beyond what the answer requires."""
+Rules: number, name, date, or short phrase. No explanation. No units unless required."""
 
 
 class GaiaAnswerFormatterMiddleware(AgentMiddleware):
@@ -238,61 +239,6 @@ class GaiaAnswerFormatterMiddleware(AgentMiddleware):
             pass  # leave original result intact on failure
 
 
-# ── Research sub-agent ────────────────────────────────────────────────────────
-
-_RESEARCH_AGENT_INSTRUCTIONS = """\
-You are a deep-research specialist. Given a question, find the precise answer
-by searching the web and reading source pages in full.
-
-Strategy:
-1. Form 2-3 targeted search queries from different angles.
-2. For each promising result, use fetch_url to read the full page content.
-3. Cross-reference at least 2 independent sources before answering.
-4. If a page doesn't have the answer, try the next result — don't guess.
-
-Return a concise research summary ending with:
-ANSWER: <exact short answer>
-
-Be precise: numbers should be exact, names fully spelled out, dates in the
-format the question implies.
-"""
-
-_RESEARCH_ANSWER_RE = re.compile(r"ANSWER\s*[:\-]\s*(.+?)(?:\n|$)", re.IGNORECASE)
-
-
-def _create_research_agent(client: FoundryChatClient) -> Agent:
-    """Create a dedicated research sub-agent with web search + fetch_url."""
-    return client.as_agent(
-        name="ResearchAgent",
-        instructions=_RESEARCH_AGENT_INSTRUCTIONS,
-        tools=[fetch_url],
-    )
-
-
-def _make_research_tool(research_agent: Agent) -> Any:
-    """Wrap the research agent as a @tool the main harness agent can call."""
-
-    @tool
-    async def deep_research(question: str) -> str:
-        """Research a specific question deeply using web search and page reading.
-
-        Use this when a question requires finding precise information from the web.
-        The research agent will search multiple sources and read full page content
-        to find the exact answer.
-
-        Args:
-            question: The specific question to research.
-        """
-        session = research_agent.create_session()
-        response = await research_agent.run([Message("user", [question])], session=session)
-        text = response.text or "No result found."
-        # Extract the ANSWER: line if present, else return full text
-        m = _RESEARCH_ANSWER_RE.search(text)
-        return m.group(1).strip() if m else text
-
-    return deep_research
-
-
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
@@ -310,20 +256,13 @@ async def main(args: argparse.Namespace) -> None:
     # <harness_gaia_agent>
     # Configure the harness agent for GAIA.
     #
-    # Key choices for a fair apples-to-apples comparison against LangGraph
-    # Deep Research Agent and Claude Opus:
+    # Key choices for a fair apples-to-apples comparison against LangGraph:
     #   - Web search: enabled automatically by create_harness_agent
     #   - fetch_url: reads full page content after a search
-    #   - deep_research: dedicated research sub-agent (web search + fetch_url
-    #     in its own loop) that the main agent delegates research tasks to —
-    #     mirrors LangGraph Deep Research Agent's architecture
     #   - MontyExecuteCodeTool: Monty Python sandbox for arithmetic/computation
-    #   - GaiaAnswerFormatterMiddleware: ensures every response ends with
-    #     FINAL ANSWER: by making a lightweight extraction call if missing
+    #   - GaiaAnswerFormatterMiddleware: ensures every response has FINAL ANSWER:
     #   - TodoProvider + looping: structured multi-step planning
     #   - File memory/access: disabled (not available in competing systems)
-    research_agent = _create_research_agent(client)
-    deep_research = _make_research_tool(research_agent)
 
     agent = create_harness_agent(
         client=client,
@@ -331,7 +270,7 @@ async def main(args: argparse.Namespace) -> None:
         max_output_tokens=8_192,
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
-        tools=[fetch_url, deep_research, MontyExecuteCodeTool()],
+        tools=[fetch_url, MontyExecuteCodeTool()],
         middleware=[GaiaAnswerFormatterMiddleware()],
         loop_should_continue=todos_remaining(),
         loop_next_message=todos_remaining_message,
