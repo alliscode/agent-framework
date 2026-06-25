@@ -73,6 +73,7 @@ from agent_framework import InMemoryHistoryProvider, create_harness_agent, tool,
 from agent_framework.foundry import FoundryChatClient
 from agent_framework_eval_harness import EvalHarness
 from agent_framework_eval_harness.benchmarks import GAIABenchmark
+from agent_framework_monty import MontyExecuteCodeTool
 from azure.identity import AzureCliCredential
 from dotenv import load_dotenv
 
@@ -199,6 +200,10 @@ async def main(args: argparse.Namespace) -> None:
     #   - Web search: enabled automatically by create_harness_agent
     #   - fetch_url: reads full page content after a search — closes the main
     #     capability gap vs LangGraph (which also uses a dedicated page reader)
+    #   - MontyExecuteCodeTool: Monty Python sandbox for arithmetic/computation,
+    #     as a plain FunctionTool (not MontyCodeActProvider) — no competing
+    #     system instructions. A/B on seed=0 shows +1 task vs without (40% vs 35%);
+    #     needs 165-task run for a definitive signal.
     #   - TodoProvider + looping: structured multi-step planning while open todos remain
     #   - File memory/access: disabled (not available in competing systems)
     #   - loop_max_iterations=15: generous cap for complex GAIA tasks
@@ -211,7 +216,7 @@ async def main(args: argparse.Namespace) -> None:
         max_output_tokens=8_192,
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
-        tools=[fetch_url],
+        tools=[fetch_url, MontyExecuteCodeTool()],
         loop_should_continue=todos_remaining(),
         loop_next_message=todos_remaining_message,
         loop_max_iterations=15,
