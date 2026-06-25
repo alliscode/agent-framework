@@ -24,7 +24,7 @@ import os
 import re
 import string
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -272,6 +272,16 @@ class GAIABenchmark:
     timeout: float | None = 300.0
     data_dir: str | None = None
     hf_token: str | None = None
+    answer_extractor: Callable[[str], str] | None = None
+    """Optional function that transforms the agent response before scoring.
+
+    When provided, called with ``item.response`` (the full agent response text)
+    and should return a short extracted answer string.  Useful for agents that
+    embed the answer in a structured format such as ``"FINAL ANSWER: Paris"``.
+
+    When ``None`` (default), ``item.response`` is passed to ``gaia_scorer``
+    directly — suitable for agents that return only the answer.
+    """
 
     name: str = field(default="GAIA", init=False)
 
@@ -333,7 +343,8 @@ class GAIABenchmark:
 
         @evaluator(name="gaia_exact_match")
         def _gaia_exact_match(response: str, expected_output: str) -> bool:
-            return gaia_scorer(response, expected_output)
+            answer = self.answer_extractor(response) if self.answer_extractor else response
+            return gaia_scorer(answer, expected_output)
 
         items: list[EvalItem] = []
         for task, response in zip(tasks, responses):

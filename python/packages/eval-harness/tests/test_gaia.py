@@ -175,6 +175,43 @@ async def test_gaia_run_failed_task_scores_as_wrong() -> None:
     assert results[0].passed == 0
 
 
+async def test_gaia_answer_extractor_used() -> None:
+    """answer_extractor transforms the response before gaia_scorer is called."""
+    import re
+
+    from agent_framework import AgentResponse, Message
+
+    # Response contains long text but embeds "FINAL ANSWER: Paris"
+    long_response = "I did a lot of research...\n\nFINAL ANSWER: Paris\n\nDone."
+    fake_response = AgentResponse(messages=[Message("assistant", [long_response])])
+    mock_agent = MagicMock()
+    mock_agent.run = AsyncMock(return_value=fake_response)
+    mock_agent.default_options = {"tools": []}
+    mock_agent.mcp_tools = []
+
+    fake_task = MagicMock()
+    fake_task.question = "Capital of France?"
+    fake_task.answer = "Paris"
+    fake_task.task_id = "t3"
+    fake_task.level = 1
+    fake_task.file_name = None
+
+    def _extract(response: str) -> str:
+        m = re.search(r"FINAL ANSWER:\s*(.+?)(?:\n|$)", response, re.IGNORECASE)
+        return m.group(1).strip() if m else response
+
+    with (
+        patch("agent_framework_eval_harness.benchmarks._gaia._ensure_data"),
+        patch("agent_framework_eval_harness.benchmarks._gaia._load_tasks", return_value=[fake_task]),
+    ):
+        b = GAIABenchmark(level=1, answer_extractor=_extract)
+        results = await b.run(mock_agent)
+
+    # With extractor: "Paris" matches "Paris" → pass
+    assert results[0].passed == 1
+    assert results[0].failed == 0
+
+
 async def test_gaia_run_no_tasks_raises() -> None:
     mock_agent = MagicMock()
 

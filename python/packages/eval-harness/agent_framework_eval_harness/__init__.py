@@ -20,11 +20,12 @@ Example:
 
 from ._harness import EvalHarness
 from ._types import Benchmark
-from .benchmarks import GAIABenchmark, TauBenchmark
+from .benchmarks import GAIABenchmark, TauBenchmark, gaia_scorer
 
 __all__ = [
     "Benchmark",
     "EvalHarness",
     "GAIABenchmark",
     "TauBenchmark",
+    "gaia_scorer",
 ]
