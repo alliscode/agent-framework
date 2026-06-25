@@ -140,6 +140,7 @@ def _load_tasks(
     levels: list[int] | None,
     skip_file_attachments: bool,
     max_tasks: int | None,
+    seed: int | None = 0,
 ) -> list[_GAIATask]:
     """Load GAIA tasks from local cache, parquet first then jsonl fallback."""
     import random
@@ -186,7 +187,8 @@ def _load_tasks(
                         continue
                     tasks.append(t)
 
-    random.shuffle(tasks)
+    rng = random.Random(seed)  # seed=None → truly random; seed=0 → reproducible dev runs
+    rng.shuffle(tasks)
     return tasks[:max_tasks] if max_tasks is not None else tasks
 
 
@@ -285,6 +287,9 @@ class GAIABenchmark:
     verbose: bool = False
     """When True, print per-task diagnostics: question, extracted answer,
     expected answer, and pass/fail.  Useful for debugging extraction failures."""
+    seed: int | None = 0
+    """Random seed for task shuffling.  Defaults to ``0`` for reproducible
+    development runs.  Set to ``None`` for a fresh random draw each time."""
 
     name: str = field(default="GAIA", init=False)
 
@@ -327,6 +332,7 @@ class GAIABenchmark:
             levels=levels,
             skip_file_attachments=self.skip_file_attachments,
             max_tasks=self.max_tasks,
+            seed=self.seed,
         )
         if not tasks:
             raise RuntimeError(
