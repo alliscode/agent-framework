@@ -68,7 +68,7 @@ import asyncio
 import os
 import re
 
-from agent_framework import create_harness_agent, todos_remaining, todos_remaining_message
+from agent_framework import InMemoryHistoryProvider, create_harness_agent, todos_remaining, todos_remaining_message
 from agent_framework.foundry import FoundryChatClient
 from agent_framework_eval_harness import EvalHarness
 from agent_framework_eval_harness.benchmarks import GAIABenchmark
@@ -126,7 +126,7 @@ def extract_final_answer(response: str) -> str:
 
 
 async def main(args: argparse.Namespace) -> None:
-    load_dotenv()
+    load_dotenv(override=True)  # load .env if present, but allow env vars to override
 
     model = os.environ.get("FOUNDRY_MODEL", "gpt-4o")
 
@@ -142,6 +142,8 @@ async def main(args: argparse.Namespace) -> None:
     # Key choices for a fair apples-to-apples comparison against LangGraph
     # Deep Research Agent and Claude Opus:
     #   - Web search: enabled automatically by create_harness_agent
+    #   - Code interpreter: Foundry-hosted Python sandbox for arithmetic,
+    #     sorting, counting — the main gap vs published GAIA scores
     #   - TodoProvider + looping: structured multi-step planning while open todos remain
     #   - File memory/access: disabled (not available in competing systems)
     #   - loop_max_iterations=15: generous cap for complex GAIA tasks
@@ -151,11 +153,16 @@ async def main(args: argparse.Namespace) -> None:
         max_output_tokens=8_192,
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
+        tools=[client.get_code_interpreter_tool()],
         loop_should_continue=todos_remaining(),
         loop_next_message=todos_remaining_message,
         loop_max_iterations=15,
         disable_file_memory=True,
         disable_file_access=True,
+        # FoundryChatClient uses the Responses API (server-side history).
+        # load_messages=False tells the local provider to stay out of the way
+        # and silences the "skipping local history load" warning.
+        history_provider=InMemoryHistoryProvider(load_messages=False),
     )
     # </harness_gaia_agent>
 
