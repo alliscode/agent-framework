@@ -172,6 +172,10 @@ or comma-separated list matching precisely what the question asks for.
 Do not include units, explanations, or extra punctuation unless they are
 part of the expected answer.
 
+**Always provide a FINAL ANSWER**, even if uncertain — give your best guess
+based on available evidence. Never say "insufficient information" or leave the
+answer blank.
+
 Examples:
     FINAL ANSWER: 42
     FINAL ANSWER: Marie Curie
@@ -190,8 +194,9 @@ _PROSE_BOUNDARY_RE = re.compile(
     r"(?:(?<=\w{4})\.\s+(?=[A-Z])"
     # "I ..." or "I've/I'd/I'll ..." — agent continuing with self-reference
     r"|\s+I(?:'[a-z]+)?\s+"
-    # Common sentence starters the agent appends after the answer
-    r"|\s+(?:The|This|It|Note|Please|Both|All|Here|Understood|Done|Complete|Note)(?:'[a-z]+)?\s*[!,.]?"
+    # Common sentence starters / acknowledgement words
+    r"|\s+(?:The|This|It|Note|Please|Both|All|Here|Understood|Done|Complete|However|Therefore|Thus)"
+    r"(?:'[a-z]+)?(?:\s|[!.,]|$)"
     # Comma followed by connective (description, not list): "12 layers, which is..."
     r"|,\s+(?:which|where|that|and|but|or|as|making|giving|so|since|because|meaning|giving)\b"
     r")",
