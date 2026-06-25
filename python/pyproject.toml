@@ -69,6 +69,7 @@ environments = [
 
 [tool.uv.workspace]
 members = [ "packages/*" ]
+exclude = [ "packages/azure-ai" ]  # missing pyproject.toml
 
 [tool.uv.sources]
 agent-framework = { workspace = true }
@@ -104,6 +105,7 @@ agent-framework-orchestrations = { workspace = true }
 agent-framework-purview = { workspace = true }
 agent-framework-redis = { workspace = true }
 agent-framework-azure-contentunderstanding = { workspace = true }
+agent-framework-eval-harness = { workspace = true }
 agent-framework-tools = { workspace = true }
 
 [tool.ruff]

@@ -1,0 +1,107 @@
+[project]
+name = "agent-framework-eval-harness"
+description = "Benchmark evaluation harness for Microsoft Agent Framework."
+authors = [{ name = "Microsoft", email = "af-support@microsoft.com"}]
+readme = "README.md"
+requires-python = ">=3.10"
+version = "0.1.0"
+license-files = ["LICENSE"]
+urls.homepage = "https://aka.ms/agent-framework"
+urls.source = "https://github.com/microsoft/agent-framework/tree/main/python"
+urls.issues = "https://github.com/microsoft/agent-framework/issues"
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
+dependencies = [
+    "agent-framework-core>=1.9.0,<2",
+]
+
+[project.optional-dependencies]
+# GAIA benchmark dependencies
+gaia = [
+    "huggingface-hub>=0.20.0",
+    "pyarrow>=18.0.0",
+]
+# tau2-bench dependencies (requires tau2 from git — see README)
+tau2 = [
+    "agent-framework-lab[tau2]>=1.0.0b0",
+]
+# Azure AI Foundry evaluators
+foundry = [
+    "agent-framework-foundry>=1.8.0,<2",
+]
+
+[tool.uv]
+prerelease = "if-necessary-or-explicit"
+environments = [
+    "sys_platform == 'darwin'",
+    "sys_platform == 'linux'",
+    "sys_platform == 'win32'"
+]
+
+[tool.uv-dynamic-versioning]
+fallback-version = "0.0.0"
+
+[tool.pytest.ini_options]
+testpaths = 'tests'
+addopts = "-ra -q -r fEX"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+timeout = 120
+markers = [
+    "integration: marks tests as integration tests that require external services",
+]
+
+[tool.ruff]
+extend = "../../pyproject.toml"
+
+[tool.ruff.lint]
+# print() is intentional in _report.py (user-facing summary output)
+extend-ignore = ["T201"]
+
+[tool.coverage.run]
+omit = [
+    "**/__init__.py"
+]
+
+[tool.pyright]
+extends = "../../pyproject.toml"
+include = ["agent_framework_eval_harness"]
+
+[tool.mypy]
+strict = true
+python_version = "3.10"
+ignore_missing_imports = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+check_untyped_defs = true
+warn_return_any = true
+show_error_codes = true
+warn_unused_ignores = false
+disallow_incomplete_defs = true
+disallow_untyped_decorators = true
+
+[tool.poe]
+executor.type = "uv"
+include = "../../shared_tasks.toml"
+
+[tool.poe.tasks.test]
+help = "Run the default unit test suite for this package."
+cmd = 'pytest -m "not integration" --cov=agent_framework_eval_harness --cov-report=term-missing:skip-covered tests'
+
+[tool.poe.tasks.integration-tests]
+help = "Run integration tests (requires live services and API keys)."
+cmd = 'pytest -m integration tests'
+
+[build-system]
+requires = ["flit-core >= 3.11,<4.0"]
+build-backend = "flit_core.buildapi"
