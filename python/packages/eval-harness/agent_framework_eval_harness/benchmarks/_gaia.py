@@ -370,14 +370,19 @@ class GAIABenchmark:
         """Run the agent on a single query; returns ``None`` on failure."""
         from agent_framework import Message
 
+        # Create a fresh session per task so ToolApprovalMiddleware (included
+        # in create_harness_agent by default) has the session state it requires,
+        # and parallel tasks don't share conversation history.
+        session = agent.create_session() if hasattr(agent, "create_session") else None
+
         async with semaphore:
             try:
                 if self.timeout is not None:
                     return await asyncio.wait_for(
-                        agent.run([Message("user", [query])]),
+                        agent.run([Message("user", [query])], session=session),
                         timeout=self.timeout,
                     )
-                return await agent.run([Message("user", [query])])
+                return await agent.run([Message("user", [query])], session=session)
             except asyncio.TimeoutError:
                 logger.warning("GAIA task timed out (%.0fs): %.80s…", self.timeout, query)
             except Exception:
