@@ -72,7 +72,6 @@ from agent_framework import InMemoryHistoryProvider, create_harness_agent, todos
 from agent_framework.foundry import FoundryChatClient
 from agent_framework_eval_harness import EvalHarness
 from agent_framework_eval_harness.benchmarks import GAIABenchmark
-from agent_framework_monty import MontyCodeActProvider
 from azure.identity import AzureCliCredential
 from dotenv import load_dotenv
 
@@ -110,17 +109,33 @@ Examples:
 # ── Answer extraction ─────────────────────────────────────────────────────────
 
 _FINAL_ANSWER_RE = re.compile(r"FINAL\s+ANSWER\s*[:\-]\s*(.+?)(?:\n|$)", re.IGNORECASE)
+# Matches prose boundaries on a single line after the answer:
+# ". Capital", " I " / " The " / " This " / " It " / " Note " at a word boundary
+_PROSE_BOUNDARY_RE = re.compile(
+    r"(?:\.\s+(?=[A-Z])|\s+(?:I|The|This|It|Note|Please)\s+)",
+)
 
 
 def extract_final_answer(response: str) -> str:
     """Extract the ``FINAL ANSWER:`` line from a harness agent response.
+
+    Also strips trailing prose that the agent may have appended on the same
+    line after the answer (e.g. ``"90 The tasks have been completed."``
+    → ``"90"``).
 
     Falls back to the full response text when the pattern is not found,
     which will almost certainly score as incorrect and correctly penalises
     non-compliant responses.
     """
     match = _FINAL_ANSWER_RE.search(response)
-    return match.group(1).strip() if match else response.strip()
+    if not match:
+        return response.strip()
+    answer = match.group(1).strip()
+    # Truncate at prose boundary introduced by the agent on the same line
+    prose = _PROSE_BOUNDARY_RE.search(answer)
+    if prose:
+        answer = answer[: prose.start()].strip()
+    return answer
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -143,20 +158,18 @@ async def main(args: argparse.Namespace) -> None:
     # Key choices for a fair apples-to-apples comparison against LangGraph
     # Deep Research Agent and Claude Opus:
     #   - Web search: enabled automatically by create_harness_agent
-    #   - MontyCodeActProvider: local Python interpreter for arithmetic,
-    #     sorting, counting — the main gap vs published GAIA scores.
-    #     Uses pydantic-monty (Rust-backed Python sandbox), no extra services.
     #   - TodoProvider + looping: structured multi-step planning while open todos remain
     #   - File memory/access: disabled (not available in competing systems)
     #   - loop_max_iterations=15: generous cap for complex GAIA tasks
-    codeact = MontyCodeActProvider(approval_mode="never_require")
+    #   - No code interpreter: MontyCodeActProvider changes the output format
+    #     in ways that interfere with FINAL ANSWER extraction on research tasks.
+    #     Add it back once output format compliance is confirmed.
     agent = create_harness_agent(
         client=client,
         max_context_window_tokens=128_000,
         max_output_tokens=8_192,
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
-        context_providers=[codeact],
         loop_should_continue=todos_remaining(),
         loop_next_message=todos_remaining_message,
         loop_max_iterations=15,
