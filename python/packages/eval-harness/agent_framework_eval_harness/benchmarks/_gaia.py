@@ -282,6 +282,9 @@ class GAIABenchmark:
     When ``None`` (default), ``item.response`` is passed to ``gaia_scorer``
     directly — suitable for agents that return only the answer.
     """
+    verbose: bool = False
+    """When True, print per-task diagnostics: question, extracted answer,
+    expected answer, and pass/fail.  Useful for debugging extraction failures."""
 
     name: str = field(default="GAIA", init=False)
 
@@ -359,7 +362,28 @@ class GAIABenchmark:
         if evaluators:
             all_evaluators.extend(evaluators)
 
-        return [await ev.evaluate(items, eval_name=run_name) for ev in all_evaluators]
+        results = [await ev.evaluate(items, eval_name=run_name) for ev in all_evaluators]
+
+        if self.verbose and results:
+            self._print_verbose(tasks, items, results[0])
+
+        return results
+
+    def _print_verbose(self, tasks: list[_GAIATask], items: list[EvalItem], results: EvalResults) -> None:
+        """Print per-task diagnostics for debugging extraction failures."""
+        item_map = {r.item_id: r for r in results.items}
+        print()
+        print(f"{'#':<4} {'Q (truncated)':<55} {'Extracted':<25} {'Expected':<25} {'OK'}")
+        print("-" * 120)
+        for idx, (task, item) in enumerate(zip(tasks, items)):
+            extracted = self.answer_extractor(item.response) if self.answer_extractor else item.response
+            expected = task.answer
+            item_result = item_map.get(str(idx))
+            passed = item_result.is_passed if item_result else False
+            mark = "✓" if passed else "✗"
+            q = task.question[:54]
+            print(f"{idx:<4} {q:<55} {extracted[:24]:<25} {expected[:24]:<25} {mark}")
+        print()
 
     async def _run_one(
         self,

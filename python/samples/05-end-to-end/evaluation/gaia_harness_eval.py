@@ -185,6 +185,7 @@ async def main(args: argparse.Namespace) -> None:
             timeout=args.timeout,
             skip_file_attachments=True,  # text-only (matches most published runs)
             answer_extractor=extract_final_answer,
+            verbose=args.verbose,
         )
     )
     # </run_gaia_eval>
@@ -228,5 +229,6 @@ Examples:
     parser.add_argument("--max-tasks", type=int, default=None, metavar="N", help="Cap tasks (default: all)")
     parser.add_argument("--parallel", type=int, default=1, help="Concurrent agent runs (default: 1)")
     parser.add_argument("--timeout", type=float, default=300.0, help="Per-task timeout seconds (default: 300)")
+    parser.add_argument("--verbose", action="store_true", help="Print per-task: question, extracted answer, expected, pass/fail")
 
     asyncio.run(main(parser.parse_args()))
