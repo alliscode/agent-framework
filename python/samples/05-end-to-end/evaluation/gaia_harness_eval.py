@@ -67,9 +67,22 @@ import argparse
 import asyncio
 import os
 import re
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import aiohttp
-from agent_framework import InMemoryHistoryProvider, create_harness_agent, tool, todos_remaining, todos_remaining_message
+from agent_framework import (
+    Agent,
+    AgentContext,
+    AgentMiddleware,
+    AgentResponse,
+    InMemoryHistoryProvider,
+    Message,
+    create_harness_agent,
+    todos_remaining,
+    todos_remaining_message,
+    tool,
+)
 from agent_framework.foundry import FoundryChatClient
 from agent_framework_eval_harness import EvalHarness
 from agent_framework_eval_harness.benchmarks import GAIABenchmark
@@ -95,10 +108,11 @@ async def fetch_url(url: str) -> str:
     """
     headers = {"User-Agent": "Mozilla/5.0 (compatible; GaiaEvalBot/1.0)"}
     try:
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=20), allow_redirects=True) as resp:
-                resp.raise_for_status()
-                html = await resp.text(errors="replace")
+        async with aiohttp.ClientSession(headers=headers) as http, http.get(
+            url, timeout=aiohttp.ClientTimeout(total=20), allow_redirects=True
+        ) as resp:
+            resp.raise_for_status()
+            html = await resp.text(errors="replace")
 
         # Very light HTML → text: strip tags, collapse whitespace
         text = re.sub(r"<script[^>]*>.*?</script>", " ", html, flags=re.DOTALL | re.IGNORECASE)
@@ -111,6 +125,7 @@ async def fetch_url(url: str) -> str:
 
 # ── GAIA-specific agent instructions ─────────────────────────────────────────
 
+
 GAIA_AGENT_INSTRUCTIONS = """\
 ## GAIA Benchmark Agent
 
@@ -118,7 +133,10 @@ You are a precise research assistant answering GAIA benchmark questions.
 
 ### How to work
 
-Use web search to find relevant pages, then fetch_url to read their full content.
+For most research questions, use the `deep_research` tool — it searches the web
+and reads full page content to find precise answers.
+Use `fetch_url` directly when you already know a specific URL to read.
+Use `execute_code` for arithmetic, counting, sorting, or data manipulation.
 For multi-step questions, create todos to track each sub-task before executing.
 Always verify facts with tools — GAIA questions require specific, current knowledge.
 
@@ -178,6 +196,103 @@ def extract_final_answer(response: str) -> str:
     return answer
 
 
+# ── Answer formatter middleware ───────────────────────────────────────────────
+
+_FORMATTER_PROMPT = """\
+The research above must end with a FINAL ANSWER line but does not.
+State the answer on the very next line in exactly this format — nothing else:
+
+FINAL ANSWER: <short exact answer>
+
+The answer must be a number, name, date, short phrase, or comma-separated list.
+No units, no explanation, no punctuation beyond what the answer requires."""
+
+
+class GaiaAnswerFormatterMiddleware(AgentMiddleware):
+    """Ensures every agent response contains a ``FINAL ANSWER:`` line.
+
+    When the agent finishes without the required format, makes a single
+    lightweight follow-up call asking it to extract the answer.  This runs
+    per loop-iteration so the loop always sees a well-formatted result.
+    """
+
+    async def process(self, context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
+        await call_next()
+        result = context.result
+        if not isinstance(result, AgentResponse):
+            return
+        if _FINAL_ANSWER_RE.search(result.text or ""):
+            return  # already formatted — nothing to do
+
+        # Build the extraction prompt from the current conversation
+        extraction_messages = list(result.messages or [])
+        extraction_messages.append(Message("user", [_FORMATTER_PROMPT]))
+        try:
+            extraction = await context.agent.client.get_response(extraction_messages)
+            # Append the extraction as a new assistant turn so the loop's
+            # injected nudge messages have a clean base to work from.
+            context.result = AgentResponse(
+                messages=list(result.messages or []) + list(extraction.messages or [])
+            )
+        except Exception:
+            pass  # leave original result intact on failure
+
+
+# ── Research sub-agent ────────────────────────────────────────────────────────
+
+_RESEARCH_AGENT_INSTRUCTIONS = """\
+You are a deep-research specialist. Given a question, find the precise answer
+by searching the web and reading source pages in full.
+
+Strategy:
+1. Form 2-3 targeted search queries from different angles.
+2. For each promising result, use fetch_url to read the full page content.
+3. Cross-reference at least 2 independent sources before answering.
+4. If a page doesn't have the answer, try the next result — don't guess.
+
+Return a concise research summary ending with:
+ANSWER: <exact short answer>
+
+Be precise: numbers should be exact, names fully spelled out, dates in the
+format the question implies.
+"""
+
+_RESEARCH_ANSWER_RE = re.compile(r"ANSWER\s*[:\-]\s*(.+?)(?:\n|$)", re.IGNORECASE)
+
+
+def _create_research_agent(client: FoundryChatClient) -> Agent:
+    """Create a dedicated research sub-agent with web search + fetch_url."""
+    return client.as_agent(
+        name="ResearchAgent",
+        instructions=_RESEARCH_AGENT_INSTRUCTIONS,
+        tools=[fetch_url],
+    )
+
+
+def _make_research_tool(research_agent: Agent) -> Any:
+    """Wrap the research agent as a @tool the main harness agent can call."""
+
+    @tool
+    async def deep_research(question: str) -> str:
+        """Research a specific question deeply using web search and page reading.
+
+        Use this when a question requires finding precise information from the web.
+        The research agent will search multiple sources and read full page content
+        to find the exact answer.
+
+        Args:
+            question: The specific question to research.
+        """
+        session = research_agent.create_session()
+        response = await research_agent.run([Message("user", [question])], session=session)
+        text = response.text or "No result found."
+        # Extract the ANSWER: line if present, else return full text
+        m = _RESEARCH_ANSWER_RE.search(text)
+        return m.group(1).strip() if m else text
+
+    return deep_research
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
@@ -198,33 +313,31 @@ async def main(args: argparse.Namespace) -> None:
     # Key choices for a fair apples-to-apples comparison against LangGraph
     # Deep Research Agent and Claude Opus:
     #   - Web search: enabled automatically by create_harness_agent
-    #   - fetch_url: reads full page content after a search — closes the main
-    #     capability gap vs LangGraph (which also uses a dedicated page reader)
-    #   - MontyExecuteCodeTool: Monty Python sandbox for arithmetic/computation,
-    #     as a plain FunctionTool (not MontyCodeActProvider) — no competing
-    #     system instructions. A/B on seed=0 shows +1 task vs without (40% vs 35%);
-    #     needs 165-task run for a definitive signal.
-    #   - TodoProvider + looping: structured multi-step planning while open todos remain
+    #   - fetch_url: reads full page content after a search
+    #   - deep_research: dedicated research sub-agent (web search + fetch_url
+    #     in its own loop) that the main agent delegates research tasks to —
+    #     mirrors LangGraph Deep Research Agent's architecture
+    #   - MontyExecuteCodeTool: Monty Python sandbox for arithmetic/computation
+    #   - GaiaAnswerFormatterMiddleware: ensures every response ends with
+    #     FINAL ANSWER: by making a lightweight extraction call if missing
+    #   - TodoProvider + looping: structured multi-step planning
     #   - File memory/access: disabled (not available in competing systems)
-    #   - loop_max_iterations=15: generous cap for complex GAIA tasks
-    #   - No code interpreter: MontyCodeActProvider changes the output format
-    #     in ways that interfere with FINAL ANSWER extraction on research tasks.
-    #     Add it back once output format compliance is confirmed.
+    research_agent = _create_research_agent(client)
+    deep_research = _make_research_tool(research_agent)
+
     agent = create_harness_agent(
         client=client,
         max_context_window_tokens=128_000,
         max_output_tokens=8_192,
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
-        tools=[fetch_url, MontyExecuteCodeTool()],
+        tools=[fetch_url, deep_research, MontyExecuteCodeTool()],
+        middleware=[GaiaAnswerFormatterMiddleware()],
         loop_should_continue=todos_remaining(),
         loop_next_message=todos_remaining_message,
         loop_max_iterations=15,
         disable_file_memory=True,
         disable_file_access=True,
-        # FoundryChatClient uses the Responses API (server-side history).
-        # load_messages=False tells the local provider to stay out of the way
-        # and silences the "skipping local history load" warning.
         history_provider=InMemoryHistoryProvider(load_messages=False),
     )
     # </harness_gaia_agent>
@@ -290,7 +403,11 @@ Examples:
     parser.add_argument("--max-tasks", type=int, default=None, metavar="N", help="Cap tasks (default: all)")
     parser.add_argument("--parallel", type=int, default=1, help="Concurrent agent runs (default: 1)")
     parser.add_argument("--timeout", type=float, default=300.0, help="Per-task timeout seconds (default: 300)")
-    parser.add_argument("--verbose", action="store_true", help="Print per-task: question, extracted answer, expected, pass/fail")
-    parser.add_argument("--seed", type=int, default=0, help="Random seed for task selection (default: 0 = reproducible; use -1 for random)")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print per-task: question, extracted answer, expected, pass/fail",
+    )
+    parser.add_argument("--seed", type=int, default=0, help="Random seed (default: 0=reproducible; -1=random)")
 
     asyncio.run(main(parser.parse_args()))
