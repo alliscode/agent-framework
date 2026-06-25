@@ -94,6 +94,29 @@ _MAX_PAGE_CHARS = 12_000  # truncate large pages to avoid context overflow
 
 
 @tool
+async def get_youtube_transcript(video_url: str) -> str:
+    """Get the spoken transcript of a YouTube video.
+
+    Use this when a question references a YouTube URL. Returns the full captions
+    so you can find specific information said in the video.
+
+    Args:
+        video_url: Full YouTube URL (e.g. https://www.youtube.com/watch?v=...)
+    """
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore[import-untyped]
+
+        vid_match = re.search(r"(?:[?&]v=|youtu\.be/)([A-Za-z0-9_-]{11})", video_url)
+        if not vid_match:
+            return f"Could not extract video ID from: {video_url}"
+        transcript = YouTubeTranscriptApi.get_transcript(vid_match.group(1))
+        text = " ".join(entry["text"] for entry in transcript)
+        return text[:8_000] + ("…[truncated]" if len(text) > 8_000 else "")
+    except Exception as exc:
+        return f"Error fetching transcript for {video_url}: {exc}"
+
+
+@tool
 async def fetch_url(url: str) -> str:
     """Fetch the text content of a web page.
 
@@ -132,6 +155,7 @@ You are a precise research assistant answering GAIA benchmark questions.
 ### How to work
 
 Use web search to find relevant pages, then fetch_url to read their full content.
+For questions referencing YouTube URLs, use get_youtube_transcript to read the video content.
 Search multiple sources and cross-reference before committing to an answer.
 Use execute_code for arithmetic, counting, sorting, or data manipulation.
 For multi-step questions, create todos to track each sub-task before executing.
@@ -167,11 +191,15 @@ _PROSE_BOUNDARY_RE = re.compile(
     # "I ..." or "I've/I'd/I'll ..." — agent continuing with self-reference
     r"|\s+I(?:'[a-z]+)?\s+"
     # Common sentence starters the agent appends after the answer
-    r"|\s+(?:The|This|It|Note|Please|Both|All|Here)(?:'[a-z]+)?\s+"
+    r"|\s+(?:The|This|It|Note|Please|Both|All|Here|Understood|Done|Complete|Note)(?:'[a-z]+)?\s*[!,.]?"
+    # Comma followed by connective (description, not list): "12 layers, which is..."
+    r"|,\s+(?:which|where|that|and|but|or|as|making|giving|so|since|because|meaning|giving)\b"
     r")",
 )
 # Markdown link: [text](url) or bare (url) — strip the whole thing
 _MARKDOWN_LINK_RE = re.compile(r"\s*\[?[^\]]*\]?\(https?://[^\)]+\)")
+# Leading markdown bold/italic markers (** or *) the formatter sometimes adds
+_MARKDOWN_BOLD_RE = re.compile(r"^\*{1,2}\s*")
 
 
 def extract_final_answer(response: str) -> str:
@@ -190,6 +218,8 @@ def extract_final_answer(response: str) -> str:
         return response.strip()
     # Take the last match — the agent's definitive answer after all loop iterations
     answer = matches[-1].strip()
+    # Strip leading markdown bold/italic markers
+    answer = _MARKDOWN_BOLD_RE.sub("", answer).strip()
     # Strip markdown links (agent sometimes cites sources inline)
     answer = _MARKDOWN_LINK_RE.sub("", answer).strip()
     # Truncate at prose boundary introduced by the agent on the same line
@@ -230,11 +260,30 @@ class GaiaAnswerFormatterMiddleware(AgentMiddleware):
         extraction_messages.append(Message("user", [_FORMATTER_PROMPT]))
         try:
             extraction = await context.agent.client.get_response(extraction_messages)
-            # Append the extraction as a new assistant turn so the loop's
-            # injected nudge messages have a clean base to work from.
-            context.result = AgentResponse(
-                messages=list(result.messages or []) + list(extraction.messages or [])
+            extraction_text = " ".join(
+                c.text or ""
+                for m in (extraction.messages or [])
+                for c in (m.contents or [])
+                if getattr(c, "text", None) and m.role == "assistant"
             )
+            # Extract and clean from the extraction response, then inject a pristine message
+            # so that extract_final_answer always gets a single clean FINAL ANSWER: line.
+            clean_matches = _FINAL_ANSWER_RE.findall(extraction_text)
+            if clean_matches:
+                clean_answer = _MARKDOWN_BOLD_RE.sub("", clean_matches[-1]).strip()
+                clean_answer = _MARKDOWN_LINK_RE.sub("", clean_answer).strip()
+                prose = _PROSE_BOUNDARY_RE.search(clean_answer)
+                if prose:
+                    clean_answer = clean_answer[: prose.start()].strip()
+                context.result = AgentResponse(
+                    messages=list(result.messages or [])
+                    + [Message("assistant", [f"FINAL ANSWER: {clean_answer}"])]
+                )
+            else:
+                # Fallback: append raw extraction and let extract_final_answer handle it
+                context.result = AgentResponse(
+                    messages=list(result.messages or []) + list(extraction.messages or [])
+                )
         except Exception:
             pass  # leave original result intact on failure
 
@@ -270,7 +319,7 @@ async def main(args: argparse.Namespace) -> None:
         max_output_tokens=8_192,
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
-        tools=[fetch_url, MontyExecuteCodeTool()],
+        tools=[fetch_url, get_youtube_transcript, MontyExecuteCodeTool()],
         middleware=[GaiaAnswerFormatterMiddleware()],
         loop_should_continue=todos_remaining(),
         loop_next_message=todos_remaining_message,
