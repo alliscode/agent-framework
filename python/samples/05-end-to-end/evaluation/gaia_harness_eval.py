@@ -146,7 +146,7 @@ _FINAL_ANSWER_RE = re.compile(r"FINAL\s+ANSWER\s*[:\-]\s*(.+?)(?:\n|$)", re.IGNO
 # Only strip at ". Word" when the preceding token is a full word (≥4 chars),
 # not an abbreviation like INT., Mr., Dr., etc.
 _PROSE_BOUNDARY_RE = re.compile(
-    r"(?:(?<=\w{4})\.\s+(?=[A-Z])|\s+(?:I|The|This|It|Note|Please)\s+)",
+    r"(?:(?<=\w{4})\.\s+(?=[A-Z])|\s+(?:I|The|This|It|Note|Please|Both|All|Here)\s+)",
 )
 # Markdown link: [text](url) or bare (url) — strip the whole thing
 _MARKDOWN_LINK_RE = re.compile(r"\s*\[?[^\]]*\]?\(https?://[^\)]+\)")
@@ -155,18 +155,19 @@ _MARKDOWN_LINK_RE = re.compile(r"\s*\[?[^\]]*\]?\(https?://[^\)]+\)")
 def extract_final_answer(response: str) -> str:
     """Extract the ``FINAL ANSWER:`` line from a harness agent response.
 
-    Also strips trailing prose that the agent may have appended on the same
-    line after the answer (e.g. ``"90 The tasks have been completed."``
-    → ``"90"``).
+    Uses the *last* occurrence when the loop runs multiple iterations — the
+    agent's final answer is always the most refined.  Also strips trailing
+    prose and markdown citation links the agent may have appended.
 
-    Falls back to the full response text when the pattern is not found,
+    Falls back to the full response text when no FINAL ANSWER is found,
     which will almost certainly score as incorrect and correctly penalises
     non-compliant responses.
     """
-    match = _FINAL_ANSWER_RE.search(response)
-    if not match:
+    matches = _FINAL_ANSWER_RE.findall(response)
+    if not matches:
         return response.strip()
-    answer = match.group(1).strip()
+    # Take the last match — the agent's definitive answer after all loop iterations
+    answer = matches[-1].strip()
     # Strip markdown links (agent sometimes cites sources inline)
     answer = _MARKDOWN_LINK_RE.sub("", answer).strip()
     # Truncate at prose boundary introduced by the agent on the same line
