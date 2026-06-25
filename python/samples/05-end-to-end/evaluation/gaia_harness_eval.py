@@ -68,12 +68,45 @@ import asyncio
 import os
 import re
 
-from agent_framework import InMemoryHistoryProvider, create_harness_agent, todos_remaining, todos_remaining_message
+import aiohttp
+from agent_framework import InMemoryHistoryProvider, create_harness_agent, tool, todos_remaining, todos_remaining_message
 from agent_framework.foundry import FoundryChatClient
 from agent_framework_eval_harness import EvalHarness
 from agent_framework_eval_harness.benchmarks import GAIABenchmark
 from azure.identity import AzureCliCredential
 from dotenv import load_dotenv
+
+# ── fetch_url tool ────────────────────────────────────────────────────────────
+
+_MAX_PAGE_CHARS = 12_000  # truncate large pages to avoid context overflow
+
+
+@tool
+async def fetch_url(url: str) -> str:
+    """Fetch the text content of a web page.
+
+    Use this after a web search when you need to read the actual page content
+    rather than a short search snippet.  Returns the first 12 000 characters
+    of the page body text.
+
+    Args:
+        url: The full URL to fetch.
+    """
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; GaiaEvalBot/1.0)"}
+    try:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=20), allow_redirects=True) as resp:
+                resp.raise_for_status()
+                html = await resp.text(errors="replace")
+
+        # Very light HTML → text: strip tags, collapse whitespace
+        text = re.sub(r"<script[^>]*>.*?</script>", " ", html, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text[:_MAX_PAGE_CHARS] + ("…[truncated]" if len(text) > _MAX_PAGE_CHARS else "")
+    except Exception as exc:
+        return f"Error fetching {url}: {exc}"
 
 # ── GAIA-specific agent instructions ─────────────────────────────────────────
 
@@ -84,7 +117,7 @@ You are a precise research assistant answering GAIA benchmark questions.
 
 ### How to work
 
-Use web search and your available tools to research each question thoroughly.
+Use web search to find relevant pages, then fetch_url to read their full content.
 For multi-step questions, create todos to track each sub-task before executing.
 Always verify facts with tools — GAIA questions require specific, current knowledge.
 
@@ -109,11 +142,14 @@ Examples:
 # ── Answer extraction ─────────────────────────────────────────────────────────
 
 _FINAL_ANSWER_RE = re.compile(r"FINAL\s+ANSWER\s*[:\-]\s*(.+?)(?:\n|$)", re.IGNORECASE)
-# Matches prose boundaries on a single line after the answer:
-# ". Capital", " I " / " The " / " This " / " It " / " Note " at a word boundary
+# Matches prose boundaries after the answer on the same line.
+# Only strip at ". Word" when the preceding token is a full word (≥4 chars),
+# not an abbreviation like INT., Mr., Dr., etc.
 _PROSE_BOUNDARY_RE = re.compile(
-    r"(?:\.\s+(?=[A-Z])|\s+(?:I|The|This|It|Note|Please)\s+)",
+    r"(?:(?<=\w{4})\.\s+(?=[A-Z])|\s+(?:I|The|This|It|Note|Please)\s+)",
 )
+# Markdown link: [text](url) or bare (url) — strip the whole thing
+_MARKDOWN_LINK_RE = re.compile(r"\s*\[?[^\]]*\]?\(https?://[^\)]+\)")
 
 
 def extract_final_answer(response: str) -> str:
@@ -131,6 +167,8 @@ def extract_final_answer(response: str) -> str:
     if not match:
         return response.strip()
     answer = match.group(1).strip()
+    # Strip markdown links (agent sometimes cites sources inline)
+    answer = _MARKDOWN_LINK_RE.sub("", answer).strip()
     # Truncate at prose boundary introduced by the agent on the same line
     prose = _PROSE_BOUNDARY_RE.search(answer)
     if prose:
@@ -158,6 +196,8 @@ async def main(args: argparse.Namespace) -> None:
     # Key choices for a fair apples-to-apples comparison against LangGraph
     # Deep Research Agent and Claude Opus:
     #   - Web search: enabled automatically by create_harness_agent
+    #   - fetch_url: reads full page content after a search — closes the main
+    #     capability gap vs LangGraph (which also uses a dedicated page reader)
     #   - TodoProvider + looping: structured multi-step planning while open todos remain
     #   - File memory/access: disabled (not available in competing systems)
     #   - loop_max_iterations=15: generous cap for complex GAIA tasks
@@ -170,6 +210,7 @@ async def main(args: argparse.Namespace) -> None:
         max_output_tokens=8_192,
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
+        tools=[fetch_url],
         loop_should_continue=todos_remaining(),
         loop_next_message=todos_remaining_message,
         loop_max_iterations=15,
