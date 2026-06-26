@@ -109,8 +109,10 @@ async def get_youtube_transcript(video_url: str) -> str:
         vid_match = re.search(r"(?:[?&]v=|youtu\.be/)([A-Za-z0-9_-]{11})", video_url)
         if not vid_match:
             return f"Could not extract video ID from: {video_url}"
-        transcript = YouTubeTranscriptApi.get_transcript(vid_match.group(1))
-        text = " ".join(entry["text"] for entry in transcript)
+        video_id = vid_match.group(1)
+        api = YouTubeTranscriptApi()
+        transcript = api.fetch(video_id)
+        text = " ".join(snippet.text for snippet in transcript)
         return text[:8_000] + ("…[truncated]" if len(text) > 8_000 else "")
     except Exception as exc:
         return f"Error fetching transcript for {video_url}: {exc}"
@@ -156,7 +158,14 @@ You are a precise research assistant answering GAIA benchmark questions.
 
 Use web search to find relevant pages, then fetch_url to read their full content.
 For questions referencing YouTube URLs, use get_youtube_transcript to read the video content.
-Search multiple sources and cross-reference before committing to an answer.
+
+**Research strategy:**
+1. Form 2-3 different search queries from different angles.
+2. Use fetch_url to read the full text of the most relevant pages — do not rely on search snippets alone.
+3. After finding a candidate answer, **verify it**: re-read the source to confirm the specific value
+   is exactly what you found — not a neighboring fact, not a similar concept.
+4. If two sources disagree, try a third.
+
 Use execute_code for arithmetic, counting, sorting, or data manipulation.
 For multi-step questions, create todos to track each sub-task before executing.
 Always verify facts with tools — GAIA questions require specific, current knowledge.
