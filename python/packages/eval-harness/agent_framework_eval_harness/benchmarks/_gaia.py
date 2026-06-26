@@ -187,7 +187,7 @@ def _load_tasks(
                         continue
                     tasks.append(t)
 
-    rng = random.Random(seed)  # seed=None → truly random; seed=0 → reproducible dev runs
+    rng = random.Random(seed)  # seed=None → truly random; seed=0 → reproducible dev runs  # noqa: S311
     rng.shuffle(tasks)
     return tasks[:max_tasks] if max_tasks is not None else tasks
 
@@ -290,6 +290,10 @@ class GAIABenchmark:
     seed: int | None = 0
     """Random seed for task shuffling.  Defaults to ``0`` for reproducible
     development runs.  Set to ``None`` for a fresh random draw each time."""
+    results_file: str | None = None
+    """When set, save per-task results as JSON Lines to this path.  Each line
+    contains: task_id, question, expected, extracted, passed, level.
+    Useful for offline failure analysis without re-running the benchmark."""
 
     name: str = field(default="GAIA", init=False)
 
@@ -373,9 +377,41 @@ class GAIABenchmark:
         if self.verbose and results:
             self._print_verbose(tasks, items, results[0])
 
+        if self.results_file and results:
+            self._save_results(tasks, items, results[0])
+
         return results
 
-    def _print_verbose(self, tasks: list[_GAIATask], items: list[EvalItem], results: EvalResults) -> None:
+    def _save_results(self, tasks: list[_GAIATask], items: list[Any], results: EvalResults) -> None:
+        """Save per-task results to a JSON Lines file for offline analysis."""
+        import json
+        from pathlib import Path
+
+        item_map = {r.item_id: r for r in results.items}
+        path = Path(self.results_file)  # type: ignore[arg-type]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as fh:
+            for idx, (task, item) in enumerate(zip(tasks, items)):
+                extracted = self.answer_extractor(item.response) if self.answer_extractor else item.response
+                item_result = item_map.get(str(idx))
+                fh.write(
+                    json.dumps(
+                        {
+                            "idx": idx,
+                            "task_id": task.task_id,
+                            "level": task.level,
+                            "question": task.question,
+                            "expected": task.answer,
+                            "extracted": extracted,
+                            "response": item.response[:2000],  # first 2k chars for diagnosis
+                            "passed": item_result.is_passed if item_result else False,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+
+    def _print_verbose(self, tasks: list[_GAIATask], items: list[Any], results: EvalResults) -> None:
         """Print per-task diagnostics for debugging extraction failures."""
         item_map = {r.item_id: r for r in results.items}
         print()

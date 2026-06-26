@@ -353,6 +353,7 @@ async def main(args: argparse.Namespace) -> None:
             answer_extractor=extract_final_answer,
             verbose=args.verbose,
             seed=None if args.seed == -1 else args.seed,
+            results_file=args.results_file,
         )
     )
     # </run_gaia_eval>
@@ -402,5 +403,12 @@ Examples:
         help="Print per-task: question, extracted answer, expected, pass/fail",
     )
     parser.add_argument("--seed", type=int, default=0, help="Random seed (default: 0=reproducible; -1=random)")
+    parser.add_argument(
+        "--results-file",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Save per-task results as JSON Lines to this file for offline analysis",
+    )
 
     asyncio.run(main(parser.parse_args()))
