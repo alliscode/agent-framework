@@ -112,8 +112,8 @@ async def _fetch_page_text(url: str, session: aiohttp.ClientSession, max_chars: 
 async def fetch_url(url: str) -> str:
     """Fetch the full text content of a web page.
 
-    Use after a web search to read a specific page in full.
-    For reading several search results at once, prefer ``fetch_urls``.
+    Use after a web search when you need to read the actual page content
+    rather than rely on a search snippet. Returns up to 10 000 characters.
 
     Args:
         url: The full URL to fetch.
@@ -121,37 +121,9 @@ async def fetch_url(url: str) -> str:
     headers = {"User-Agent": "Mozilla/5.0 (compatible; GaiaEvalBot/1.0)"}
     try:
         async with aiohttp.ClientSession(headers=headers) as session:
-            return await _fetch_page_text(url, session, max_chars=_MAX_PAGE_CHARS)
+            return await _fetch_page_text(url, session)
     except Exception as exc:
         return f"Error fetching {url}: {exc}"
-
-
-@tool
-async def fetch_urls(urls: list[str]) -> str:
-    """Fetch the full text content of multiple web pages simultaneously.
-
-    Use this after a web search to read the top 2-5 results in parallel
-    rather than fetching them one at a time.  This mirrors how Tavily-based
-    research agents work — search once, read several pages at once.
-
-    Args:
-        urls: List of URLs to fetch in parallel (2-5 recommended).
-
-    Example:
-        # After web search returns results, read the top 3:
-        fetch_urls([
-            "https://girlswhocode.com/about-us",
-            "https://en.wikipedia.org/wiki/Girls_Who_Code",
-            "https://newsroom.accenture.com/...",
-        ])
-    """
-    if not urls:
-        return "No URLs provided."
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; GaiaEvalBot/1.0)"}
-    async with aiohttp.ClientSession(headers=headers) as session:
-        texts = await asyncio.gather(*[_fetch_page_text(u, session) for u in urls[:6]])
-    sections = [f"### {url}\n{text}" for url, text in zip(urls, texts)]
-    return "\n\n---\n\n".join(sections)
 
 
 @tool
@@ -189,17 +161,18 @@ You are a precise research assistant answering GAIA benchmark questions.
 
 ### How to work
 
-1. Use web search to find relevant pages.
-2. After getting search results, use ``fetch_urls([url1, url2, url3])`` to read
-   the top 2-4 pages in parallel — do not rely on search snippets alone.
-3. For YouTube URLs, use ``get_youtube_transcript`` first.
-4. Use ``fetch_url`` for a single known URL.
-5. Use ``execute_code`` for arithmetic, counting, sorting, or data manipulation.
+Use web search to find relevant pages, then fetch_url to read their full content.
+For questions referencing YouTube URLs, use get_youtube_transcript first.
+Use execute_code for arithmetic, counting, sorting, or data manipulation.
 
-**Verification:** After finding a candidate answer, re-read the specific section
-of the source to confirm it — not a neighboring fact, not a similar concept.
+**Research strategy:**
+1. Form 2-3 different search queries from different angles.
+2. Use fetch_url to read the full text of the most relevant pages — do not rely on search snippets alone.
+3. After finding a candidate answer, **verify it**: re-read the source to confirm the specific value
+   is exactly what you found — not a neighboring fact, not a similar concept.
+4. If two sources disagree, try a third.
 
-For multi-step questions, create todos before executing.
+For multi-step questions, create todos to track each sub-task before executing.
 Always verify facts with tools — GAIA questions require specific, current knowledge.
 4. If two sources disagree, try a third.
 
@@ -370,7 +343,7 @@ async def main(args: argparse.Namespace) -> None:
         max_output_tokens=8_192,
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
-        tools=[fetch_url, fetch_urls, get_youtube_transcript, MontyExecuteCodeTool()],
+        tools=[fetch_url, get_youtube_transcript, MontyExecuteCodeTool()],
         middleware=[GaiaAnswerFormatterMiddleware()],
         loop_should_continue=todos_remaining(),
         loop_next_message=todos_remaining_message,
