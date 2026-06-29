@@ -178,7 +178,6 @@ After completing your research, end your response with exactly:
 
 The final answer must be short and exact: a number, date, name, short phrase,
 or comma-separated list matching precisely what the question asks for.
-**Use the most minimal form** — if the answer is "diamond", say "diamond", not "crystalline diamond".
 Do not include units, explanations, or extra punctuation unless they are
 part of the expected answer.
 
@@ -206,7 +205,7 @@ _PROSE_BOUNDARY_RE = re.compile(
     r"|\s+I(?:'[a-z]+)?\s+"
     # Common sentence starters / acknowledgement words — match word + any trailing punctuation/space
     r"|\s+(?:The|This|It|Note|Please|Both|All|Here|Understood|Done|Complete|However|Therefore|Thus)"
-    r"(?:'[a-z]+)?(?:[!.,]|\s|$)"
+    r"(?:'[a-z]+)?(?:\s|[!.,]|$)"
     # Comma followed by connective (description, not list): "12 layers, which is..."
     r"|,\s+(?:which|where|that|and|but|or|as|making|giving|so|since|because|meaning|giving)\b"
     r")",
