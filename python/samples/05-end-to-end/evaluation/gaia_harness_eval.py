@@ -90,7 +90,118 @@ from dotenv import load_dotenv
 
 # ── fetch_url tool ────────────────────────────────────────────────────────────
 
-_MAX_PAGE_CHARS = 12_000  # truncate large pages to avoid context overflow
+_MAX_PAGE_CHARS = 8_000   # per-page limit inside deep_search results
+_MAX_FETCH_CHARS = 12_000  # limit for standalone fetch_url calls
+
+
+async def _fetch_page_text(url: str, session: aiohttp.ClientSession, max_chars: int = _MAX_PAGE_CHARS) -> str:
+    """Fetch and strip a single page; returns plain text capped at *max_chars*."""
+    try:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=20), allow_redirects=True) as resp:
+            resp.raise_for_status()
+            html = await resp.text(errors="replace")
+        text = re.sub(r"<script[^>]*>.*?</script>", " ", html, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text[:max_chars] + ("…[truncated]" if len(text) > max_chars else "")
+    except Exception as exc:
+        return f"[fetch error: {exc}]"
+
+
+async def _ddg_search(query: str, max_results: int = 5) -> list[tuple[str, str]]:
+    """Search using ddgs and return (url, snippet) pairs."""
+    try:
+        from ddgs import DDGS  # type: ignore[import-untyped]
+
+        results = await asyncio.to_thread(
+            lambda: list(DDGS().text(query, max_results=max_results))
+        )
+        return [(r["href"], r.get("body", "")) for r in results if r.get("href")]
+    except Exception as exc:
+        return [("", f"[search error: {exc}]")]
+
+
+@tool
+async def deep_search(queries: list[str], pages_per_query: int = 3) -> str:
+    """Search the web with multiple queries simultaneously and read the full content of top results.
+
+    This is the primary research tool for GAIA tasks. It mirrors how top-scoring
+    systems (e.g. Tavily-based agents) work: multiple search angles run in parallel,
+    and the full text of the most relevant pages is returned automatically — no
+    separate fetch_url calls needed.
+
+    Use this for any question requiring web research. Pass 2-5 targeted queries
+    covering different angles of the question for best results.
+
+    Args:
+        queries: List of search queries to run in parallel (2-5 recommended).
+        pages_per_query: Number of top pages to fully read per query (default 3).
+
+    Example:
+        deep_search(
+            queries=[
+                "Girls Who Code percentage women computer scientists 1984 2016",
+                "decline women CS degrees site:girlswhocode.com",
+                "how long did it take women CS percentage drop Girls Who Code",
+            ]
+        )
+    """
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; GaiaEvalBot/1.0)"}
+    async with aiohttp.ClientSession(headers=headers) as session:
+        # Run all search queries in parallel
+        search_results = await asyncio.gather(*[_ddg_search(q) for q in queries])
+
+        # Collect unique URLs across all queries (preserve insertion order)
+        seen: set[str] = set()
+        url_queue: list[tuple[str, str, str]] = []  # (url, snippet, query)
+        for query, results in zip(queries, search_results):
+            for url, snippet in results[:pages_per_query]:
+                if url and url not in seen and not url.endswith((".pdf", ".pptx", ".docx")):
+                    seen.add(url)
+                    url_queue.append((url, snippet, query))
+
+        # Fetch all unique pages in parallel
+        page_texts = await asyncio.gather(*[_fetch_page_text(u, session) for u, _, _ in url_queue])
+
+    # Format results grouped by query
+    sections: list[str] = []
+    query_results: dict[str, list[str]] = {q: [] for q in queries}
+    for (url, _snippet, query), page_text in zip(url_queue, page_texts):
+        query_results[query].append(f"### {url}\n{page_text}")
+
+    for query, pages in query_results.items():
+        if pages:
+            sections.append(f"## Query: {query}\n\n" + "\n\n---\n\n".join(pages))
+
+    return "\n\n".join(sections) if sections else "No results found."
+
+
+@tool
+async def fetch_url(url: str) -> str:
+    """Fetch the full text content of a specific web page URL.
+
+    Use when you already know the exact URL to read.  For general research
+    questions, prefer ``deep_search`` which handles search + page reading together.
+
+    Args:
+        url: The full URL to fetch.
+    """
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; GaiaEvalBot/1.0)"}
+    try:
+        async with aiohttp.ClientSession(headers=headers) as http, http.get(
+            url, timeout=aiohttp.ClientTimeout(total=20), allow_redirects=True
+        ) as resp:
+            resp.raise_for_status()
+            html = await resp.text(errors="replace")
+
+        text = re.sub(r"<script[^>]*>.*?</script>", " ", html, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text[:_MAX_FETCH_CHARS] + ("…[truncated]" if len(text) > _MAX_FETCH_CHARS else "")
+    except Exception as exc:
+        return f"Error fetching {url}: {exc}"
 
 
 @tool
@@ -118,34 +229,6 @@ async def get_youtube_transcript(video_url: str) -> str:
         return f"Error fetching transcript for {video_url}: {exc}"
 
 
-@tool
-async def fetch_url(url: str) -> str:
-    """Fetch the text content of a web page.
-
-    Use this after a web search when you need to read the actual page content
-    rather than a short search snippet.  Returns the first 12 000 characters
-    of the page body text.
-
-    Args:
-        url: The full URL to fetch.
-    """
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; GaiaEvalBot/1.0)"}
-    try:
-        async with aiohttp.ClientSession(headers=headers) as http, http.get(
-            url, timeout=aiohttp.ClientTimeout(total=20), allow_redirects=True
-        ) as resp:
-            resp.raise_for_status()
-            html = await resp.text(errors="replace")
-
-        # Very light HTML → text: strip tags, collapse whitespace
-        text = re.sub(r"<script[^>]*>.*?</script>", " ", html, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r"<[^>]+>", " ", text)
-        text = re.sub(r"\s+", " ", text).strip()
-        return text[:_MAX_PAGE_CHARS] + ("…[truncated]" if len(text) > _MAX_PAGE_CHARS else "")
-    except Exception as exc:
-        return f"Error fetching {url}: {exc}"
-
 # ── GAIA-specific agent instructions ─────────────────────────────────────────
 
 
@@ -156,14 +239,21 @@ You are a precise research assistant answering GAIA benchmark questions.
 
 ### How to work
 
-Use web search to find relevant pages, then fetch_url to read their full content.
-For questions referencing YouTube URLs, use get_youtube_transcript to read the video content.
+Use ``deep_search`` as your primary research tool — it runs multiple queries in
+parallel and returns full page content for the top results automatically.
+For questions referencing YouTube URLs, use ``get_youtube_transcript`` first.
+Use ``fetch_url`` when you already know a specific URL to read.
+Use ``execute_code`` for arithmetic, counting, sorting, or data manipulation.
 
 **Research strategy:**
-1. Form 2-3 different search queries from different angles.
-2. Use fetch_url to read the full text of the most relevant pages — do not rely on search snippets alone.
-3. After finding a candidate answer, **verify it**: re-read the source to confirm the specific value
-   is exactly what you found — not a neighboring fact, not a similar concept.
+1. Form 2-5 search queries covering different angles of the question.
+2. Call ``deep_search(queries=[...])`` once — it fetches full page content automatically.
+3. After finding a candidate answer, **verify it**: confirm the specific value in the
+   source text — not a neighboring fact, not a similar concept.
+4. If the answer isn't found, try different query angles with another ``deep_search`` call.
+
+For multi-step questions, create todos to track each sub-task before executing.
+Always verify facts with tools — GAIA questions require specific, current knowledge.
 4. If two sources disagree, try a third.
 
 Use execute_code for arithmetic, counting, sorting, or data manipulation.
@@ -333,13 +423,16 @@ async def main(args: argparse.Namespace) -> None:
         max_output_tokens=8_192,
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
-        tools=[fetch_url, get_youtube_transcript, MontyExecuteCodeTool()],
+        tools=[fetch_url, deep_search, get_youtube_transcript, MontyExecuteCodeTool()],
         middleware=[GaiaAnswerFormatterMiddleware()],
         loop_should_continue=todos_remaining(),
         loop_next_message=todos_remaining_message,
         loop_max_iterations=15,
         disable_file_memory=True,
         disable_file_access=True,
+        # deep_search replaces the Foundry web search tool (which returns only snippets).
+        # Disable the auto-included Foundry web search to avoid duplicate search tools.
+        disable_web_search=True,
         history_provider=InMemoryHistoryProvider(load_messages=False),
     )
     # </harness_gaia_agent>
