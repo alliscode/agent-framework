@@ -165,6 +165,8 @@ You are a precise research assistant answering GAIA benchmark questions.
 Use web search to find relevant pages, then fetch_url to read their full content.
 For questions referencing YouTube URLs, use get_youtube_transcript first.
 Use execute_code for arithmetic, counting, sorting, or data manipulation.
+For multi-step questions, create todos to track each sub-task before executing.
+Always verify facts with tools — GAIA questions require specific, current knowledge.
 
 **Research strategy:**
 1. Form 2-3 different search queries from different angles.
@@ -173,34 +175,11 @@ Use execute_code for arithmetic, counting, sorting, or data manipulation.
    is exactly what you found — not a neighboring fact, not a similar concept.
 4. If two sources disagree, try a third.
 
-For multi-step questions, create todos to track each sub-task before executing.
-Always verify facts with tools — GAIA questions require specific, current knowledge.
-4. If two sources disagree, try a third.
+### Presenting your answer
 
-Use execute_code for arithmetic, counting, sorting, or data manipulation.
-For multi-step questions, create todos to track each sub-task before executing.
-Always verify facts with tools — GAIA questions require specific, current knowledge.
-
-### Answer format
-
-After completing your research, end your response with exactly:
-
-    FINAL ANSWER: <your answer>
-
-The final answer must be short and exact: a number, date, name, short phrase,
-or comma-separated list matching precisely what the question asks for.
-Do not include units, explanations, or extra punctuation unless they are
-part of the expected answer.
-
-**Always provide a FINAL ANSWER**, even if uncertain — give your best guess
-based on available evidence. Never say "insufficient information" or leave the
-answer blank.
-
-Examples:
-    FINAL ANSWER: 42
-    FINAL ANSWER: Marie Curie
-    FINAL ANSWER: 3, 7, 11
-    FINAL ANSWER: 1969-07-20
+When you have finished your research, summarize your findings concisely.
+State the answer clearly at the end of your response.
+Do not worry about special formatting — just give your best answer based on the evidence.
 """
 
 # ── Answer extraction ─────────────────────────────────────────────────────────
@@ -521,7 +500,8 @@ async def main(args: argparse.Namespace) -> None:
                 next_message=todos_remaining_message,
                 return_final_only=True,  # KEY: reformulator reads only last iteration
             ),
-            GaiaAnswerFormatterMiddleware(),
+            # No GaiaAnswerFormatterMiddleware — reformulator handles ALL extraction
+            # now that the agent is not instructed to produce FINAL ANSWER: inline.
         ],
         # No loop_should_continue — loop is in middleware= above with return_final_only=True
         disable_file_memory=True,

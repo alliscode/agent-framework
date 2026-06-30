@@ -494,22 +494,17 @@ class GAIABenchmark:
                     response = await agent.run([Message("user", [query])], session=session)
 
                 # Apply reformulator if provided — runs ONCE after all loop iterations
-                # complete, with the full accumulated transcript.  This is adapted from
-                # HuggingFace smolagents' prepare_response() pattern.
-                #
-                # Hybrid mode: only reformulate when the agent's inline response doesn't
-                # contain a clean FINAL ANSWER: line.  When the agent already produced a
-                # well-formatted answer, the reformulator can only make it worse by
-                # re-reading the transcript and potentially changing a correct answer.
+                # complete with the last iteration's clean research output.
+                # Adapted from HuggingFace smolagents' prepare_response() pattern.
+                # The agent is not instructed to produce FINAL ANSWER: inline, so the
+                # reformulator is the sole extractor — always runs when provided.
                 if self.response_reformulator is not None and response is not None:
-                    needs_reformulation = not _has_clean_final_answer(response)
-                    if needs_reformulation:
-                        try:
-                            response = await self.response_reformulator(query, response)
-                        except Exception:
-                            logger.warning(
-                                "Reformulator failed for task: %.80s…", query, exc_info=True
-                            )
+                    try:
+                        response = await self.response_reformulator(query, response)
+                    except Exception:
+                        logger.warning(
+                            "Reformulator failed for task: %.80s…", query, exc_info=True
+                        )
                 return response
 
             except asyncio.TimeoutError:
