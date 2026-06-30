@@ -212,7 +212,7 @@ _PROSE_BOUNDARY_RE = re.compile(
     r"|\s+I(?:'[a-z]+)?\s+"
     # Common sentence starters / acknowledgement words — match word + any trailing punctuation/space
     r"|\s+(?:The|This|It|Note|Please|Both|All|Here|Understood|Done|Complete|However|Therefore|Thus|FINAL)"
-    r"(?:'[a-z]+)?(?:\s|[!.,]|$)"
+    r"(?:'[a-z]+)?(?:\s|[!.,\u2014]|$)"
     # Comma followed by connective (description, not list): "12 layers, which is..."
     r"|,\s+(?:which|where|that|and|but|or|as|making|giving|so|since|because|meaning|giving)\b"
     r")",
@@ -277,7 +277,8 @@ If you are asked for a string, don't use articles or abbreviations (e.g. for cit
 Don't output any final sentence punctuation such as '.', '!', or '?'.
 If you are asked for a comma separated list, apply the above rules depending on whether \
 the elements are numbers or strings.
-If you are unable to determine the final answer, output 'FINAL ANSWER: Unable to determine'"""
+Always provide a FINAL ANSWER based on the best available evidence. \
+Never output 'Unable to determine' or leave the answer blank — make your best guess."""
 
 
 def _build_transcript(messages: list[Message], max_chars: int = 30_000) -> str:
