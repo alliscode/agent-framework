@@ -88,9 +88,18 @@ from agent_framework_monty import MontyExecuteCodeTool
 from azure.identity import AzureCliCredential
 from dotenv import load_dotenv
 
-# ── fetch tools ──────────────────────────────────────────────────────────────
+# ── search + fetch tools ─────────────────────────────────────────────────────
 
 _MAX_PAGE_CHARS = 10_000
+_SERPAPI_KEY: str | None = None  # set from env at startup
+
+
+def _get_serpapi_key() -> str | None:
+    """Return the SerpAPI key from env, cached after first read."""
+    global _SERPAPI_KEY
+    if _SERPAPI_KEY is None:
+        _SERPAPI_KEY = os.environ.get("SERPAPI_API_KEY") or None
+    return _SERPAPI_KEY
 
 
 async def _fetch_page_text(url: str, session: aiohttp.ClientSession, max_chars: int = _MAX_PAGE_CHARS) -> str:
@@ -103,17 +112,73 @@ async def _fetch_page_text(url: str, session: aiohttp.ClientSession, max_chars: 
         text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r"<[^>]+>", " ", text)
         text = re.sub(r"\s+", " ", text).strip()
-        return text[:max_chars] + ("…[truncated]" if len(text) > max_chars else "")
+        return text[:max_chars] + ("...[truncated]" if len(text) > max_chars else "")
     except Exception as exc:
         return f"[fetch error: {exc}]"
+
+
+@tool
+async def web_search(query: str, filter_year: int | None = None) -> str:
+    """Search the web and return results with titles, URLs, and snippets.
+
+    Returns structured search results — titles, URLs, and page snippets —
+    that can be used to decide which pages to read with fetch_url.
+    Unlike the built-in Bing tool, results are fully visible in the
+    conversation history and can be used by the answer reformulator.
+
+    Args:
+        query: The search query.
+        filter_year: Optional year to restrict results (e.g. 2023).
+    """
+    key = _get_serpapi_key()
+    if not key:
+        return "[web_search: SERPAPI_API_KEY not set — add it to .env]"
+
+    try:
+        params: dict[str, str] = {
+            "engine": "google",
+            "q": query,
+            "api_key": key,
+            "num": "10",
+        }
+        if filter_year is not None:
+            params["tbs"] = f"cdr:1,cd_min:01/01/{filter_year},cd_max:12/31/{filter_year}"
+
+        # Run in thread — SerpAPI client is synchronous
+        def _call() -> dict:  # type: ignore[type-arg]
+            from serpapi import GoogleSearch  # type: ignore[import-untyped]
+            return GoogleSearch(params).get_dict()  # type: ignore[no-any-return]
+
+        results = await asyncio.to_thread(_call)
+
+        if "error" in results:
+            return f"[search error: {results['error']}]"
+
+        organic = results.get("organic_results", [])
+        if not organic:
+            return f"No results found for: {query!r}"
+
+        lines: list[str] = [f"Google search results for '{query}':\n"]
+        for i, r in enumerate(organic[:8], 1):
+            title = r.get("title", "")
+            link = r.get("link", "")
+            snippet = r.get("snippet", "")
+            date = r.get("date", "")
+            date_str = f"  Date: {date}\n" if date else ""
+            lines.append(f"{i}. [{title}]({link})\n{date_str}  {snippet}")
+
+        return "\n\n".join(lines)
+
+    except Exception as exc:
+        return f"[search error: {exc}]"
 
 
 @tool
 async def fetch_url(url: str) -> str:
     """Fetch the full text content of a web page.
 
-    Use after a web search when you need to read the actual page content
-    rather than rely on a search snippet. Returns up to 10 000 characters.
+    Use after web_search when you need to read the actual page content.
+    Returns up to 10 000 characters of plain text.
 
     Args:
         url: The full URL to fetch.
@@ -130,8 +195,7 @@ async def fetch_url(url: str) -> str:
 async def get_youtube_transcript(video_url: str) -> str:
     """Get the spoken transcript of a YouTube video.
 
-    Use this when a question references a YouTube URL. Returns the full captions
-    so you can find specific information said in the video.
+    Use this when a question references a YouTube URL.
 
     Args:
         video_url: Full YouTube URL (e.g. https://www.youtube.com/watch?v=...)
@@ -146,7 +210,7 @@ async def get_youtube_transcript(video_url: str) -> str:
         api = YouTubeTranscriptApi()
         transcript = api.fetch(video_id)
         text = " ".join(snippet.text for snippet in transcript)
-        return text[:8_000] + ("…[truncated]" if len(text) > 8_000 else "")
+        return text[:8_000] + ("...[truncated]" if len(text) > 8_000 else "")
     except Exception as exc:
         return f"Error fetching transcript for {video_url}: {exc}"
 
@@ -161,24 +225,18 @@ You are a precise research assistant answering GAIA benchmark questions.
 
 ### How to work
 
-Use web search to find relevant pages, then fetch_url to read their full content.
-For questions referencing YouTube URLs, use get_youtube_transcript first.
-Use execute_code for arithmetic, counting, sorting, or data manipulation.
+Use ``web_search`` to find relevant pages, then ``fetch_url`` to read the full content.
+For YouTube URLs, use ``get_youtube_transcript`` first.
+Use ``execute_code`` for arithmetic, counting, sorting, or data manipulation.
+For multi-step questions, create todos to track each sub-task before executing.
+Always verify facts with tools — GAIA questions require specific, current knowledge.
 
 **Research strategy:**
 1. Form 2-3 different search queries from different angles.
-2. Use fetch_url to read the full text of the most relevant pages — do not rely on search snippets alone.
+2. Use ``fetch_url`` on the most relevant URLs from search results — do not rely on snippets alone.
 3. After finding a candidate answer, **verify it**: re-read the source to confirm the specific value
    is exactly what you found — not a neighboring fact, not a similar concept.
 4. If two sources disagree, try a third.
-
-For multi-step questions, create todos to track each sub-task before executing.
-Always verify facts with tools — GAIA questions require specific, current knowledge.
-4. If two sources disagree, try a third.
-
-Use execute_code for arithmetic, counting, sorting, or data manipulation.
-For multi-step questions, create todos to track each sub-task before executing.
-Always verify facts with tools — GAIA questions require specific, current knowledge.
 
 ### Answer format
 
@@ -476,13 +534,18 @@ async def main(args: argparse.Namespace) -> None:
         max_output_tokens=8_192,
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
-        tools=[fetch_url, get_youtube_transcript, MontyExecuteCodeTool()],
+        tools=[web_search, fetch_url, get_youtube_transcript, MontyExecuteCodeTool()],
         middleware=[GaiaAnswerFormatterMiddleware()],
         loop_should_continue=todos_remaining(),
         loop_next_message=todos_remaining_message,
         loop_max_iterations=15,
         disable_file_memory=True,
         disable_file_access=True,
+        # web_search tool replaces the Foundry hosted Bing search.
+        # The key difference: search results are returned as function_result
+        # text (fully visible in AgentResponse.messages) rather than being
+        # injected server-side into the model context only.
+        disable_web_search=True,
         history_provider=InMemoryHistoryProvider(load_messages=False),
     )
     # </harness_gaia_agent>
