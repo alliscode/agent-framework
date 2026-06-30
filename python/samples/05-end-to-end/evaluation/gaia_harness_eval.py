@@ -352,9 +352,33 @@ Never output 'Unable to determine' or leave the answer blank — make your best 
 def _build_transcript(messages: list[Message], max_chars: int = 30_000) -> str:
     """Extract a concise research transcript from accumulated agent messages.
 
-    Includes assistant reasoning text and tool results; skips function-call
-    invocations and user nudge messages (loop internals).
+    Skips harness-internal tool calls (todos, mode, file memory) that add noise
+    without research value.  Keeps assistant reasoning text and results from
+    research tools (fetch_url, execute_code, youtube transcript).
     """
+    # Known harness-internal tool names whose results add noise to the transcript
+    _HARNESS_TOOLS = frozenset({
+        "todos_add", "todos_complete", "todos_get_remaining",
+        "todos_remove", "todos_get_all",
+        "mode_get", "mode_set",
+        "file_memory_save_file", "file_memory_read_file", "file_memory_delete_file",
+        "file_memory_list_files", "file_memory_search_files",
+        "file_access_save_file", "file_access_read_file", "file_access_delete_file",
+        "file_access_list_files", "file_access_list_subdirectories", "file_access_search_files",
+    })
+
+    # First pass: collect call_ids for harness-internal tool calls so we can
+    # skip their corresponding function_result entries.
+    harness_call_ids: set[str] = set()
+    for msg in messages:
+        for c in (msg.contents or []):
+            if getattr(c, "type", "") == "function_call":
+                name = getattr(c, "name", "") or ""
+                call_id = getattr(c, "call_id", None)
+                if name in _HARNESS_TOOLS and call_id:
+                    harness_call_ids.add(call_id)
+
+    # Second pass: build the transcript from research-relevant content only
     parts: list[str] = []
     chars_used = 0
 
@@ -368,12 +392,16 @@ def _build_transcript(messages: list[Message], max_chars: int = 30_000) -> str:
 
             if role == "assistant" and ctype == "text":
                 text = getattr(content, "text", "") or ""
-                if text:
-                    entry = f"[assistant]: {text}"
+                # Skip very short messages that are loop nudges or completions
+                if text and len(text.strip()) > 20:
+                    entry = f"[research]: {text}"
                     parts.append(entry)
                     chars_used += len(entry)
 
             elif ctype == "function_result":
+                call_id = getattr(content, "call_id", None)
+                if call_id and call_id in harness_call_ids:
+                    continue  # skip harness-internal result
                 result_val = getattr(content, "result", None)
                 if result_val:
                     snippet = str(result_val)[:2_000]
@@ -460,7 +488,7 @@ async def main(args: argparse.Namespace) -> None:
     )
 
     # <harness_gaia_agent>
-    # Configure the harness agent for GAIA — v2 proven baseline (47.6%).
+    # Configure the harness agent for GAIA.
     #
     # Key choices for a fair apples-to-apples comparison against smolagents:
     #   - Web search: enabled automatically (Bing via Foundry)
@@ -487,6 +515,14 @@ async def main(args: argparse.Namespace) -> None:
     )
     # </harness_gaia_agent>
 
+    # <reformulator>
+    # Hybrid reformulator: only fires when the middleware could not produce a
+    # clean FINAL ANSWER inline (gave-up phrases, noisy output, etc.).
+    # _build_transcript now skips harness-internal tool calls (todos, mode),
+    # so the reformulator reads clean research content only.
+    reformulator = make_reformulator(client)
+    # </reformulator>
+
     harness = EvalHarness(agent=agent)
 
     level_str = f"L{args.level}"
@@ -503,6 +539,7 @@ async def main(args: argparse.Namespace) -> None:
             timeout=args.timeout,
             skip_file_attachments=True,
             answer_extractor=extract_final_answer,
+            response_reformulator=reformulator,
             verbose=args.verbose,
             seed=None if args.seed == -1 else args.seed,
             results_file=args.results_file,
