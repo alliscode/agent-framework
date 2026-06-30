@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# GAIA benchmark run results (large data files, not for source control)
+python/gaia_results*.jsonl
+
 # C extensions
 *.so
 
