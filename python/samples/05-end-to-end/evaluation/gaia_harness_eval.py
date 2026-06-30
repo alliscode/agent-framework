@@ -72,7 +72,6 @@ from collections.abc import Awaitable, Callable
 import aiohttp
 from agent_framework import (
     AgentContext,
-    AgentLoopMiddleware,
     AgentMiddleware,
     AgentResponse,
     InMemoryHistoryProvider,
@@ -165,8 +164,6 @@ You are a precise research assistant answering GAIA benchmark questions.
 Use web search to find relevant pages, then fetch_url to read their full content.
 For questions referencing YouTube URLs, use get_youtube_transcript first.
 Use execute_code for arithmetic, counting, sorting, or data manipulation.
-For multi-step questions, create todos to track each sub-task before executing.
-Always verify facts with tools — GAIA questions require specific, current knowledge.
 
 **Research strategy:**
 1. Form 2-3 different search queries from different angles.
@@ -175,11 +172,34 @@ Always verify facts with tools — GAIA questions require specific, current know
    is exactly what you found — not a neighboring fact, not a similar concept.
 4. If two sources disagree, try a third.
 
-### Presenting your answer
+For multi-step questions, create todos to track each sub-task before executing.
+Always verify facts with tools — GAIA questions require specific, current knowledge.
+4. If two sources disagree, try a third.
 
-When you have finished your research, summarize your findings concisely.
-State the answer clearly at the end of your response.
-Do not worry about special formatting — just give your best answer based on the evidence.
+Use execute_code for arithmetic, counting, sorting, or data manipulation.
+For multi-step questions, create todos to track each sub-task before executing.
+Always verify facts with tools — GAIA questions require specific, current knowledge.
+
+### Answer format
+
+After completing your research, end your response with exactly:
+
+    FINAL ANSWER: <your answer>
+
+The final answer must be short and exact: a number, date, name, short phrase,
+or comma-separated list matching precisely what the question asks for.
+Do not include units, explanations, or extra punctuation unless they are
+part of the expected answer.
+
+**Always provide a FINAL ANSWER**, even if uncertain — give your best guess
+based on available evidence. Never say "insufficient information" or leave the
+answer blank.
+
+Examples:
+    FINAL ANSWER: 42
+    FINAL ANSWER: Marie Curie
+    FINAL ANSWER: 3, 7, 11
+    FINAL ANSWER: 1969-07-20
 """
 
 # ── Answer extraction ─────────────────────────────────────────────────────────
@@ -332,33 +352,9 @@ Never output 'Unable to determine' or leave the answer blank — make your best 
 def _build_transcript(messages: list[Message], max_chars: int = 30_000) -> str:
     """Extract a concise research transcript from accumulated agent messages.
 
-    Skips harness-internal tool calls (todos, mode, file memory) that add noise
-    without research value.  Keeps assistant reasoning text and results from
-    research tools (fetch_url, execute_code, youtube transcript).
+    Includes assistant reasoning text and tool results; skips function-call
+    invocations and user nudge messages (loop internals).
     """
-    # Known harness-internal tool names whose results add noise to the transcript
-    _HARNESS_TOOLS = frozenset({
-        "todos_add", "todos_complete", "todos_get_remaining",
-        "todos_remove", "todos_get_all",
-        "mode_get", "mode_set",
-        "file_memory_save_file", "file_memory_read_file", "file_memory_delete_file",
-        "file_memory_list_files", "file_memory_search_files",
-        "file_access_save_file", "file_access_read_file", "file_access_delete_file",
-        "file_access_list_files", "file_access_list_subdirectories", "file_access_search_files",
-    })
-
-    # First pass: collect call_ids for harness-internal tool calls so we can
-    # skip their corresponding function_result entries.
-    harness_call_ids: set[str] = set()
-    for msg in messages:
-        for c in (msg.contents or []):
-            if getattr(c, "type", "") == "function_call":
-                name = getattr(c, "name", "") or ""
-                call_id = getattr(c, "call_id", None)
-                if name in _HARNESS_TOOLS and call_id:
-                    harness_call_ids.add(call_id)
-
-    # Second pass: build the transcript from research-relevant content only
     parts: list[str] = []
     chars_used = 0
 
@@ -372,16 +368,12 @@ def _build_transcript(messages: list[Message], max_chars: int = 30_000) -> str:
 
             if role == "assistant" and ctype == "text":
                 text = getattr(content, "text", "") or ""
-                # Skip very short messages that are loop nudges or completions
-                if text and len(text.strip()) > 20:
-                    entry = f"[research]: {text}"
+                if text:
+                    entry = f"[assistant]: {text}"
                     parts.append(entry)
                     chars_used += len(entry)
 
             elif ctype == "function_result":
-                call_id = getattr(content, "call_id", None)
-                if call_id and call_id in harness_call_ids:
-                    continue  # skip harness-internal result
                 result_val = getattr(content, "result", None)
                 if result_val:
                     snippet = str(result_val)[:2_000]
@@ -468,21 +460,15 @@ async def main(args: argparse.Namespace) -> None:
     )
 
     # <harness_gaia_agent>
-    # Configure the harness agent for GAIA.
+    # Configure the harness agent for GAIA — v2 proven baseline (47.6%).
     #
-    # Structural fix for the reformulator:
-    # The previous approach used create_harness_agent's loop_should_continue which
-    # created AgentLoopMiddleware with return_final_only=False (default), so the
-    # AgentResponse accumulated ALL 15 loop iterations.  The reformulator read
-    # the full 15-iteration log and sometimes picked wrong values from earlier
-    # iterations, scoring below v2's 47.6%.
-    #
-    # Fix: pass AgentLoopMiddleware directly via middleware= with return_final_only=True.
-    # This gives the reformulator only the LAST iteration's clean research output —
-    # equivalent to smolagents' write_memory_to_messages() approach.
-    # disable_tool_auto_approval=True: removes ToolApprovalMiddleware so the loop
-    # can be the outermost wrapper (required for correct approval escape hatch ordering).
-    # GAIA tools (fetch_url, execute_code, youtube) don't use approval_mode, so this is safe.
+    # Key choices for a fair apples-to-apples comparison against smolagents:
+    #   - Web search: enabled automatically (Bing via Foundry)
+    #   - fetch_url: reads full page content when agent has a specific URL
+    #   - MontyExecuteCodeTool: Python sandbox for arithmetic/computation
+    #   - GaiaAnswerFormatterMiddleware: per-iteration FINAL ANSWER: enforcement
+    #   - TodoProvider + looping: structured multi-step planning
+    #   - File memory/access: disabled (not in competing systems)
 
     agent = create_harness_agent(
         client=client,
@@ -491,31 +477,15 @@ async def main(args: argparse.Namespace) -> None:
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
         tools=[fetch_url, get_youtube_transcript, MontyExecuteCodeTool()],
-        # Loop + formatter in middleware= so we control return_final_only
-        disable_tool_auto_approval=True,
-        middleware=[
-            AgentLoopMiddleware(
-                todos_remaining(),
-                max_iterations=15,
-                next_message=todos_remaining_message,
-                return_final_only=True,  # KEY: reformulator reads only last iteration
-            ),
-            # No GaiaAnswerFormatterMiddleware — reformulator handles ALL extraction
-            # now that the agent is not instructed to produce FINAL ANSWER: inline.
-        ],
-        # No loop_should_continue — loop is in middleware= above with return_final_only=True
+        middleware=[GaiaAnswerFormatterMiddleware()],
+        loop_should_continue=todos_remaining(),
+        loop_next_message=todos_remaining_message,
+        loop_max_iterations=15,
         disable_file_memory=True,
         disable_file_access=True,
         history_provider=InMemoryHistoryProvider(load_messages=False),
     )
     # </harness_gaia_agent>
-
-    # <reformulator>
-    # Now that return_final_only=True gives a clean last-iteration transcript,
-    # the reformulator reads only the final research output — not 15 iterations
-    # of accumulated todo scaffolding.  Re-enabled as hybrid fallback.
-    reformulator = make_reformulator(client)
-    # </reformulator>
 
     harness = EvalHarness(agent=agent)
 
@@ -533,7 +503,6 @@ async def main(args: argparse.Namespace) -> None:
             timeout=args.timeout,
             skip_file_attachments=True,
             answer_extractor=extract_final_answer,
-            response_reformulator=reformulator,
             verbose=args.verbose,
             seed=None if args.seed == -1 else args.seed,
             results_file=args.results_file,
