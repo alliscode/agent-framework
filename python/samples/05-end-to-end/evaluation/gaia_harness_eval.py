@@ -211,7 +211,7 @@ _PROSE_BOUNDARY_RE = re.compile(
     # "I ..." or "I've/I'd/I'll ..." — agent continuing with self-reference
     r"|\s+I(?:'[a-z]+)?\s+"
     # Common sentence starters / acknowledgement words — match word + any trailing punctuation/space
-    r"|\s+(?:The|This|It|Note|Please|Both|All|Here|Understood|Done|Complete|However|Therefore|Thus)"
+    r"|\s+(?:The|This|It|Note|Please|Both|All|Here|Understood|Done|Complete|However|Therefore|Thus|FINAL)"
     r"(?:'[a-z]+)?(?:\s|[!.,]|$)"
     # Comma followed by connective (description, not list): "12 layers, which is..."
     r"|,\s+(?:which|where|that|and|but|or|as|making|giving|so|since|because|meaning|giving)\b"
@@ -342,13 +342,17 @@ def make_reformulator(client: FoundryChatClient):
         if not transcript:
             return response
 
-        # Append the reformulator prompt to the full conversation transcript.
-        # The model sees all the agent's research + a precise formatting request
-        # with "fresh eyes" — it is not constrained by the agent's inline format.
-        reformulator_messages = list(response.messages or [])
-        reformulator_messages.append(
-            Message("user", [_REFORMULATOR_PROMPT.format(question=question)])
+        # Use system + user message structure (like smolagents) rather than passing
+        # the raw conversation — avoids the model being confused by prior FINAL ANSWER:
+        # lines in the history and echoing them.
+        system_content = (
+            f"Earlier you were asked the following:\n\n{question}\n\n"
+            f"Your research produced the following transcript:\n\n{transcript}"
         )
+        reformulator_messages = [
+            Message("system", [system_content]),
+            Message("user", [_REFORMULATOR_PROMPT.format(question=question)]),
+        ]
 
         try:
             extraction = await client.get_response(reformulator_messages)
@@ -452,9 +456,9 @@ async def main(args: argparse.Namespace) -> None:
         r = results[0]
         pct = r.passed / r.total * 100
 
-        print("─" * 50)
-        print(f"Comparison — GAIA {level_str}, {model}")
-        print("─" * 50)
+        print("-" * 50)
+        print(f"Comparison -- GAIA {level_str}, {model}")
+        print("-" * 50)
         print(f"  This harness ({task_str}):          {pct:5.1f}%  ({r.passed}/{r.total})")
         print("  LangGraph Deep Research (L1):     ~72.0%  (GPT-4o)")
         print("  Claude Opus – Anthropic SDK (L1): ~75.0%")

@@ -436,7 +436,7 @@ class GAIABenchmark:
             expected = task.answer
             item_result = item_map.get(str(idx))
             passed = item_result.is_passed if item_result else False
-            mark = "✓" if passed else "✗"
+            mark = "+" if passed else "-"
             q = task.question[:54]
             print(f"{idx:<4} {q:<55} {extracted[:24]:<25} {expected[:24]:<25} {mark}")
         print()
