@@ -225,15 +225,15 @@ You are a precise research assistant answering GAIA benchmark questions.
 
 ### How to work
 
-Use ``web_search`` to find relevant pages, then ``fetch_url`` to read the full content.
-For YouTube URLs, use ``get_youtube_transcript`` first.
-Use ``execute_code`` for arithmetic, counting, sorting, or data manipulation.
+Use web search to find relevant pages, then fetch_url to read their full content.
+For questions referencing YouTube URLs, use get_youtube_transcript first.
+Use execute_code for arithmetic, counting, sorting, or data manipulation.
 For multi-step questions, create todos to track each sub-task before executing.
 Always verify facts with tools — GAIA questions require specific, current knowledge.
 
 **Research strategy:**
 1. Form 2-3 different search queries from different angles.
-2. Use ``fetch_url`` on the most relevant URLs from search results — do not rely on snippets alone.
+2. Use fetch_url to read the full text of the most relevant pages — do not rely on search snippets alone.
 3. After finding a candidate answer, **verify it**: re-read the source to confirm the specific value
    is exactly what you found — not a neighboring fact, not a similar concept.
 4. If two sources disagree, try a third.
@@ -534,18 +534,18 @@ async def main(args: argparse.Namespace) -> None:
         max_output_tokens=8_192,
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
-        tools=[web_search, fetch_url, get_youtube_transcript, MontyExecuteCodeTool()],
+        tools=[fetch_url, get_youtube_transcript, MontyExecuteCodeTool()],
         middleware=[GaiaAnswerFormatterMiddleware()],
         loop_should_continue=todos_remaining(),
         loop_next_message=todos_remaining_message,
         loop_max_iterations=15,
         disable_file_memory=True,
         disable_file_access=True,
-        # web_search tool replaces the Foundry hosted Bing search.
-        # The key difference: search results are returned as function_result
-        # text (fully visible in AgentResponse.messages) rather than being
-        # injected server-side into the model context only.
-        disable_web_search=True,
+        # web_search (SerpAPI) is available but requires a paid account for full evals
+        # (free tier = 100 searches/month; 84 tasks × ~3 searches = ~250 searches per run).
+        # Switch to SerpAPI: add web_search to tools= and set disable_web_search=True.
+        # The SerpAPI tool makes search results visible in AgentResponse.messages,
+        # enabling the reformulator to read raw search data rather than the agent's synthesis.
         history_provider=InMemoryHistoryProvider(load_messages=False),
     )
     # </harness_gaia_agent>
