@@ -102,7 +102,35 @@ def gaia_scorer(model_answer: str | None, ground_truth: str) -> bool:
     return _normalize_str(model_answer) == _normalize_str(ground_truth)
 
 
-# ── task loading ──────────────────────────────────────────────────────────────
+_FINAL_ANSWER_INLINE_RE = re.compile(
+    r"FINAL\s+ANSWER\s*[:\-]\s*(.{1,120}?)(?:\n|$)", re.IGNORECASE
+)
+# Patterns that indicate the extracted answer is just noise, not a real answer
+_NOISE_PATTERN_RE = re.compile(
+    r"\b(?:unknown|not available|unable to|cannot be|insufficient|no (?:information|data|result))\b",
+    re.IGNORECASE,
+)
+
+
+def _has_clean_final_answer(response: Any) -> bool:
+    """Return ``True`` if the response already contains a clean ``FINAL ANSWER:`` line.
+
+    "Clean" means: the line is present AND the captured answer is short (≤120
+    chars) AND doesn't contain give-up phrases like "Unable to determine".
+    When ``True``, the reformulator is skipped — the agent already did the work.
+    """
+    text: str = getattr(response, "text", "") or ""
+    matches = _FINAL_ANSWER_INLINE_RE.findall(text)
+    if not matches:
+        return False
+    last = matches[-1].strip()
+    # Reject if it looks like a give-up phrase
+    if _NOISE_PATTERN_RE.search(last):
+        return False
+    # Reject if suspiciously long (likely trailing prose leaked in)
+    if len(last) > 80:
+        return False
+    return bool(last)
 
 
 @dataclass
@@ -468,13 +496,20 @@ class GAIABenchmark:
                 # Apply reformulator if provided — runs ONCE after all loop iterations
                 # complete, with the full accumulated transcript.  This is adapted from
                 # HuggingFace smolagents' prepare_response() pattern.
+                #
+                # Hybrid mode: only reformulate when the agent's inline response doesn't
+                # contain a clean FINAL ANSWER: line.  When the agent already produced a
+                # well-formatted answer, the reformulator can only make it worse by
+                # re-reading the transcript and potentially changing a correct answer.
                 if self.response_reformulator is not None and response is not None:
-                    try:
-                        response = await self.response_reformulator(query, response)
-                    except Exception:
-                        logger.warning(
-                            "Reformulator failed for task: %.80s…", query, exc_info=True
-                        )
+                    needs_reformulation = not _has_clean_final_answer(response)
+                    if needs_reformulation:
+                        try:
+                            response = await self.response_reformulator(query, response)
+                        except Exception:
+                            logger.warning(
+                                "Reformulator failed for task: %.80s…", query, exc_info=True
+                            )
                 return response
 
             except asyncio.TimeoutError:
