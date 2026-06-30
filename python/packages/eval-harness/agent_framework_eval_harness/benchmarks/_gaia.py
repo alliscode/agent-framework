@@ -294,6 +294,20 @@ class GAIABenchmark:
     """When set, save per-task results as JSON Lines to this path.  Each line
     contains: task_id, question, expected, extracted, passed, level.
     Useful for offline failure analysis without re-running the benchmark."""
+    response_reformulator: Any = None
+    """Optional async callable ``(question: str, response: AgentResponse) -> AgentResponse``.
+
+    When provided, called once per task *after* ``agent.run()`` returns (after all loop
+    iterations complete). The callable receives the original question and the full
+    accumulated ``AgentResponse`` (messages from every loop iteration) and should return
+    a new ``AgentResponse`` with a clean, precisely formatted final answer appended.
+
+    Use this to implement a "reformulator" pattern: a separate LLM call that reads
+    the full research transcript and extracts the answer with precise formatting
+    rules, rather than relying on the agent to produce the right format inline.
+    See ``make_reformulator()`` in the GAIA eval sample for a reference implementation
+    adapted from HuggingFace smolagents.
+    """
 
     name: str = field(default="GAIA", init=False)
 
@@ -444,11 +458,25 @@ class GAIABenchmark:
         async with semaphore:
             try:
                 if self.timeout is not None:
-                    return await asyncio.wait_for(
+                    response = await asyncio.wait_for(
                         agent.run([Message("user", [query])], session=session),
                         timeout=self.timeout,
                     )
-                return await agent.run([Message("user", [query])], session=session)
+                else:
+                    response = await agent.run([Message("user", [query])], session=session)
+
+                # Apply reformulator if provided — runs ONCE after all loop iterations
+                # complete, with the full accumulated transcript.  This is adapted from
+                # HuggingFace smolagents' prepare_response() pattern.
+                if self.response_reformulator is not None and response is not None:
+                    try:
+                        response = await self.response_reformulator(query, response)
+                    except Exception:
+                        logger.warning(
+                            "Reformulator failed for task: %.80s…", query, exc_info=True
+                        )
+                return response
+
             except asyncio.TimeoutError:
                 logger.warning("GAIA task timed out (%.0fs): %.80s…", self.timeout, query)
             except Exception:

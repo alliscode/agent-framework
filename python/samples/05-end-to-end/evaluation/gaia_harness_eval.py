@@ -67,12 +67,9 @@ import argparse
 import asyncio
 import os
 import re
-from collections.abc import Awaitable, Callable
 
 import aiohttp
 from agent_framework import (
-    AgentContext,
-    AgentMiddleware,
     AgentResponse,
     InMemoryHistoryProvider,
     Message,
@@ -253,63 +250,126 @@ def extract_final_answer(response: str) -> str:
     return answer
 
 
-# ── Answer formatter middleware ───────────────────────────────────────────────
+# ── Reformulator ──────────────────────────────────────────────────────────────
+#
+# Adapted from HuggingFace smolagents prepare_response():
+# https://github.com/huggingface/smolagents/blob/main/examples/open_deep_research/scripts/reformulator.py
+#
+# Instead of asking the agent to produce FINAL ANSWER: inline (while still
+# reasoning), a separate LLM call reads the entire research transcript with
+# fresh eyes and applies precise GAIA formatting rules.  This is the primary
+# driver of smolagents' ~55% GAIA L1 score with GPT-4o.
 
-_FORMATTER_PROMPT = """\
-Output the final answer to the question. One line only, exactly:
+# Verbatim from smolagents reformulator.py
+_REFORMULATOR_PROMPT = """\
+Read the above conversation and output a FINAL ANSWER to the question. \
+The question is repeated here for convenience:
 
-FINAL ANSWER: <answer>
+{question}
 
-Rules: number, name, date, or short phrase. No explanation. No units unless required."""
+To output the final answer, use the following template: FINAL ANSWER: [YOUR FINAL ANSWER]
+Your FINAL ANSWER should be a number OR as few words as possible OR a comma separated list of numbers and/or strings.
+ADDITIONALLY, your FINAL ANSWER MUST adhere to any formatting instructions specified in the original question \
+(e.g., alphabetization, sequencing, units, rounding, decimal places, etc.)
+If you are asked for a number, express it numerically (i.e., with digits rather than words), don't use commas, \
+and DO NOT INCLUDE UNITS such as $ or USD or percent signs unless specified otherwise.
+If you are asked for a string, don't use articles or abbreviations (e.g. for cities), unless specified otherwise. \
+Don't output any final sentence punctuation such as '.', '!', or '?'.
+If you are asked for a comma separated list, apply the above rules depending on whether \
+the elements are numbers or strings.
+If you are unable to determine the final answer, output 'FINAL ANSWER: Unable to determine'"""
 
 
-class GaiaAnswerFormatterMiddleware(AgentMiddleware):
-    """Ensures every agent response contains a ``FINAL ANSWER:`` line.
+def _build_transcript(messages: list[Message], max_chars: int = 30_000) -> str:
+    """Extract a concise research transcript from accumulated agent messages.
 
-    When the agent finishes without the required format, makes a single
-    lightweight follow-up call asking it to extract the answer.  This runs
-    per loop-iteration so the loop always sees a well-formatted result.
+    Includes assistant reasoning text and tool results; skips function-call
+    invocations and user nudge messages (loop internals).
+    """
+    parts: list[str] = []
+    chars_used = 0
+
+    for msg in messages:
+        if not msg.contents:
+            continue
+        role = msg.role
+
+        for content in msg.contents:
+            ctype = getattr(content, "type", "")
+
+            if role == "assistant" and ctype == "text":
+                text = getattr(content, "text", "") or ""
+                if text:
+                    entry = f"[assistant]: {text}"
+                    parts.append(entry)
+                    chars_used += len(entry)
+
+            elif ctype == "function_result":
+                result_val = getattr(content, "result", None)
+                if result_val:
+                    snippet = str(result_val)[:2_000]
+                    entry = f"[tool result]: {snippet}"
+                    parts.append(entry)
+                    chars_used += len(entry)
+
+            if chars_used >= max_chars:
+                break
+        if chars_used >= max_chars:
+            break
+
+    transcript = "\n\n".join(parts)
+    if len(transcript) > max_chars:
+        transcript = transcript[:max_chars] + "…[truncated]"
+    return transcript
+
+
+def make_reformulator(client: FoundryChatClient):
+    """Create an async reformulator callable for ``GAIABenchmark.response_reformulator``.
+
+    Runs ONCE per task after ``agent.run()`` returns (after all loop iterations),
+    reading the full accumulated research transcript and applying precise GAIA
+    formatting rules via a fresh LLM call.
+
+    Args:
+        client: The same ``FoundryChatClient`` used for the agent.
+
+    Returns:
+        An async callable ``(question: str, response: AgentResponse) -> AgentResponse``.
     """
 
-    async def process(self, context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
-        await call_next()
-        result = context.result
-        if not isinstance(result, AgentResponse):
-            return
-        if _FINAL_ANSWER_RE.search(result.text or ""):
-            return  # already formatted — nothing to do
+    async def reformulate(question: str, response: AgentResponse) -> AgentResponse:  # type: ignore[type-arg]
+        transcript = _build_transcript(response.messages or [])
+        if not transcript:
+            return response
 
-        # Build the extraction prompt from the current conversation
-        extraction_messages = list(result.messages or [])
-        extraction_messages.append(Message("user", [_FORMATTER_PROMPT]))
+        # Append the reformulator prompt to the full conversation transcript.
+        # The model sees all the agent's research + a precise formatting request
+        # with "fresh eyes" — it is not constrained by the agent's inline format.
+        reformulator_messages = list(response.messages or [])
+        reformulator_messages.append(
+            Message("user", [_REFORMULATOR_PROMPT.format(question=question)])
+        )
+
         try:
-            extraction = await context.agent.client.get_response(extraction_messages)
-            extraction_text = " ".join(
-                c.text or ""
-                for m in (extraction.messages or [])
-                for c in (m.contents or [])
-                if getattr(c, "text", None) and m.role == "assistant"
-            )
-            # Extract and clean from the extraction response, then inject a pristine message
-            # so that extract_final_answer always gets a single clean FINAL ANSWER: line.
-            clean_matches = _FINAL_ANSWER_RE.findall(extraction_text)
-            if clean_matches:
-                clean_answer = _MARKDOWN_BOLD_RE.sub("", clean_matches[-1]).strip()
-                clean_answer = _MARKDOWN_LINK_RE.sub("", clean_answer).strip()
-                prose = _PROSE_BOUNDARY_RE.search(clean_answer)
-                if prose:
-                    clean_answer = clean_answer[: prose.start()].strip()
-                context.result = AgentResponse(
-                    messages=list(result.messages or [])
+            extraction = await client.get_response(reformulator_messages)
+            extraction_text = extraction.text or ""
+
+            # The reformulator always produces FINAL ANSWER: <answer>
+            m = _FINAL_ANSWER_RE.search(extraction_text)
+            if m:
+                clean_answer = m.group(1).strip()
+                # Inject the clean answer as a new message so extract_final_answer
+                # sees a single, prose-free FINAL ANSWER line.
+                return AgentResponse(
+                    messages=list(response.messages or [])
                     + [Message("assistant", [f"FINAL ANSWER: {clean_answer}"])]
                 )
-            else:
-                # Fallback: append raw extraction and let extract_final_answer handle it
-                context.result = AgentResponse(
-                    messages=list(result.messages or []) + list(extraction.messages or [])
-                )
         except Exception:
-            pass  # leave original result intact on failure
+            pass  # leave original response intact on failure
+
+        return response
+
+    return reformulate
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -329,13 +389,13 @@ async def main(args: argparse.Namespace) -> None:
     # <harness_gaia_agent>
     # Configure the harness agent for GAIA.
     #
-    # Key choices for a fair apples-to-apples comparison against LangGraph:
-    #   - Web search: enabled automatically by create_harness_agent
-    #   - fetch_url: reads full page content after a search
-    #   - MontyExecuteCodeTool: Monty Python sandbox for arithmetic/computation
-    #   - GaiaAnswerFormatterMiddleware: ensures every response has FINAL ANSWER:
+    # Key choices for a fair apples-to-apples comparison against smolagents/LangGraph:
+    #   - Web search: enabled automatically by create_harness_agent (Bing via Foundry)
+    #   - fetch_url: reads full page content when agent has a specific URL
+    #   - MontyExecuteCodeTool: Python sandbox for arithmetic/computation
     #   - TodoProvider + looping: structured multi-step planning
     #   - File memory/access: disabled (not available in competing systems)
+    #   - No middleware: the reformulator (below) replaces GaiaAnswerFormatterMiddleware
 
     agent = create_harness_agent(
         client=client,
@@ -344,7 +404,6 @@ async def main(args: argparse.Namespace) -> None:
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
         tools=[fetch_url, get_youtube_transcript, MontyExecuteCodeTool()],
-        middleware=[GaiaAnswerFormatterMiddleware()],
         loop_should_continue=todos_remaining(),
         loop_next_message=todos_remaining_message,
         loop_max_iterations=15,
@@ -353,6 +412,14 @@ async def main(args: argparse.Namespace) -> None:
         history_provider=InMemoryHistoryProvider(load_messages=False),
     )
     # </harness_gaia_agent>
+
+    # <reformulator>
+    # Adapted from HuggingFace smolagents' prepare_response().
+    # Runs ONCE per task after all loop iterations complete, reading the
+    # full research transcript with fresh eyes and applying precise GAIA
+    # formatting rules — rather than relying on inline FINAL ANSWER: text.
+    reformulator = make_reformulator(client)
+    # </reformulator>
 
     harness = EvalHarness(agent=agent)
 
@@ -370,6 +437,7 @@ async def main(args: argparse.Namespace) -> None:
             timeout=args.timeout,
             skip_file_attachments=True,
             answer_extractor=extract_final_answer,
+            response_reformulator=reformulator,
             verbose=args.verbose,
             seed=None if args.seed == -1 else args.seed,
             results_file=args.results_file,
