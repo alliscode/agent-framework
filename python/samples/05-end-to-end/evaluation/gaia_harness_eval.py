@@ -72,6 +72,7 @@ from collections.abc import Awaitable, Callable
 import aiohttp
 from agent_framework import (
     AgentContext,
+    AgentLoopMiddleware,
     AgentMiddleware,
     AgentResponse,
     InMemoryHistoryProvider,
@@ -488,15 +489,21 @@ async def main(args: argparse.Namespace) -> None:
     )
 
     # <harness_gaia_agent>
-    # Configure the harness agent for GAIA — v2 proven baseline (47.6%).
+    # Configure the harness agent for GAIA.
     #
-    # Key choices for a fair apples-to-apples comparison against smolagents:
-    #   - Web search: enabled automatically (Bing via Foundry)
-    #   - fetch_url: reads full page content when agent has a specific URL
-    #   - MontyExecuteCodeTool: Python sandbox for arithmetic/computation
-    #   - GaiaAnswerFormatterMiddleware: per-iteration FINAL ANSWER: enforcement
-    #   - TodoProvider + looping: structured multi-step planning
-    #   - File memory/access: disabled (not in competing systems)
+    # Structural fix for the reformulator:
+    # The previous approach used create_harness_agent's loop_should_continue which
+    # created AgentLoopMiddleware with return_final_only=False (default), so the
+    # AgentResponse accumulated ALL 15 loop iterations.  The reformulator read
+    # the full 15-iteration log and sometimes picked wrong values from earlier
+    # iterations, scoring below v2's 47.6%.
+    #
+    # Fix: pass AgentLoopMiddleware directly via middleware= with return_final_only=True.
+    # This gives the reformulator only the LAST iteration's clean research output —
+    # equivalent to smolagents' write_memory_to_messages() approach.
+    # disable_tool_auto_approval=True: removes ToolApprovalMiddleware so the loop
+    # can be the outermost wrapper (required for correct approval escape hatch ordering).
+    # GAIA tools (fetch_url, execute_code, youtube) don't use approval_mode, so this is safe.
 
     agent = create_harness_agent(
         client=client,
@@ -505,15 +512,30 @@ async def main(args: argparse.Namespace) -> None:
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
         tools=[fetch_url, get_youtube_transcript, MontyExecuteCodeTool()],
-        middleware=[GaiaAnswerFormatterMiddleware()],
-        loop_should_continue=todos_remaining(),
-        loop_next_message=todos_remaining_message,
-        loop_max_iterations=15,
+        # Loop + formatter in middleware= so we control return_final_only
+        disable_tool_auto_approval=True,
+        middleware=[
+            AgentLoopMiddleware(
+                todos_remaining(),
+                max_iterations=15,
+                next_message=todos_remaining_message,
+                return_final_only=True,  # KEY: reformulator reads only last iteration
+            ),
+            GaiaAnswerFormatterMiddleware(),
+        ],
+        # No loop_should_continue — loop is in middleware= above with return_final_only=True
         disable_file_memory=True,
         disable_file_access=True,
         history_provider=InMemoryHistoryProvider(load_messages=False),
     )
     # </harness_gaia_agent>
+
+    # <reformulator>
+    # Now that return_final_only=True gives a clean last-iteration transcript,
+    # the reformulator reads only the final research output — not 15 iterations
+    # of accumulated todo scaffolding.  Re-enabled as hybrid fallback.
+    reformulator = make_reformulator(client)
+    # </reformulator>
 
     harness = EvalHarness(agent=agent)
 
@@ -531,6 +553,7 @@ async def main(args: argparse.Namespace) -> None:
             timeout=args.timeout,
             skip_file_attachments=True,
             answer_extractor=extract_final_answer,
+            response_reformulator=reformulator,
             verbose=args.verbose,
             seed=None if args.seed == -1 else args.seed,
             results_file=args.results_file,
