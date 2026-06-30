@@ -488,7 +488,7 @@ async def main(args: argparse.Namespace) -> None:
     )
 
     # <harness_gaia_agent>
-    # Configure the harness agent for GAIA.
+    # Configure the harness agent for GAIA — v2 proven baseline (47.6%).
     #
     # Key choices for a fair apples-to-apples comparison against smolagents:
     #   - Web search: enabled automatically (Bing via Foundry)
@@ -515,14 +515,6 @@ async def main(args: argparse.Namespace) -> None:
     )
     # </harness_gaia_agent>
 
-    # <reformulator>
-    # Hybrid reformulator: only fires when the middleware could not produce a
-    # clean FINAL ANSWER inline (gave-up phrases, noisy output, etc.).
-    # _build_transcript now skips harness-internal tool calls (todos, mode),
-    # so the reformulator reads clean research content only.
-    reformulator = make_reformulator(client)
-    # </reformulator>
-
     harness = EvalHarness(agent=agent)
 
     level_str = f"L{args.level}"
@@ -539,7 +531,6 @@ async def main(args: argparse.Namespace) -> None:
             timeout=args.timeout,
             skip_file_attachments=True,
             answer_extractor=extract_final_answer,
-            response_reformulator=reformulator,
             verbose=args.verbose,
             seed=None if args.seed == -1 else args.seed,
             results_file=args.results_file,
