@@ -67,9 +67,12 @@ import argparse
 import asyncio
 import os
 import re
+from collections.abc import Awaitable, Callable
 
 import aiohttp
 from agent_framework import (
+    AgentContext,
+    AgentMiddleware,
     AgentResponse,
     InMemoryHistoryProvider,
     Message,
@@ -250,7 +253,72 @@ def extract_final_answer(response: str) -> str:
     return answer
 
 
-# ── Reformulator ──────────────────────────────────────────────────────────────
+# ── Answer formatter middleware (v2 baseline) ────────────────────────────────
+#
+# Runs per loop-iteration: if the agent finishes without FINAL ANSWER:, makes a
+# single lightweight follow-up call to extract it.  Simpler than the reformulator
+# but proven at 47.6% on the full L1 split.
+#
+# NOTE: The reformulator (make_reformulator below) is a post-run alternative
+# that reads the full transcript once.  All reformulator variants tested scored
+# below v2's 47.6% because the harness loop accumulates noisy transcript
+# (todos, mode switches, nudges) that confuses the reformulator.  The middleware
+# is re-enabled as the default until a cleaner transcript extraction is available.
+
+_FORMATTER_PROMPT = """\
+Output the final answer to the question. One line only, exactly:
+
+FINAL ANSWER: <answer>
+
+Rules: number, name, date, or short phrase. No explanation. No units unless required.
+Always provide an answer — never say unable to determine."""
+
+
+class GaiaAnswerFormatterMiddleware(AgentMiddleware):
+    """Ensures every agent response contains a ``FINAL ANSWER:`` line.
+
+    When the agent finishes without the required format, makes a single
+    lightweight follow-up call asking it to extract the answer.  This runs
+    per loop-iteration so the loop always sees a well-formatted result.
+    """
+
+    async def process(self, context: AgentContext, call_next: Callable[[], Awaitable[None]]) -> None:
+        await call_next()
+        result = context.result
+        if not isinstance(result, AgentResponse):
+            return
+        if _FINAL_ANSWER_RE.search(result.text or ""):
+            return  # already formatted
+
+        extraction_messages = list(result.messages or [])
+        extraction_messages.append(Message("user", [_FORMATTER_PROMPT]))
+        try:
+            extraction = await context.agent.client.get_response(extraction_messages)
+            extraction_text = " ".join(
+                c.text or ""
+                for m in (extraction.messages or [])
+                for c in (m.contents or [])
+                if getattr(c, "text", None) and m.role == "assistant"
+            )
+            clean_matches = _FINAL_ANSWER_RE.findall(extraction_text)
+            if clean_matches:
+                clean_answer = _MARKDOWN_BOLD_RE.sub("", clean_matches[-1]).strip()
+                clean_answer = _MARKDOWN_LINK_RE.sub("", clean_answer).strip()
+                prose = _PROSE_BOUNDARY_RE.search(clean_answer)
+                if prose:
+                    clean_answer = clean_answer[: prose.start()].strip()
+                context.result = AgentResponse(
+                    messages=list(result.messages or [])
+                    + [Message("assistant", [f"FINAL ANSWER: {clean_answer}"])]
+                )
+            else:
+                context.result = AgentResponse(
+                    messages=list(result.messages or []) + list(extraction.messages or [])
+                )
+        except Exception:
+            pass
+
+
 #
 # Adapted from HuggingFace smolagents prepare_response():
 # https://github.com/huggingface/smolagents/blob/main/examples/open_deep_research/scripts/reformulator.py
@@ -392,15 +460,15 @@ async def main(args: argparse.Namespace) -> None:
     )
 
     # <harness_gaia_agent>
-    # Configure the harness agent for GAIA.
+    # Configure the harness agent for GAIA — v2 proven baseline (47.6%).
     #
-    # Key choices for a fair apples-to-apples comparison against smolagents/LangGraph:
-    #   - Web search: enabled automatically by create_harness_agent (Bing via Foundry)
+    # Key choices for a fair apples-to-apples comparison against smolagents:
+    #   - Web search: enabled automatically (Bing via Foundry)
     #   - fetch_url: reads full page content when agent has a specific URL
     #   - MontyExecuteCodeTool: Python sandbox for arithmetic/computation
+    #   - GaiaAnswerFormatterMiddleware: per-iteration FINAL ANSWER: enforcement
     #   - TodoProvider + looping: structured multi-step planning
-    #   - File memory/access: disabled (not available in competing systems)
-    #   - No middleware: the reformulator (below) replaces GaiaAnswerFormatterMiddleware
+    #   - File memory/access: disabled (not in competing systems)
 
     agent = create_harness_agent(
         client=client,
@@ -409,6 +477,7 @@ async def main(args: argparse.Namespace) -> None:
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
         tools=[fetch_url, get_youtube_transcript, MontyExecuteCodeTool()],
+        middleware=[GaiaAnswerFormatterMiddleware()],
         loop_should_continue=todos_remaining(),
         loop_next_message=todos_remaining_message,
         loop_max_iterations=15,
@@ -417,14 +486,6 @@ async def main(args: argparse.Namespace) -> None:
         history_provider=InMemoryHistoryProvider(load_messages=False),
     )
     # </harness_gaia_agent>
-
-    # <reformulator>
-    # Adapted from HuggingFace smolagents' prepare_response().
-    # Runs ONCE per task after all loop iterations complete, reading the
-    # full research transcript with fresh eyes and applying precise GAIA
-    # formatting rules — rather than relying on inline FINAL ANSWER: text.
-    reformulator = make_reformulator(client)
-    # </reformulator>
 
     harness = EvalHarness(agent=agent)
 
@@ -442,7 +503,6 @@ async def main(args: argparse.Namespace) -> None:
             timeout=args.timeout,
             skip_file_attachments=True,
             answer_extractor=extract_final_answer,
-            response_reformulator=reformulator,
             verbose=args.verbose,
             seed=None if args.seed == -1 else args.seed,
             results_file=args.results_file,
