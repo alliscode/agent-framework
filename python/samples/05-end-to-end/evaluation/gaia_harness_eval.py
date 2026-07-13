@@ -541,6 +541,7 @@ async def main(args: argparse.Namespace) -> None:
         loop_max_iterations=15,
         disable_file_memory=True,
         disable_file_access=True,
+        disable_mode=True,
         # web_search (SerpAPI) is available but requires a paid account for full evals
         # (free tier = 100 searches/month; 84 tasks × ~3 searches = ~250 searches per run).
         # Switch to SerpAPI: add web_search to tools= and set disable_web_search=True.
