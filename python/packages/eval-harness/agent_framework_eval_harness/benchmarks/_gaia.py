@@ -166,6 +166,7 @@ def _load_tasks(
     levels: list[int] | None,
     skip_file_attachments: bool,
     max_tasks: int | None,
+    task_offset: int = 0,
     seed: int | None = 0,
 ) -> list[_GAIATask]:
     """Load GAIA tasks from local cache, parquet first then jsonl fallback."""
@@ -216,7 +217,10 @@ def _load_tasks(
     # Benchmark task ordering may be seeded for reproducible runs; this is not security-sensitive.
     rng = random.Random(seed)  # nosec B311  # ruff:ignore[suspicious-non-cryptographic-random-usage]
     rng.shuffle(tasks)
-    return tasks[:max_tasks] if max_tasks is not None else tasks
+    if task_offset < 0:
+        raise ValueError("task_offset must be non-negative")
+    selected = tasks[task_offset:]
+    return selected[:max_tasks] if max_tasks is not None else selected
 
 
 def _ensure_data(data_dir: Path, hf_token: str | None) -> None:
@@ -283,6 +287,9 @@ class GAIABenchmark:
         level: GAIA level(s) to run.  1 = simple tool use, 3 = complex
             multi-hop.  Defaults to ``1``.
         max_tasks: Cap on tasks per run.  ``None`` = all tasks in the level.
+        task_offset: Number of tasks to skip after deterministic shuffling.
+            Combine with ``max_tasks`` and ``seed`` to create stable,
+            non-overlapping development and holdout slices.
         skip_file_attachments: Skip ~30% of L1 tasks that include file
             attachments.  Defaults to ``True`` (text-only first pass).
         parallel: Maximum concurrent agent calls.  Defaults to ``1``.
@@ -296,6 +303,7 @@ class GAIABenchmark:
 
     level: int | list[int] = 1
     max_tasks: int | None = None
+    task_offset: int = 0
     skip_file_attachments: bool = True
     parallel: int = 1
     timeout: float | None = 300.0
@@ -377,6 +385,7 @@ class GAIABenchmark:
             levels=levels,
             skip_file_attachments=self.skip_file_attachments,
             max_tasks=self.max_tasks,
+            task_offset=self.task_offset,
             seed=self.seed,
         )
         if not tasks:

@@ -87,6 +87,11 @@ from agent_framework_eval_harness.benchmarks import GAIABenchmark
 from agent_framework_monty import MontyExecuteCodeTool
 from azure.identity import AzureCliCredential
 from dotenv import load_dotenv
+from gaia_harness_candidate import (
+    FINAL_ANSWER_FORMATTER_PROMPT,
+    GAIA_AGENT_INSTRUCTIONS,
+    SETTINGS,
+)
 
 # ── search + fetch tools ─────────────────────────────────────────────────────
 
@@ -147,6 +152,7 @@ async def web_search(query: str, filter_year: int | None = None) -> str:
         # Run in thread — SerpAPI client is synchronous
         def _call() -> dict:  # type: ignore[type-arg]
             from serpapi import GoogleSearch  # type: ignore[import-untyped]
+
             return GoogleSearch(params).get_dict()  # type: ignore[no-any-return]
 
         results = await asyncio.to_thread(_call)
@@ -215,51 +221,6 @@ async def get_youtube_transcript(video_url: str) -> str:
         return f"Error fetching transcript for {video_url}: {exc}"
 
 
-# ── GAIA-specific agent instructions ─────────────────────────────────────────
-
-
-GAIA_AGENT_INSTRUCTIONS = """\
-## GAIA Benchmark Agent
-
-You are a precise research assistant answering GAIA benchmark questions.
-
-### How to work
-
-Use web search to find relevant pages, then fetch_url to read their full content.
-For questions referencing YouTube URLs, use get_youtube_transcript first.
-Use execute_code for arithmetic, counting, sorting, or data manipulation.
-For multi-step questions, create todos to track each sub-task before executing.
-Always verify facts with tools — GAIA questions require specific, current knowledge.
-
-**Research strategy:**
-1. Form 2-3 different search queries from different angles.
-2. Use fetch_url to read the full text of the most relevant pages — do not rely on search snippets alone.
-3. After finding a candidate answer, **verify it**: re-read the source to confirm the specific value
-   is exactly what you found — not a neighboring fact, not a similar concept.
-4. If two sources disagree, try a third.
-
-### Answer format
-
-After completing your research, end your response with exactly:
-
-    FINAL ANSWER: <your answer>
-
-The final answer must be short and exact: a number, date, name, short phrase,
-or comma-separated list matching precisely what the question asks for.
-Do not include units, explanations, or extra punctuation unless they are
-part of the expected answer.
-
-**Always provide a FINAL ANSWER**, even if uncertain — give your best guess
-based on available evidence. Never say "insufficient information" or leave the
-answer blank.
-
-Examples:
-    FINAL ANSWER: 42
-    FINAL ANSWER: Marie Curie
-    FINAL ANSWER: 3, 7, 11
-    FINAL ANSWER: 1969-07-20
-"""
-
 # ── Answer extraction ─────────────────────────────────────────────────────────
 
 _FINAL_ANSWER_RE = re.compile(r"FINAL\s+ANSWER\s*[:\-]\s*(.+?)(?:\n|$)", re.IGNORECASE)
@@ -323,14 +284,6 @@ def extract_final_answer(response: str) -> str:
 # (todos, mode switches, nudges) that confuses the reformulator.  The middleware
 # is re-enabled as the default until a cleaner transcript extraction is available.
 
-_FORMATTER_PROMPT = """\
-Output the final answer to the question. One line only, exactly:
-
-FINAL ANSWER: <answer>
-
-Rules: number, name, date, or short phrase. No explanation. No units unless required.
-Always provide an answer — never say unable to determine."""
-
 
 class GaiaAnswerFormatterMiddleware(AgentMiddleware):
     """Ensures every agent response contains a ``FINAL ANSWER:`` line.
@@ -349,7 +302,7 @@ class GaiaAnswerFormatterMiddleware(AgentMiddleware):
             return  # already formatted
 
         extraction_messages = list(result.messages or [])
-        extraction_messages.append(Message("user", [_FORMATTER_PROMPT]))
+        extraction_messages.append(Message("user", [FINAL_ANSWER_FORMATTER_PROMPT]))
         try:
             extraction = await context.agent.client.get_response(extraction_messages)
             extraction_text = " ".join(
@@ -366,13 +319,10 @@ class GaiaAnswerFormatterMiddleware(AgentMiddleware):
                 if prose:
                     clean_answer = clean_answer[: prose.start()].strip()
                 context.result = AgentResponse(
-                    messages=list(result.messages or [])
-                    + [Message("assistant", [f"FINAL ANSWER: {clean_answer}"])]
+                    messages=list(result.messages or []) + [Message("assistant", [f"FINAL ANSWER: {clean_answer}"])]
                 )
             else:
-                context.result = AgentResponse(
-                    messages=list(result.messages or []) + list(extraction.messages or [])
-                )
+                context.result = AgentResponse(messages=list(result.messages or []) + list(extraction.messages or []))
         except Exception:
             pass
 
@@ -492,8 +442,7 @@ def make_reformulator(client: FoundryChatClient):
                 # Inject the clean answer as a new message so extract_final_answer
                 # sees a single, prose-free FINAL ANSWER line.
                 return AgentResponse(
-                    messages=list(response.messages or [])
-                    + [Message("assistant", [f"FINAL ANSWER: {clean_answer}"])]
+                    messages=list(response.messages or []) + [Message("assistant", [f"FINAL ANSWER: {clean_answer}"])]
                 )
         except Exception:
             pass  # leave original response intact on failure
@@ -528,26 +477,37 @@ async def main(args: argparse.Namespace) -> None:
     #   - TodoProvider + looping: structured multi-step planning
     #   - File memory/access: disabled (not in competing systems)
 
+    tools = []
+    if SETTINGS.use_fetch_url:
+        tools.append(fetch_url)
+    if SETTINGS.use_youtube_transcript:
+        tools.append(get_youtube_transcript)
+    if SETTINGS.use_code_execution:
+        tools.append(MontyExecuteCodeTool())
+    if SETTINGS.use_serpapi_search:
+        tools.append(web_search)
+
     agent = create_harness_agent(
         client=client,
-        max_context_window_tokens=128_000,
-        max_output_tokens=8_192,
+        max_context_window_tokens=SETTINGS.max_context_window_tokens,
+        max_output_tokens=SETTINGS.max_output_tokens,
         name="GaiaHarnessAgent",
         agent_instructions=GAIA_AGENT_INSTRUCTIONS,
-        tools=[fetch_url, get_youtube_transcript, MontyExecuteCodeTool()],
-        middleware=[GaiaAnswerFormatterMiddleware()],
-        loop_should_continue=todos_remaining(),
-        loop_next_message=todos_remaining_message,
-        loop_max_iterations=15,
-        disable_file_memory=True,
-        disable_file_access=True,
-        disable_mode=True,
+        tools=tools,
+        middleware=[GaiaAnswerFormatterMiddleware()] if SETTINGS.use_answer_formatter else None,
+        loop_should_continue=todos_remaining() if SETTINGS.use_todo_loop else None,
+        loop_next_message=todos_remaining_message if SETTINGS.use_todo_loop else None,
+        loop_max_iterations=SETTINGS.loop_max_iterations,
+        disable_todo=not SETTINGS.use_todo_loop,
+        disable_file_memory=SETTINGS.disable_file_memory,
+        disable_mode=SETTINGS.disable_mode,
+        disable_web_search=SETTINGS.use_serpapi_search,
         # web_search (SerpAPI) is available but requires a paid account for full evals
         # (free tier = 100 searches/month; 84 tasks × ~3 searches = ~250 searches per run).
         # Switch to SerpAPI: add web_search to tools= and set disable_web_search=True.
         # The SerpAPI tool makes search results visible in AgentResponse.messages,
         # enabling the reformulator to read raw search data rather than the agent's synthesis.
-        history_provider=InMemoryHistoryProvider(load_messages=False),
+        history_provider=InMemoryHistoryProvider(load_messages=SETTINGS.history_load_messages),
     )
     # </harness_gaia_agent>
 
@@ -563,6 +523,7 @@ async def main(args: argparse.Namespace) -> None:
         GAIABenchmark(
             level=args.level,
             max_tasks=args.max_tasks,
+            task_offset=args.task_offset,
             parallel=args.parallel,
             timeout=args.timeout,
             skip_file_attachments=True,
@@ -570,6 +531,7 @@ async def main(args: argparse.Namespace) -> None:
             verbose=args.verbose,
             seed=None if args.seed == -1 else args.seed,
             results_file=args.results_file,
+            response_reformulator=make_reformulator(client) if SETTINGS.use_reformulator else None,
         )
     )
     # </run_gaia_eval>
@@ -611,6 +573,13 @@ Examples:
     )
     parser.add_argument("--level", type=int, default=1, choices=[1, 2, 3], help="GAIA level (default: 1)")
     parser.add_argument("--max-tasks", type=int, default=None, metavar="N", help="Cap tasks (default: all)")
+    parser.add_argument(
+        "--task-offset",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Skip N tasks after seeded shuffling (default: 0)",
+    )
     parser.add_argument("--parallel", type=int, default=1, help="Concurrent agent runs (default: 1)")
     parser.add_argument("--timeout", type=float, default=300.0, help="Per-task timeout seconds (default: 300)")
     parser.add_argument(

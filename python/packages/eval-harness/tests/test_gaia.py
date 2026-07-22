@@ -4,12 +4,15 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from agent_framework_eval_harness.benchmarks._gaia import (
     GAIABenchmark,
+    _load_tasks,
     _task_from_record,
     gaia_scorer,
 )
@@ -103,11 +106,66 @@ def test_gaia_benchmark_defaults() -> None:
 
 
 def test_gaia_benchmark_custom() -> None:
-    b = GAIABenchmark(level=[1, 2], max_tasks=10, parallel=4, skip_file_attachments=False)
+    b = GAIABenchmark(
+        level=[1, 2],
+        max_tasks=10,
+        task_offset=5,
+        parallel=4,
+        skip_file_attachments=False,
+    )
     assert b.level == [1, 2]
     assert b.max_tasks == 10
+    assert b.task_offset == 5
     assert b.parallel == 4
     assert b.skip_file_attachments is False
+
+
+def test_load_tasks_applies_offset_after_seeded_shuffle(tmp_path: Path) -> None:
+    data_dir = tmp_path / "gaia"
+    data_dir.mkdir()
+    records = [
+        {"Question": f"Question {idx}", "Final answer": str(idx), "task_id": f"t{idx}", "Level": 1} for idx in range(8)
+    ]
+    (data_dir / "metadata.jsonl").write_text(
+        "\n".join(json.dumps(record) for record in records),
+        encoding="utf-8",
+    )
+
+    all_tasks = _load_tasks(
+        data_dir,
+        levels=[1],
+        skip_file_attachments=True,
+        max_tasks=None,
+        seed=7,
+    )
+    sliced_tasks = _load_tasks(
+        data_dir,
+        levels=[1],
+        skip_file_attachments=True,
+        max_tasks=3,
+        task_offset=2,
+        seed=7,
+    )
+
+    assert [task.task_id for task in sliced_tasks] == [task.task_id for task in all_tasks[2:5]]
+
+
+def test_load_tasks_rejects_negative_offset(tmp_path: Path) -> None:
+    data_dir = tmp_path / "gaia"
+    data_dir.mkdir()
+    (data_dir / "metadata.jsonl").write_text(
+        '{"Question": "Question", "Final answer": "Answer", "task_id": "t1", "Level": 1}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="task_offset must be non-negative"):
+        _load_tasks(
+            data_dir,
+            levels=[1],
+            skip_file_attachments=True,
+            max_tasks=None,
+            task_offset=-1,
+        )
 
 
 # ── GAIABenchmark.run() with mocked internals ─────────────────────────────────
