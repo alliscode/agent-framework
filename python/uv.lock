@@ -43,6 +43,7 @@ members = [
     "agent-framework-declarative",
     "agent-framework-devui",
     "agent-framework-durabletask",
+    "agent-framework-eval-harness",
     "agent-framework-foundry",
     "agent-framework-foundry-hosting",
     "agent-framework-foundry-local",
@@ -589,6 +590,36 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "types-python-dateutil", specifier = "==2.9.0.20260716" }]
+
+[[package]]
+name = "agent-framework-eval-harness"
+version = "0.1.0"
+source = { editable = "packages/eval-harness" }
+dependencies = [
+    { name = "agent-framework-core", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
+[package.optional-dependencies]
+foundry = [
+    { name = "agent-framework-foundry", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+gaia = [
+    { name = "huggingface-hub", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "pyarrow", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+tau2 = [
+    { name = "agent-framework-lab", extra = ["tau2"], marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agent-framework-core", editable = "packages/core" },
+    { name = "agent-framework-foundry", marker = "extra == 'foundry'", editable = "packages/foundry" },
+    { name = "agent-framework-lab", extras = ["tau2"], marker = "extra == 'tau2'", editable = "packages/lab" },
+    { name = "huggingface-hub", marker = "extra == 'gaia'", specifier = ">=0.20.0" },
+    { name = "pyarrow", marker = "extra == 'gaia'", specifier = ">=18.0.0" },
+]
+provides-extras = ["gaia", "tau2", "foundry"]
 
 [[package]]
 name = "agent-framework-foundry"
