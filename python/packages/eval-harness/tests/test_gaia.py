@@ -103,6 +103,8 @@ def test_gaia_benchmark_defaults() -> None:
     assert b.skip_file_attachments is True
     assert b.parallel == 1
     assert b.timeout == 300.0
+    assert b.transient_retries == 2
+    assert b.retry_base_delay == 15.0
 
 
 def test_gaia_benchmark_custom() -> None:
@@ -231,6 +233,80 @@ async def test_gaia_run_failed_task_scores_as_wrong() -> None:
 
     assert results[0].failed == 1
     assert results[0].passed == 0
+
+
+class _TransientError(Exception):
+    status_code = 429
+    response = MagicMock(headers={"retry-after-ms": "250"})
+
+
+def _wrapped_transient_error() -> Exception:
+    return RuntimeError("Provider request failed", _TransientError())
+
+
+async def test_gaia_run_retries_transient_error() -> None:
+    """Transient service errors are retried with a fresh session."""
+    from agent_framework import AgentResponse, Message
+
+    fake_response = AgentResponse(messages=[Message("assistant", ["Paris"])])
+    mock_agent = MagicMock()
+    mock_agent.run = AsyncMock(side_effect=[_wrapped_transient_error(), fake_response])
+    mock_agent.create_session.side_effect = ["session-1", "session-2"]
+    mock_agent.default_options = {"tools": []}
+    mock_agent.mcp_tools = []
+
+    fake_task = MagicMock(
+        question="Capital of France?",
+        answer="Paris",
+        task_id="retry-task",
+        level=1,
+        file_name=None,
+    )
+
+    with (
+        patch("agent_framework_eval_harness.benchmarks._gaia._ensure_data"),
+        patch("agent_framework_eval_harness.benchmarks._gaia._load_tasks", return_value=[fake_task]),
+        patch(
+            "agent_framework_eval_harness.benchmarks._gaia.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep,
+    ):
+        results = await GAIABenchmark(level=1, retry_base_delay=0.1).run(mock_agent)
+
+    assert results[0].passed == 1
+    assert mock_agent.run.await_count == 2
+    assert mock_agent.create_session.call_count == 2
+    sleep.assert_awaited_once_with(0.25)
+
+
+async def test_gaia_run_propagates_exhausted_transient_error() -> None:
+    """Exhausted transient errors invalidate the benchmark run."""
+    mock_agent = MagicMock()
+    mock_agent.run = AsyncMock(side_effect=_wrapped_transient_error())
+    mock_agent.create_session.return_value = "session"
+    mock_agent.default_options = {"tools": []}
+    mock_agent.mcp_tools = []
+
+    fake_task = MagicMock(
+        question="Capital of France?",
+        answer="Paris",
+        task_id="retry-task",
+        level=1,
+        file_name=None,
+    )
+
+    with (
+        patch("agent_framework_eval_harness.benchmarks._gaia._ensure_data"),
+        patch("agent_framework_eval_harness.benchmarks._gaia._load_tasks", return_value=[fake_task]),
+        patch(
+            "agent_framework_eval_harness.benchmarks._gaia.asyncio.sleep",
+            new_callable=AsyncMock,
+        ),
+        pytest.raises(RuntimeError, match="Provider request failed"),
+    ):
+        await GAIABenchmark(level=1, transient_retries=1, retry_base_delay=0).run(mock_agent)
+
+    assert mock_agent.run.await_count == 2
 
 
 async def test_gaia_answer_extractor_used() -> None:

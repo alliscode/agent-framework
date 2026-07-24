@@ -35,6 +35,52 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _find_transient_error(exc: Exception) -> Exception | None:
+    """Find a retryable service failure inside an exception wrapper."""
+    pending = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+
+        status_code = getattr(current, "status_code", None)
+        if isinstance(status_code, int) and (status_code in {408, 409, 429} or status_code >= 500):
+            return current
+
+        if isinstance(current.__cause__, Exception):
+            pending.append(current.__cause__)
+        if isinstance(current.__context__, Exception):
+            pending.append(current.__context__)
+        pending.extend(arg for arg in current.args if isinstance(arg, Exception))
+    return None
+
+
+def _retry_after_seconds(exc: Exception, fallback: float) -> float:
+    """Read a service retry delay from response headers when available."""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return fallback
+
+    retry_after_ms = headers.get("retry-after-ms")
+    if retry_after_ms is not None:
+        try:
+            return max(float(retry_after_ms) / 1000.0, fallback)
+        except (TypeError, ValueError):
+            pass
+
+    retry_after = headers.get("retry-after")
+    if retry_after is not None:
+        try:
+            return max(float(retry_after), fallback)
+        except (TypeError, ValueError):
+            pass
+
+    return fallback
+
+
 # ── scoring ───────────────────────────────────────────────────────────────────
 
 
@@ -307,6 +353,15 @@ class GAIABenchmark:
     skip_file_attachments: bool = True
     parallel: int = 1
     timeout: float | None = 300.0
+    transient_retries: int = 2
+    """Number of retries for transient service errors such as HTTP 429 and 5xx.
+
+    Exhausted transient errors are propagated so infrastructure failures cannot
+    silently become incorrect benchmark answers.
+    """
+    retry_base_delay: float = 15.0
+    """Base delay in seconds for transient retries when the service does not
+    provide a ``Retry-After`` header."""
     data_dir: str | None = None
     hf_token: str | None = None
     answer_extractor: Callable[[str], str] | None = None
@@ -486,40 +541,69 @@ class GAIABenchmark:
         """Run the agent on a single query; returns ``None`` on failure."""
         from agent_framework import Message
 
-        # Create a fresh session per task so ToolApprovalMiddleware (included
-        # in create_harness_agent by default) has the session state it requires,
-        # and parallel tasks don't share conversation history.
-        session = agent.create_session() if hasattr(agent, "create_session") else None
+        attempt = 0
+        while True:
+            # Use a fresh session for every attempt so a partially completed
+            # agent loop cannot leak state into a retry.
+            session = agent.create_session() if hasattr(agent, "create_session") else None
+            retry_delay: float | None = None
 
-        async with semaphore:
-            try:
-                if self.timeout is not None:
-                    response = await asyncio.wait_for(
-                        agent.run([Message("user", [query])], session=session),
-                        timeout=self.timeout,
+            async with semaphore:
+                try:
+                    if self.timeout is not None:
+                        response = await asyncio.wait_for(
+                            agent.run([Message("user", [query])], session=session),
+                            timeout=self.timeout,
+                        )
+                    else:
+                        response = await agent.run([Message("user", [query])], session=session)
+
+                    # Apply reformulator if provided - runs ONCE after all loop iterations
+                    # complete, with the full accumulated transcript.  This is adapted from
+                    # HuggingFace smolagents' prepare_response() pattern.
+                    #
+                    # Hybrid mode: only reformulate when the agent's inline response doesn't
+                    # contain a clean FINAL ANSWER: line.  When the agent already produced a
+                    # well-formatted answer, the reformulator can only make it worse by
+                    # re-reading the transcript and potentially changing a correct answer.
+                    if self.response_reformulator is not None and response is not None:
+                        needs_reformulation = not _has_clean_final_answer(response)
+                        if needs_reformulation:
+                            try:
+                                response = await self.response_reformulator(query, response)
+                            except Exception:
+                                logger.warning("Reformulator failed for task: %.80s...", query, exc_info=True)
+                    return response
+
+                except asyncio.TimeoutError:
+                    logger.warning("GAIA task timed out (%.0fs): %.80s...", self.timeout, query)
+                    return None
+                except Exception as exc:
+                    transient_error = _find_transient_error(exc)
+                    if transient_error is None:
+                        logger.warning("GAIA task failed: %.80s...", query, exc_info=True)
+                        return None
+                    if attempt >= self.transient_retries:
+                        logger.error(
+                            "GAIA task exhausted %d transient retries: %.80s...",
+                            self.transient_retries,
+                            query,
+                            exc_info=True,
+                        )
+                        raise
+
+                    attempt += 1
+                    fallback = self.retry_base_delay * (2 ** (attempt - 1))
+                    retry_delay = _retry_after_seconds(transient_error, fallback)
+                    logger.warning(
+                        "GAIA task hit transient service error; retrying in %.1fs (attempt %d/%d): %.80s...",
+                        retry_delay,
+                        attempt,
+                        self.transient_retries,
+                        query,
                     )
-                else:
-                    response = await agent.run([Message("user", [query])], session=session)
 
-                # Apply reformulator if provided - runs ONCE after all loop iterations
-                # complete, with the full accumulated transcript.  This is adapted from
-                # HuggingFace smolagents' prepare_response() pattern.
-                #
-                # Hybrid mode: only reformulate when the agent's inline response doesn't
-                # contain a clean FINAL ANSWER: line.  When the agent already produced a
-                # well-formatted answer, the reformulator can only make it worse by
-                # re-reading the transcript and potentially changing a correct answer.
-                if self.response_reformulator is not None and response is not None:
-                    needs_reformulation = not _has_clean_final_answer(response)
-                    if needs_reformulation:
-                        try:
-                            response = await self.response_reformulator(query, response)
-                        except Exception:
-                            logger.warning("Reformulator failed for task: %.80s...", query, exc_info=True)
-                return response
-
-            except asyncio.TimeoutError:
-                logger.warning("GAIA task timed out (%.0fs): %.80s...", self.timeout, query)
-            except Exception:
-                logger.warning("GAIA task failed: %.80s...", query, exc_info=True)
-        return None
+                if retry_delay is not None:
+                    # Hold the concurrency slot during backoff so queued tasks
+                    # do not stampede a deployment whose quota is exhausted.
+                    await asyncio.sleep(retry_delay)
